@@ -402,6 +402,34 @@ function getThreadLiveState(threadId: string): {
   };
 }
 
+async function resolveTurnStartTemplate(
+  threadId: string
+): Promise<ReturnType<typeof findLatestTurnParamsTemplate>> {
+  const reasons: string[] = [];
+  const live = getThreadLiveState(threadId);
+
+  if (live.conversationState) {
+    try {
+      const conversationState = parseThreadConversationState(live.conversationState);
+      return findLatestTurnParamsTemplate(conversationState);
+    } catch (error) {
+      reasons.push(`live-state: ${toErrorMessage(error)}`);
+    }
+  } else {
+    reasons.push("live-state: no snapshot yet");
+  }
+
+  try {
+    const threadResult = await runAppServerCall(() => appClient.readThread(threadId, true));
+    const conversationState = parseThreadConversationState(threadResult.thread);
+    return findLatestTurnParamsTemplate(conversationState);
+  } catch (error) {
+    reasons.push(`thread/read: ${toErrorMessage(error)}`);
+  }
+
+  throw new Error(`No turn params template available. ${reasons.join("; ")}`);
+}
+
 function extractThreadId(frame: IpcFrame): string | null {
   if (frame.type === "broadcast" && frame.method === "thread-stream-state-changed") {
     const params = frame.params;
@@ -716,15 +744,7 @@ const server = http.createServer(async (req, res) => {
 
         let turnStartTemplate: ReturnType<typeof findLatestTurnParamsTemplate>;
         try {
-          const live = getThreadLiveState(threadId);
-          if (!live.conversationState) {
-            throw new Error(
-              "No live conversation state found for this thread. Open the thread in desktop and wait for stream activity."
-            );
-          }
-
-          const conversationState = parseThreadConversationState(live.conversationState);
-          turnStartTemplate = findLatestTurnParamsTemplate(conversationState);
+          turnStartTemplate = await resolveTurnStartTemplate(threadId);
         } catch (error) {
           const message = pushActionError("messages", error, {
             threadId,

@@ -12,7 +12,6 @@ import {
   listDebugHistory,
   listThreads,
   markTrace,
-  readThread,
   replayHistoryEntry,
   sendMessage,
   setCollaborationMode,
@@ -36,7 +35,6 @@ import { Textarea } from "@/components/ui/textarea";
 
 type Health = Awaited<ReturnType<typeof getHealth>>;
 type ThreadsResponse = Awaited<ReturnType<typeof listThreads>>;
-type ThreadResponse = Awaited<ReturnType<typeof readThread>>;
 type ModesResponse = Awaited<ReturnType<typeof listCollaborationModes>>;
 type LiveStateResponse = Awaited<ReturnType<typeof getLiveState>>;
 type StreamEventsResponse = Awaited<ReturnType<typeof getStreamEvents>>;
@@ -87,7 +85,7 @@ function getItemRole(item: ConversationState["turns"][number]["items"][number]):
   if (item.type === "userInputResponse") {
     return "User input";
   }
-  return "Unknown";
+  return item.type;
 }
 
 function getItemText(item: ConversationState["turns"][number]["items"][number]): string {
@@ -120,8 +118,8 @@ function modeToCollaborationMode(mode: ModesResponse["data"][number]) {
   };
 }
 
-function isThreadNotLoadedMessage(message: string): boolean {
-  return message.toLowerCase().includes("thread not loaded");
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 export function App(): React.JSX.Element {
@@ -130,7 +128,6 @@ export function App(): React.JSX.Element {
   const [health, setHealth] = useState<Health | null>(null);
   const [threads, setThreads] = useState<ThreadsResponse["data"]>([]);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
-  const [selectedThread, setSelectedThread] = useState<ThreadResponse["thread"] | null>(null);
   const [liveState, setLiveState] = useState<LiveStateResponse | null>(null);
   const [streamEvents, setStreamEvents] = useState<StreamEventsResponse["events"]>([]);
   const [modes, setModes] = useState<ModesResponse["data"]>([]);
@@ -171,9 +168,7 @@ export function App(): React.JSX.Element {
       return pendingRequests[0];
     }
 
-    return (
-      pendingRequests.find((request) => request.id === selectedRequestId) ?? pendingRequests[0]
-    );
+    return pendingRequests.find((request) => request.id === selectedRequestId) ?? pendingRequests[0];
   }, [pendingRequests, selectedRequestId]);
 
   const selectedMode = useMemo(() => {
@@ -214,13 +209,11 @@ export function App(): React.JSX.Element {
   }, []);
 
   const loadSelectedThread = useCallback(async (threadId: string) => {
-    const [thread, live, stream] = await Promise.all([
-      readThread(threadId),
+    const [live, stream] = await Promise.all([
       getLiveState(threadId),
       getStreamEvents(threadId)
     ]);
 
-    setSelectedThread(thread.thread);
     setLiveState(live);
     setStreamEvents(stream.events);
   }, []);
@@ -235,20 +228,7 @@ export function App(): React.JSX.Element {
     setHistory(nextHistory.history);
 
     if (selectedThreadIdRef.current) {
-      try {
-        await loadSelectedThread(selectedThreadIdRef.current);
-      } catch (nextError) {
-        const message = nextError instanceof Error ? nextError.message : String(nextError);
-        if (isThreadNotLoadedMessage(message)) {
-          setSelectedThread(null);
-          setLiveState(null);
-          setStreamEvents([]);
-          setSelectedThreadId(null);
-          setError(message);
-          return;
-        }
-        throw nextError;
-      }
+      await loadSelectedThread(selectedThreadIdRef.current);
     }
   }, [loadSelectedThread]);
 
@@ -260,7 +240,7 @@ export function App(): React.JSX.Element {
         await loadSelectedThread(selectedThreadIdRef.current);
       }
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      setError(toErrorMessage(nextError));
     }
   }, [loadCoreData, loadSelectedThread]);
 
@@ -280,7 +260,7 @@ export function App(): React.JSX.Element {
 
     coreRefreshIntervalRef.current = window.setInterval(() => {
       void loadCoreData().catch((nextError) => {
-        setError(nextError instanceof Error ? nextError.message : String(nextError));
+        setError(toErrorMessage(nextError));
       });
     }, 5000);
 
@@ -294,22 +274,13 @@ export function App(): React.JSX.Element {
 
   useEffect(() => {
     if (!selectedThreadId) {
-      setSelectedThread(null);
       setLiveState(null);
       setStreamEvents([]);
       return;
     }
 
     void loadSelectedThread(selectedThreadId).catch((nextError) => {
-      const message = nextError instanceof Error ? nextError.message : String(nextError);
-      setError(message);
-
-      if (isThreadNotLoadedMessage(message)) {
-        setSelectedThread(null);
-        setLiveState(null);
-        setStreamEvents([]);
-        setSelectedThreadId(null);
-      }
+      setError(toErrorMessage(nextError));
     });
   }, [loadSelectedThread, selectedThreadId]);
 
@@ -324,7 +295,7 @@ export function App(): React.JSX.Element {
       refreshTimerRef.current = window.setTimeout(() => {
         refreshTimerRef.current = null;
         void loadLiveData().catch((nextError) => {
-          setError(nextError instanceof Error ? nextError.message : String(nextError));
+          setError(toErrorMessage(nextError));
         });
       }, 800);
     };
@@ -370,9 +341,8 @@ export function App(): React.JSX.Element {
 
     setIsBusy(true);
     try {
-      const ownerOptions = liveState?.ownerClientId
-        ? { ownerClientId: liveState.ownerClientId }
-        : {};
+      setError("");
+      const ownerOptions = liveState?.ownerClientId ? { ownerClientId: liveState.ownerClientId } : {};
       await sendMessage({
         threadId: selectedThreadId,
         ...ownerOptions,
@@ -380,6 +350,8 @@ export function App(): React.JSX.Element {
       });
       setMessageDraft("");
       await refreshAll();
+    } catch (nextError) {
+      setError(toErrorMessage(nextError));
     } finally {
       setIsBusy(false);
     }
@@ -392,15 +364,16 @@ export function App(): React.JSX.Element {
 
     setIsBusy(true);
     try {
-      const ownerOptions = liveState?.ownerClientId
-        ? { ownerClientId: liveState.ownerClientId }
-        : {};
+      setError("");
+      const ownerOptions = liveState?.ownerClientId ? { ownerClientId: liveState.ownerClientId } : {};
       await setCollaborationMode({
         threadId: selectedThreadId,
         ...ownerOptions,
         collaborationMode: modeToCollaborationMode(selectedMode)
       });
       await refreshAll();
+    } catch (nextError) {
+      setError(toErrorMessage(nextError));
     } finally {
       setIsBusy(false);
     }
@@ -423,9 +396,8 @@ export function App(): React.JSX.Element {
 
     setIsBusy(true);
     try {
-      const ownerOptions = liveState?.ownerClientId
-        ? { ownerClientId: liveState.ownerClientId }
-        : {};
+      setError("");
+      const ownerOptions = liveState?.ownerClientId ? { ownerClientId: liveState.ownerClientId } : {};
       await submitUserInput({
         threadId: selectedThreadId,
         ...ownerOptions,
@@ -435,6 +407,8 @@ export function App(): React.JSX.Element {
         }
       });
       await refreshAll();
+    } catch (nextError) {
+      setError(toErrorMessage(nextError));
     } finally {
       setIsBusy(false);
     }
@@ -447,9 +421,8 @@ export function App(): React.JSX.Element {
 
     setIsBusy(true);
     try {
-      const ownerOptions = liveState?.ownerClientId
-        ? { ownerClientId: liveState.ownerClientId }
-        : {};
+      setError("");
+      const ownerOptions = liveState?.ownerClientId ? { ownerClientId: liveState.ownerClientId } : {};
       await submitUserInput({
         threadId: selectedThreadId,
         ...ownerOptions,
@@ -459,6 +432,8 @@ export function App(): React.JSX.Element {
         }
       });
       await refreshAll();
+    } catch (nextError) {
+      setError(toErrorMessage(nextError));
     } finally {
       setIsBusy(false);
     }
@@ -471,14 +446,15 @@ export function App(): React.JSX.Element {
 
     setIsBusy(true);
     try {
-      const ownerOptions = liveState?.ownerClientId
-        ? { ownerClientId: liveState.ownerClientId }
-        : {};
+      setError("");
+      const ownerOptions = liveState?.ownerClientId ? { ownerClientId: liveState.ownerClientId } : {};
       await interruptThread({
         threadId: selectedThreadId,
         ...ownerOptions
       });
       await refreshAll();
+    } catch (nextError) {
+      setError(toErrorMessage(nextError));
     } finally {
       setIsBusy(false);
     }
@@ -496,7 +472,7 @@ export function App(): React.JSX.Element {
 
   useEffect(() => {
     void loadHistoryDetail(selectedHistoryId).catch((nextError) => {
-      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      setError(toErrorMessage(nextError));
     });
   }, [loadHistoryDetail, selectedHistoryId]);
 
@@ -506,9 +482,7 @@ export function App(): React.JSX.Element {
         <Card className="w-[320px] shrink-0 overflow-hidden">
           <CardHeader>
             <CardTitle>Threads</CardTitle>
-            <CardDescription>
-              {threads.length} total
-            </CardDescription>
+            <CardDescription>{threads.length} total</CardDescription>
           </CardHeader>
           <CardContent className="flex h-[calc(100%-80px)] flex-col gap-3">
             <Button variant="outline" size="sm" onClick={() => void refreshAll()} disabled={isBusy}>
@@ -529,9 +503,7 @@ export function App(): React.JSX.Element {
                     }`}
                   >
                     <div className="font-medium">{threadLabel(thread)}</div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {formatDate(thread.updatedAt)}
-                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">{formatDate(thread.updatedAt)}</div>
                   </button>
                 ))}
               </div>
@@ -572,9 +544,11 @@ export function App(): React.JSX.Element {
 
           <Card className="min-h-0 flex-1 overflow-hidden">
             <CardHeader className="border-b border-border pb-3">
-              <CardTitle>{selectedThread ? selectedThread.id : "No thread selected"}</CardTitle>
+              <CardTitle>{selectedThreadId ?? "No thread selected"}</CardTitle>
               <CardDescription>
-                {selectedThread ? `${selectedThread.turns.length} turns` : "Select a thread"}
+                {liveState?.conversationState
+                  ? `${liveState.conversationState.turns.length} turns`
+                  : "Select a thread"}
               </CardDescription>
             </CardHeader>
 
@@ -595,19 +569,17 @@ export function App(): React.JSX.Element {
                   <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto_auto] gap-3">
                     <ScrollArea className="rounded-md border border-border bg-background/80">
                       <div className="space-y-3 p-3">
-                        {selectedThread?.turns.map((turn, turnIndex) => (
+                        {(liveState?.conversationState?.turns ?? []).map((turn, turnIndex) => (
                           <div key={`${turn.turnId ?? "turn"}-${turnIndex}`} className="space-y-2">
                             <div className="text-xs text-muted-foreground">
                               Turn {turnIndex + 1} • {turn.status}
                             </div>
-                            {turn.items.map((item) => (
-                              <div key={item.id} className="rounded-md border border-border bg-card p-3">
+                            {turn.items.map((item, itemIndex) => (
+                              <div key={item.id ?? `${turnIndex}-${itemIndex}`} className="rounded-md border border-border bg-card p-3">
                                 <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">
                                   {getItemRole(item)}
                                 </div>
-                                <pre className="font-mono text-[12px] leading-5">
-                                  {getItemText(item)}
-                                </pre>
+                                <pre className="font-mono text-[12px] leading-5">{getItemText(item)}</pre>
                               </div>
                             ))}
                           </div>
@@ -820,9 +792,7 @@ export function App(): React.JSX.Element {
                                 </Button>
                               </div>
                               <ScrollArea className="h-[460px] rounded-md border border-border bg-muted/40 p-2">
-                                <pre className="font-mono text-[11px] leading-5">
-                                  {JSON.stringify(historyDetail.fullPayload, null, 2)}
-                                </pre>
+                                <pre className="font-mono text-[11px] leading-5">{JSON.stringify(historyDetail.fullPayload, null, 2)}</pre>
                               </ScrollArea>
                             </>
                           )}
@@ -868,9 +838,7 @@ export function App(): React.JSX.Element {
                                 .reverse()
                                 .map((event, index) => (
                                   <div key={index} className="rounded border border-border p-2">
-                                    <pre className="font-mono text-[11px] leading-5">
-                                      {JSON.stringify(event, null, 2)}
-                                    </pre>
+                                    <pre className="font-mono text-[11px] leading-5">{JSON.stringify(event, null, 2)}</pre>
                                   </div>
                                 ))}
                             </div>
