@@ -631,7 +631,7 @@ export function App(): React.JSX.Element {
     const cs = conversationState;
     if (!cs) return;
     const lm = cs.latestCollaborationMode;
-    const nextModeKey = lm?.mode ?? "";
+    const nextModeKey = lm?.mode ?? selectedModeKey;
     const nextModelId = lm?.settings.model ?? cs.latestModel ?? "";
     const nextReasoningEffort = lm?.settings.reasoning_effort ?? cs.latestReasoningEffort ?? "";
     if (nextModeKey) setSelectedModeKey(nextModeKey);
