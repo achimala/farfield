@@ -151,6 +151,17 @@ const runtimeState = {
   lastError: null as string | null
 };
 
+let bootstrapInFlight: Promise<void> | null = null;
+
+function getRuntimeStateSnapshot(): Record<string, unknown> {
+  return {
+    ...runtimeState,
+    historyCount: history.length,
+    threadOwnerCount: threadOwnerById.size,
+    activeTrace: activeTrace?.summary ?? null
+  };
+}
+
 function ensureTraceDirectory(): void {
   if (!fs.existsSync(TRACE_DIR)) {
     fs.mkdirSync(TRACE_DIR, { recursive: true });
@@ -204,6 +215,31 @@ function pushHistory(
 
 function pushSystem(message: string, details: Record<string, unknown> = {}): void {
   pushHistory("system", "system", { message, details });
+}
+
+function broadcastRuntimeState(): void {
+  broadcastSse({
+    type: "state",
+    state: getRuntimeStateSnapshot()
+  });
+}
+
+function setRuntimeError(error: unknown): string {
+  const message = toErrorMessage(error);
+  runtimeState.lastError = message;
+  return message;
+}
+
+function requireIpcReady(res: ServerResponse): boolean {
+  if (runtimeState.ipcConnected && runtimeState.ipcInitialized) {
+    return true;
+  }
+
+  jsonResponse(res, 503, {
+    ok: false,
+    error: runtimeState.lastError ?? "Desktop IPC is not connected"
+  });
+  return false;
 }
 
 const appClient = new AppServerClient({
@@ -352,6 +388,24 @@ function sendIpcBroadcast(method: string, params: unknown, options: SendRequestO
   ipcClient.sendBroadcast(method, params, options);
 }
 
+ipcClient.onConnectionState((state) => {
+  runtimeState.ipcConnected = state.connected;
+  if (!state.connected) {
+    runtimeState.ipcInitialized = false;
+    runtimeState.appReady = false;
+  }
+
+  if (state.reason) {
+    runtimeState.lastError = state.reason;
+    pushSystem("IPC connection state changed", {
+      connected: state.connected,
+      reason: state.reason
+    });
+  }
+
+  broadcastRuntimeState();
+});
+
 ipcClient.onFrame((frame) => {
   const threadId = extractThreadId(frame);
 
@@ -400,11 +454,7 @@ const server = http.createServer(async (req, res) => {
       sseClients.add(res);
       eventResponse(res, {
         type: "state",
-        state: {
-          ...runtimeState,
-          historyCount: history.length,
-          threadOwnerCount: threadOwnerById.size
-        }
+        state: getRuntimeStateSnapshot()
       });
 
       req.on("close", () => {
@@ -416,12 +466,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && pathname === "/api/health") {
       jsonResponse(res, 200, {
         ok: true,
-        state: {
-          ...runtimeState,
-          historyCount: history.length,
-          threadOwnerCount: threadOwnerById.size,
-          activeTrace: activeTrace?.summary ?? null
-        }
+        state: getRuntimeStateSnapshot()
       });
       return;
     }
@@ -512,6 +557,10 @@ const server = http.createServer(async (req, res) => {
       }
 
       if (req.method === "POST" && segments[3] === "messages") {
+        if (!requireIpcReady(res)) {
+          return;
+        }
+
         const body = parseBody(SendMessageBodySchema, await readJsonBody(req));
         const ownerClientId = resolveOwnerClientId(threadOwnerById, threadId, body.ownerClientId);
 
@@ -543,6 +592,10 @@ const server = http.createServer(async (req, res) => {
       }
 
       if (req.method === "POST" && segments[3] === "collaboration-mode") {
+        if (!requireIpcReady(res)) {
+          return;
+        }
+
         const body = parseBody(SetModeBodySchema, await readJsonBody(req));
         const ownerClientId = resolveOwnerClientId(threadOwnerById, threadId, body.ownerClientId);
 
@@ -569,6 +622,10 @@ const server = http.createServer(async (req, res) => {
       }
 
       if (req.method === "POST" && segments[3] === "user-input") {
+        if (!requireIpcReady(res)) {
+          return;
+        }
+
         const body = parseBody(SubmitUserInputBodySchema, await readJsonBody(req));
         const ownerClientId = resolveOwnerClientId(threadOwnerById, threadId, body.ownerClientId);
 
@@ -597,6 +654,10 @@ const server = http.createServer(async (req, res) => {
       }
 
       if (req.method === "POST" && segments[3] === "interrupt") {
+        if (!requireIpcReady(res)) {
+          return;
+        }
+
         const body = parseBody(InterruptBodySchema, await readJsonBody(req));
         const ownerClientId = resolveOwnerClientId(threadOwnerById, threadId, body.ownerClientId);
 
@@ -646,6 +707,10 @@ const server = http.createServer(async (req, res) => {
       }
 
       if (req.method === "POST" && pathname === "/api/debug/replay") {
+        if (!requireIpcReady(res)) {
+          return;
+        }
+
         const body = parseBody(ReplayBodySchema, await readJsonBody(req));
         const entry = history.find((item) => item.id === body.entryId);
         if (!entry) {
@@ -855,12 +920,57 @@ const server = http.createServer(async (req, res) => {
       method: req.method ?? "unknown",
       url: req.url ?? "unknown"
     });
+    broadcastRuntimeState();
     jsonResponse(res, 500, {
       ok: false,
       error: runtimeState.lastError
     });
   }
 });
+
+async function bootstrapConnections(): Promise<void> {
+  if (bootstrapInFlight) {
+    return bootstrapInFlight;
+  }
+
+  bootstrapInFlight = (async () => {
+    try {
+      if (!ipcClient.isConnected()) {
+        await ipcClient.connect();
+      }
+      runtimeState.ipcConnected = true;
+
+      const initializeResponse = await ipcClient.initialize(USER_AGENT);
+      runtimeState.ipcInitialized = true;
+
+      const initializeResult = initializeResponse.result;
+      if (initializeResult && typeof initializeResult === "object") {
+        const candidate = (initializeResult as Record<string, unknown>)["clientId"];
+        if (typeof candidate === "string" && candidate.trim()) {
+          pushSystem("IPC initialized", { clientId: candidate });
+        }
+      }
+
+      await appClient.listThreads({ limit: 1, archived: false });
+      runtimeState.appReady = true;
+      runtimeState.lastError = null;
+    } catch (error) {
+      runtimeState.appReady = false;
+      runtimeState.ipcInitialized = false;
+      if (!ipcClient.isConnected()) {
+        runtimeState.ipcConnected = false;
+      }
+
+      const errorMessage = setRuntimeError(error);
+      pushSystem("Codex bootstrap failed", { error: errorMessage });
+    } finally {
+      broadcastRuntimeState();
+      bootstrapInFlight = null;
+    }
+  })();
+
+  return bootstrapInFlight;
+}
 
 async function start(): Promise<void> {
   ensureTraceDirectory();
@@ -870,32 +980,29 @@ async function start(): Promise<void> {
     socketPath: runtimeState.socketPath
   });
 
-  await ipcClient.connect();
-  runtimeState.ipcConnected = true;
+  await new Promise<void>((resolve, reject) => {
+    const onError = (error: Error): void => {
+      reject(error);
+    };
 
-  const initializeResponse = await ipcClient.initialize(USER_AGENT);
-  runtimeState.ipcInitialized = true;
-
-  const initializeResult = initializeResponse.result;
-  if (initializeResult && typeof initializeResult === "object") {
-    const candidate = (initializeResult as Record<string, unknown>)["clientId"];
-    if (typeof candidate === "string" && candidate.trim()) {
-      pushSystem("IPC initialized", { clientId: candidate });
-    }
-  }
-
-  await appClient.listThreads({ limit: 1, archived: false });
-  runtimeState.appReady = true;
-
-  server.listen(PORT, HOST, () => {
-    pushSystem("Monitor server ready", {
-      url: `http://${HOST}:${PORT}`,
-      appExecutable: runtimeState.appExecutable,
-      socketPath: runtimeState.socketPath
+    server.once("error", onError);
+    server.listen(PORT, HOST, () => {
+      server.off("error", onError);
+      resolve();
     });
-    // eslint-disable-next-line no-console
-    console.log(`Codex monitor server running at http://${HOST}:${PORT}`);
   });
+
+  pushSystem("Monitor server ready", {
+    url: `http://${HOST}:${PORT}`,
+    appExecutable: runtimeState.appExecutable,
+    socketPath: runtimeState.socketPath
+  });
+  broadcastRuntimeState();
+
+  // eslint-disable-next-line no-console
+  console.log(`Codex monitor server running at http://${HOST}:${PORT}`);
+
+  void bootstrapConnections();
 }
 
 async function shutdown(): Promise<void> {
@@ -918,4 +1025,10 @@ process.on("SIGTERM", () => {
   void shutdown().then(() => process.exit(0));
 });
 
-void start();
+void start().catch((error) => {
+  const errorMessage = setRuntimeError(error);
+  pushSystem("Monitor server failed to start", { error: errorMessage });
+  // eslint-disable-next-line no-console
+  console.error(`Failed to start monitor server: ${errorMessage}`);
+  process.exit(1);
+});

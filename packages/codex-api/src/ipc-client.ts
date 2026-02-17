@@ -31,6 +31,11 @@ export interface DesktopIpcClientOptions {
 }
 
 export type IpcFrameListener = (frame: IpcFrame) => void;
+export interface IpcConnectionState {
+  connected: boolean;
+  reason?: string;
+}
+export type IpcConnectionListener = (state: IpcConnectionState) => void;
 
 export class DesktopIpcClient {
   private readonly socketPath: string;
@@ -51,6 +56,15 @@ export class DesktopIpcClient {
     return () => this.events.off("frame", listener);
   }
 
+  public onConnectionState(listener: IpcConnectionListener): () => void {
+    this.events.on("connection-state", listener);
+    return () => this.events.off("connection-state", listener);
+  }
+
+  public isConnected(): boolean {
+    return this.socket !== null;
+  }
+
   public async connect(): Promise<void> {
     if (this.socket) {
       throw new DesktopIpcError("IPC client is already connected");
@@ -68,10 +82,20 @@ export class DesktopIpcClient {
       this.rejectAll(new DesktopIpcError("IPC socket closed"));
       this.socket = null;
       this.buffer = Buffer.alloc(0);
+      this.emitConnectionState({
+        connected: false,
+        reason: "IPC socket closed"
+      });
     });
     this.socket.on("error", (error) => {
       this.rejectAll(new DesktopIpcError(`IPC socket error: ${error.message}`));
+      this.emitConnectionState({
+        connected: false,
+        reason: `IPC socket error: ${error.message}`
+      });
     });
+
+    this.emitConnectionState({ connected: true });
   }
 
   public async disconnect(): Promise<void> {
@@ -106,6 +130,10 @@ export class DesktopIpcClient {
 
   private emitFrame(frame: IpcFrame): void {
     this.events.emit("frame", frame);
+  }
+
+  private emitConnectionState(state: IpcConnectionState): void {
+    this.events.emit("connection-state", state);
   }
 
   private handleData(chunk: Buffer): void {
