@@ -16,7 +16,11 @@ import {
   type ChildProcessAppServerTransportOptions
 } from "./app-server-transport.js";
 
-function parseWithSchema<T>(schema: z.ZodSchema<T>, value: unknown, context: string): T {
+function parseWithSchema<T>(
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
+  value: unknown,
+  context: string
+): T {
   const parsed = schema.safeParse(value);
   if (!parsed.success) {
     throw ProtocolValidationError.fromZod(context, parsed.error);

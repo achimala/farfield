@@ -160,7 +160,7 @@ export function reduceThreadStreamEvents(
 
 export function findLatestTurnParamsTemplate(
   conversationState: ThreadConversationState
-): ThreadConversationState["turns"][number]["params"] {
+): NonNullable<ThreadConversationState["turns"][number]["params"]> {
   for (let i = conversationState.turns.length - 1; i >= 0; i -= 1) {
     const turn = conversationState.turns[i];
     if (turn?.params) {

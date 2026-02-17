@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  parseAppServerReadThreadResponse,
   parseAppServerCollaborationModeListResponse,
   parseIpcFrame,
   parseThreadConversationState,
@@ -154,5 +155,34 @@ describe("codex-protocol schemas", () => {
     });
 
     expect(parsed.data[0]?.mode).toBe("plan");
+  });
+
+  it("parses app-server thread/read response with subset validation", () => {
+    const parsed = parseAppServerReadThreadResponse({
+      thread: {
+        id: "thread-123",
+        preview: "hello",
+        modelProvider: "openai",
+        path: "/tmp/thread.jsonl",
+        cliVersion: "0.1.0",
+        turns: [
+          {
+            id: "turn-1",
+            status: "completed",
+            items: [
+              {
+                id: "item-1",
+                type: "agentMessage",
+                text: "hello"
+              }
+            ]
+          }
+        ]
+      }
+    });
+
+    expect(parsed.thread.id).toBe("thread-123");
+    expect(parsed.thread.requests).toEqual([]);
+    expect(parsed.thread.turns[0]?.status).toBe("completed");
   });
 });

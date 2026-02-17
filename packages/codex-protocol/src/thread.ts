@@ -155,7 +155,7 @@ export const UserInputRequestSchema = z
 
 export const ThreadTurnSchema = z
   .object({
-    params: TurnStartParamsSchema,
+    params: TurnStartParamsSchema.optional(),
     turnId: z.union([NonEmptyStringSchema, z.null()]).optional(),
     id: NonEmptyStringSchema.optional(),
     status: NonEmptyStringSchema,
@@ -165,13 +165,13 @@ export const ThreadTurnSchema = z
     diff: z.union([JsonValueSchema, z.null()]).optional(),
     items: z.array(TurnItemSchema)
   })
-  .strict();
+  .passthrough();
 
 export const ThreadConversationStateSchema = z
   .object({
     id: NonEmptyStringSchema,
     turns: z.array(ThreadTurnSchema),
-    requests: z.array(UserInputRequestSchema),
+    requests: z.array(UserInputRequestSchema).default([]),
     createdAt: NonNegativeIntSchema.optional(),
     updatedAt: NonNegativeIntSchema.optional(),
     title: z.string().optional(),
@@ -187,7 +187,7 @@ export const ThreadConversationStateSchema = z
     latestTokenUsageInfo: JsonValueSchema.optional(),
     source: z.string().optional()
   })
-  .strict();
+  .passthrough();
 
 export const ThreadStreamPatchPathSegmentSchema = z.union([
   NonNegativeIntSchema,
