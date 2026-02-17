@@ -107,6 +107,34 @@ function isPlanModeOption(mode: { mode: string; name: string }): boolean {
   return mode.mode.toLowerCase().includes("plan") || mode.name.toLowerCase().includes("plan");
 }
 
+function parseUiStateFromPath(pathname: string): { threadId: string | null; tab: "chat" | "debug" } {
+  const segments = pathname.split("/").filter((segment) => segment.length > 0);
+  if (segments.length === 0) {
+    return { threadId: null, tab: "chat" };
+  }
+  if (segments.length === 1 && segments[0] === "debug") {
+    return { threadId: null, tab: "debug" };
+  }
+  if (segments[0] === "threads" && typeof segments[1] === "string" && segments[1].length > 0) {
+    const threadId = decodeURIComponent(segments[1]);
+    if (segments[2] === "debug") {
+      return { threadId, tab: "debug" };
+    }
+    return { threadId, tab: "chat" };
+  }
+  return { threadId: null, tab: "chat" };
+}
+
+function buildPathFromUiState(threadId: string | null, tab: "chat" | "debug"): string {
+  if (!threadId) {
+    return tab === "debug" ? "/debug" : "/";
+  }
+  if (tab === "debug") {
+    return `/threads/${encodeURIComponent(threadId)}/debug`;
+  }
+  return `/threads/${encodeURIComponent(threadId)}`;
+}
+
 function IconBtn({
   onClick,
   disabled,
@@ -312,12 +340,13 @@ function PendingRequestCard({
 /* ── Main App ───────────────────────────────────────────────── */
 export function App(): React.JSX.Element {
   const { theme, toggle: toggleTheme } = useTheme();
+  const initialUiState = useMemo(() => parseUiStateFromPath(window.location.pathname), []);
 
   /* State */
   const [error, setError] = useState("");
   const [health, setHealth] = useState<Health | null>(null);
   const [threads, setThreads] = useState<ThreadsResponse["data"]>([]);
-  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
+  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(initialUiState.threadId);
   const [liveState, setLiveState] = useState<LiveStateResponse | null>(null);
   const [streamEvents, setStreamEvents] = useState<StreamEventsResponse["events"]>([]);
   const [modes, setModes] = useState<ModesResponse["data"]>([]);
@@ -338,7 +367,7 @@ export function App(): React.JSX.Element {
   const [answerDraft, setAnswerDraft] = useState<Record<string, { option: string; freeform: string }>>({});
 
   /* UI state */
-  const [activeTab, setActiveTab] = useState<"chat" | "debug">("chat");
+  const [activeTab, setActiveTab] = useState<"chat" | "debug">(initialUiState.tab);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true);
   const [isChatAtBottom, setIsChatAtBottom] = useState(true);
@@ -515,6 +544,24 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     selectedThreadIdRef.current = selectedThreadId;
   }, [selectedThreadId]);
+
+  useEffect(() => {
+    const onPopState = () => {
+      const next = parseUiStateFromPath(window.location.pathname);
+      setSelectedThreadId(next.threadId);
+      setActiveTab(next.tab);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => {
+      window.removeEventListener("popstate", onPopState);
+    };
+  }, []);
+
+  useEffect(() => {
+    const nextPath = buildPathFromUiState(selectedThreadId, activeTab);
+    if (window.location.pathname === nextPath) return;
+    window.history.replaceState(null, "", nextPath);
+  }, [activeTab, selectedThreadId]);
 
   useEffect(() => {
     void refreshAll();
