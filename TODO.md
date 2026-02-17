@@ -60,16 +60,16 @@ Only mark items done when they are fully complete and verified.
 
 ## Stage 5: Web App (`apps/web`)
 
-- [ ] Create Vite + React + TypeScript app.
-- [ ] Add Tailwind CSS and shadcn/ui.
-- [ ] Build clean split-view interface with:
-  - [ ] Thread list sidebar
-  - [ ] Conversation panel
-  - [ ] Plan mode controls and pending questions
-  - [ ] Always-visible Debug tab with trace/replay tools
-- [ ] Keep frontend thin (no protocol logic in UI).
-- [ ] Make performance-friendly rendering defaults.
-- [ ] Add UI smoke tests for main flows.
+- [x] Create Vite + React + TypeScript app.
+- [x] Add Tailwind CSS and shadcn/ui.
+- [x] Build clean split-view interface with:
+  - [x] Thread list sidebar
+  - [x] Conversation panel
+  - [x] Plan mode controls and pending questions
+  - [x] Always-visible Debug tab with trace/replay tools
+- [x] Keep frontend thin (no protocol logic in UI).
+- [x] Make performance-friendly rendering defaults.
+- [x] Add UI smoke tests for main flows.
 
 ## Stage 6: Trace Sanitization and Test Fixtures
 
