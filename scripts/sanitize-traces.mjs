@@ -5,7 +5,17 @@ const root = process.cwd();
 const inputDir = path.join(root, "traces");
 const outputDir = path.join(root, "packages", "codex-protocol", "test", "fixtures", "sanitized");
 
-const BANNED_PATTERNS = [/\/Users\//gi, /anshu/gi, /OpenRLM/gi, /codextemp/gi, /rollout-/gi];
+const BANNED_PATTERNS = [
+  /\/Users\//gi,
+  /\\Users\\/gi,
+  /github\.com/gi,
+  /git@/gi,
+  /https?:\/\//gi,
+  /PRIVATE KEY/gi,
+  /api[_-]?key/gi,
+  /token/gi,
+  /rollout-/gi
+];
 const ID_LIKE_KEYS = new Set([
   "id",
   "threadId",
@@ -17,18 +27,33 @@ const ID_LIKE_KEYS = new Set([
   "clientId",
   "entryId"
 ]);
-const PATH_KEYS = new Set(["cwd", "path", "rolloutPath", "socketPath", "executablePath"]);
-const TEXT_KEYS = new Set([
-  "text",
-  "preview",
-  "title",
-  "question",
-  "header",
+const DROP_KEYS = new Set([
+  "fullPayload",
+  "aggregatedOutput",
+  "originUrl",
+  "command",
   "description",
   "developer_instructions",
   "message",
+  "preview",
+  "question",
+  "header",
+  "label",
+  "title",
   "note",
-  "label"
+  "text",
+  "summary"
+]);
+const PATH_KEYS = new Set(["cwd", "path", "rolloutPath", "socketPath", "executablePath"]);
+const SAFE_LITERAL_KEYS = new Set([
+  "type",
+  "method",
+  "op",
+  "resultType",
+  "source",
+  "direction",
+  "mode",
+  "status"
 ]);
 
 const idMap = new Map();
@@ -55,28 +80,27 @@ function looksLikeId(value) {
 }
 
 function sanitizeString(key, value) {
+  if (DROP_KEYS.has(key)) {
+    return `[redacted ${key}]`;
+  }
+
   if (PATH_KEYS.has(key) || value.includes("/Users/") || value.includes("\\\\.\\pipe")) {
     return "/redacted/path";
   }
 
-  if (ID_LIKE_KEYS.has(key) || looksLikeId(value)) {
+  if (ID_LIKE_KEYS.has(key) || /Id$/.test(key) || looksLikeId(value)) {
     return mapId(value, key || "id");
   }
 
-  if (TEXT_KEYS.has(key)) {
-    return `[redacted ${key}]`;
+  if (SAFE_LITERAL_KEYS.has(key)) {
+    return value;
   }
 
-  let redacted = value;
-  for (const pattern of BANNED_PATTERNS) {
-    redacted = redacted.replace(pattern, "<redacted>");
+  if (key === "version") {
+    return value;
   }
 
-  if (redacted !== value) {
-    return "[redacted text]";
-  }
-
-  return redacted;
+  return `[redacted ${key || "string"}]`;
 }
 
 function sanitizeNumber(key, value) {
@@ -107,7 +131,7 @@ function sanitizeValue(value, key = "") {
   if (value && typeof value === "object") {
     const result = {};
     for (const [nextKey, nextValue] of Object.entries(value)) {
-      if (nextKey === "fullPayload") {
+      if (DROP_KEYS.has(nextKey)) {
         continue;
       }
 
