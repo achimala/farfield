@@ -769,7 +769,7 @@ export function App(): React.JSX.Element {
                   setMobileSidebarOpen(false);
                 }}
                 variant="ghost"
-                className={`w-full min-w-0 h-auto flex items-center justify-between gap-2 rounded-xl px-3 py-3 text-left transition-colors ${
+                className={`w-full min-w-0 h-auto flex items-center justify-between gap-2 rounded-xl px-3 py-2.5 text-left transition-colors ${
                   isSelected
                     ? "bg-muted/90 text-foreground shadow-sm"
                     : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
