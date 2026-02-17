@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   ChevronRight,
   CheckCircle2,
@@ -13,6 +14,7 @@ import {
 import type { z } from "zod";
 import type { CommandExecutionItemSchema } from "@codex-monitor/codex-protocol";
 import { Button } from "@/components/ui/button";
+import { CodeSnippet } from "./CodeSnippet";
 
 type CommandItem = z.infer<typeof CommandExecutionItemSchema>;
 
@@ -26,17 +28,15 @@ const ACTION_ICONS: Record<string, React.ElementType> = {
 };
 
 function simplifyCommand(cmd: string): string {
-  // Strip common shell wrappers: /bin/zsh -lc "..." or /bin/bash -lc "..."
-  const m = /(?:\/bin\/(?:bash|zsh|sh)\s+(?:-\w+\s+)+)"?(.*?)"?\s*$/.exec(cmd);
-  const simplified = m?.[1]?.replace(/\\"/g, '"').replace(/\\'/g, "'") ?? cmd;
-  return simplified.length > 140 ? simplified.slice(0, 140) + "…" : simplified;
+  return cmd.length > 140 ? cmd.slice(0, 140) + "…" : cmd;
 }
 
 export function CommandBlock({ item, isActive }: { item: CommandItem; isActive: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const isCompleted = item.status === "completed";
   const isSuccess = item.exitCode === 0 || item.exitCode == null;
-  const hasOutput = item.aggregatedOutput && item.aggregatedOutput.trim().length > 0;
+  const output = typeof item.aggregatedOutput === "string" ? item.aggregatedOutput : "";
+  const hasOutput = output.trim().length > 0;
   const hasActions = (item.commandActions?.length ?? 0) > 0;
 
   return (
@@ -75,38 +75,62 @@ export function CommandBlock({ item, isActive }: { item: CommandItem; isActive: 
       </Button>
 
       {/* Expanded body */}
-      {expanded && (
-        <div className="border-t border-border divide-y divide-border/60">
-          {/* Command actions */}
-          {hasActions && (
-            <div className="px-3 py-2 space-y-1.5">
-              {item.commandActions!.map((action, i) => {
-                const Icon = ACTION_ICONS[action.type] ?? Terminal;
-                const label = action.name ?? action.command ?? action.path ?? action.type;
-                return (
-                  <div key={i} className="flex items-start gap-2 text-xs text-muted-foreground">
-                    <Icon size={10} className="mt-0.5 shrink-0 opacity-60" />
-                    <code className="font-mono break-all leading-4">{label}</code>
+      <AnimatePresence initial={false}>
+        {expanded && (
+          <motion.div
+            key="expanded"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.22, ease: "easeInOut" }}
+            className="overflow-hidden"
+          >
+            <div className="border-t border-border divide-y divide-border/60">
+              {/* Command actions */}
+              {hasActions && (
+                <div className="px-3 py-2 space-y-1.5">
+                  {item.commandActions!.map((action, i) => {
+                    const Icon = ACTION_ICONS[action.type] ?? Terminal;
+                    const label = action.name ?? action.command ?? action.path ?? action.type;
+                    return (
+                      <div key={i} className="flex items-start gap-2 text-xs text-muted-foreground">
+                        <Icon size={10} className="mt-0.5 shrink-0 opacity-60" />
+                        <code className="font-mono break-all leading-4">{label}</code>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Output */}
+              {hasOutput && (
+                <div className="px-3 py-2 space-y-2">
+                  <div>
+                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Command
+                    </div>
+                    <CodeSnippet code={item.command} language="bash" />
                   </div>
-                );
-              })}
-            </div>
-          )}
+                  <div>
+                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Output
+                    </div>
+                    <CodeSnippet
+                      code={output}
+                      language="bash"
+                      className="max-h-56 overflow-y-auto"
+                    />
+                  </div>
+                </div>
+              )}
 
-          {/* Output */}
-          {hasOutput && (
-            <div className="px-3 py-2">
-              <pre className="font-mono text-xs text-foreground/70 whitespace-pre-wrap break-words max-h-48 overflow-y-auto leading-5">
-                {item.aggregatedOutput}
-              </pre>
+              {!hasActions && !hasOutput && (
+                <div className="px-3 py-2 text-xs text-muted-foreground">No output</div>
+              )}
             </div>
-          )}
-
-          {!hasActions && !hasOutput && (
-            <div className="px-3 py-2 text-xs text-muted-foreground">No output</div>
-          )}
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

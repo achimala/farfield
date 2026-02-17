@@ -1,11 +1,12 @@
 import { useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { ChevronRight, FilePlus, FileMinus, FileEdit } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface FileChange {
   path: string;
-  kind: { type: string; move_path?: string | null };
-  diff?: string;
+  kind: { type: string; move_path?: string | null | undefined };
+  diff?: string | undefined;
 }
 
 interface DiffBlockProps {
@@ -19,6 +20,10 @@ function parseDiff(raw: string): DiffLine[] {
   const result: DiffLine[] = [];
   for (const line of raw.split("\n")) {
     if (line.startsWith("@@")) {
+      result.push({ type: "header", content: line });
+    } else if (line.startsWith("+++")) {
+      result.push({ type: "header", content: line });
+    } else if (line.startsWith("---")) {
       result.push({ type: "header", content: line });
     } else if (line.startsWith("+")) {
       result.push({ type: "add", content: line.slice(1) });
@@ -68,8 +73,8 @@ export function DiffBlock({ changes }: DiffBlockProps) {
         const fileName = change.path.split("/").pop() ?? change.path;
         const dirPath = change.path.slice(0, change.path.lastIndexOf("/"));
         const lines = change.diff ? parseDiff(change.diff) : [];
-        const added = lines.filter((l) => l.type === "add").length;
-        const removed = lines.filter((l) => l.type === "remove").length;
+        const added = lines.filter((line) => line.type === "add").length;
+        const removed = lines.filter((line) => line.type === "remove").length;
         const { Icon, label, cls } = kindMeta(change.kind.type);
 
         return (
@@ -102,31 +107,42 @@ export function DiffBlock({ changes }: DiffBlockProps) {
               </div>
             </Button>
 
-            {isExpanded && (
-              <div className="border-t border-border overflow-x-auto">
-                {lines.length > 0 ? (
-                  lines.map((line, j) => (
-                    <div
-                      key={j}
-                      className={`flex font-mono text-xs leading-5 ${LINE_STYLES[line.type]}`}
-                    >
-                      <span
-                        className={`select-none w-6 text-center text-[10px] shrink-0 pt-px ${GUTTER_STYLES[line.type]}`}
-                      >
-                        {GUTTER_CHAR[line.type]}
-                      </span>
-                      <span
-                        className={`flex-1 px-2 py-0.5 whitespace-pre-wrap break-all ${TEXT_STYLES[line.type]}`}
-                      >
-                        {line.content}
-                      </span>
-                    </div>
-                  ))
-                ) : (
-                  <div className="px-3 py-2 text-xs text-muted-foreground">No diff available</div>
-                )}
-              </div>
-            )}
+            <AnimatePresence initial={false}>
+              {isExpanded && (
+                <motion.div
+                  key={`diff-${i}`}
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.24, ease: "easeInOut" }}
+                  className="overflow-hidden"
+                >
+                  <div className="border-t border-border overflow-x-auto">
+                    {change.diff ? (
+                      lines.map((line, j) => (
+                        <div
+                          key={j}
+                          className={`flex font-mono text-xs leading-5 ${LINE_STYLES[line.type]}`}
+                        >
+                          <span
+                            className={`select-none w-6 text-center text-[10px] shrink-0 pt-px ${GUTTER_STYLES[line.type]}`}
+                          >
+                            {GUTTER_CHAR[line.type]}
+                          </span>
+                          <span
+                            className={`flex-1 px-2 py-0.5 whitespace-pre-wrap break-all ${TEXT_STYLES[line.type]}`}
+                          >
+                            {line.content}
+                          </span>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="px-3 py-2 text-xs text-muted-foreground">No diff available</div>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         );
       })}

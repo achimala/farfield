@@ -1,11 +1,12 @@
 import type { z } from "zod";
-import type { TurnItemSchema, CommandExecutionItemSchema } from "@codex-monitor/codex-protocol";
+import type { TurnItemSchema } from "@codex-monitor/codex-protocol";
 import { ReasoningBlock } from "./ReasoningBlock";
 import { CommandBlock } from "./CommandBlock";
 import { DiffBlock } from "./DiffBlock";
+import { MarkdownText } from "./MarkdownText";
 
 type TurnItem = z.infer<typeof TurnItemSchema>;
-type CommandItem = z.infer<typeof CommandExecutionItemSchema>;
+type UserMessageLikeItem = Extract<TurnItem, { type: "userMessage" | "steeringUserMessage" }>;
 
 interface Props {
   item: TurnItem;
@@ -13,15 +14,10 @@ interface Props {
   turnIsInProgress: boolean;
 }
 
-function readTextContent(content: unknown): string {
-  if (!Array.isArray(content)) return "";
+function readTextContent(content: UserMessageLikeItem["content"]): string {
   return content
-    .map((part: unknown) => {
-      if (typeof part !== "object" || part === null) return "";
-      const p = part as Record<string, unknown>;
-      return typeof p["text"] === "string" ? p["text"] : "";
-    })
-    .filter(Boolean)
+    .map((part) => (part.type === "text" ? part.text : ""))
+    .filter((text) => text.length > 0)
     .join("\n");
 }
 
@@ -29,7 +25,7 @@ export function ConversationItem({ item, isLast, turnIsInProgress }: Props) {
   const isActive = isLast && turnIsInProgress;
 
   /* ── User message ───────────────────────────────────── */
-  if (item.type === "userMessage") {
+  if (item.type === "userMessage" || item.type === "steeringUserMessage") {
     const text = readTextContent(item.content);
     if (!text) return null;
     return (
@@ -45,9 +41,7 @@ export function ConversationItem({ item, isLast, turnIsInProgress }: Props) {
   if (item.type === "agentMessage") {
     if (!item.text) return null;
     return (
-      <div className="text-sm text-foreground leading-relaxed whitespace-pre-wrap break-words">
-        {item.text}
-      </div>
+      <MarkdownText text={item.text} />
     );
   }
 
@@ -100,34 +94,38 @@ export function ConversationItem({ item, isLast, turnIsInProgress }: Props) {
 
   /* ── Command execution ──────────────────────────────── */
   if (item.type === "commandExecution") {
-    return <CommandBlock item={item as CommandItem} isActive={isActive} />;
+    return <CommandBlock item={item} isActive={isActive} />;
   }
 
-  /* ── File change (not in strict schema, but handle defensively) */
-  const raw = item as unknown as Record<string, unknown>;
-  if (raw["type"] === "fileChange" && Array.isArray(raw["changes"])) {
+  /* ── File change ────────────────────────────────────── */
+  if (item.type === "fileChange") {
     return (
-      <DiffBlock
-        changes={
-          raw["changes"] as Array<{
-            path: string;
-            kind: { type: string; move_path?: string | null };
-            diff?: string;
-          }>
-        }
-      />
+      <DiffBlock changes={item.changes} />
     );
   }
 
-  /* ── Fallback ───────────────────────────────────────── */
-  return (
-    <div className="rounded-lg border border-border bg-muted/20 px-3 py-2">
-      <div className="text-[10px] text-muted-foreground font-mono mb-1 uppercase tracking-wider">
-        {item.type}
+  /* ── Context compaction ─────────────────────────────── */
+  if (item.type === "contextCompaction") {
+    return (
+      <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+        Context compacted
       </div>
-      <pre className="text-xs font-mono text-muted-foreground/80 whitespace-pre-wrap break-words">
-        {JSON.stringify(item, null, 2)}
-      </pre>
-    </div>
-  );
+    );
+  }
+
+  /* ── Web search ─────────────────────────────────────── */
+  if (item.type === "webSearch") {
+    return (
+      <div className="rounded-lg border border-border bg-muted/20 px-3 py-2">
+        <div className="text-[10px] text-muted-foreground font-mono mb-1 uppercase tracking-wider">
+          Web search
+        </div>
+        <div className="text-xs text-foreground/80 whitespace-pre-wrap break-words">
+          {item.query}
+        </div>
+      </div>
+    );
+  }
+
+  return null;
 }

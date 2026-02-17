@@ -29,6 +29,9 @@
     "radix-ui": "^1.4.3",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "react-markdown": "^10.1.0",
+    "react-syntax-highlighter": "^16.1.0",
+    "remark-gfm": "^4.0.1",
     "tailwind-merge": "^2.5.5",
     "zod": "^3.24.1"
   },
@@ -37,6 +40,7 @@
     "@testing-library/react": "^16.1.0",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
+    "@types/react-syntax-highlighter": "^15.5.13",
     "@vitejs/plugin-react": "^5.1.0",
     "jsdom": "^25.0.1",
     "shadcn": "^3.8.5",
