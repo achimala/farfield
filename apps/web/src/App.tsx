@@ -345,6 +345,7 @@ export function App(): React.JSX.Element {
   const [visibleChatItemLimit, setVisibleChatItemLimit] = useState(INITIAL_VISIBLE_CHAT_ITEMS);
   const [suppressEntryAnimations, setSuppressEntryAnimations] = useState(false);
   const [hasHydratedModeFromLiveState, setHasHydratedModeFromLiveState] = useState(false);
+  const [isModeSyncing, setIsModeSyncing] = useState(false);
 
   /* Refs */
   const selectedThreadIdRef = useRef<string | null>(null);
@@ -354,6 +355,7 @@ export function App(): React.JSX.Element {
   const chatContentRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lastAppliedModeSignatureRef = useRef("");
+  const modeSyncRequestIdRef = useRef(0);
 
   /* Derived */
   const selectedThread = useMemo(
@@ -585,6 +587,8 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     lastAppliedModeSignatureRef.current = "";
     setHasHydratedModeFromLiveState(false);
+    modeSyncRequestIdRef.current += 1;
+    setIsModeSyncing(false);
   }, [selectedThreadId]);
 
   // Track whether chat view is at the bottom.
@@ -681,7 +685,9 @@ export function App(): React.JSX.Element {
 
   const applyMode = useCallback(async () => {
     if (!selectedThreadId || !selectedMode) return;
-    setIsBusy(true);
+    const requestId = modeSyncRequestIdRef.current + 1;
+    modeSyncRequestIdRef.current = requestId;
+    setIsModeSyncing(true);
     try {
       setError("");
       const ownerOpts = liveState?.ownerClientId ? { ownerClientId: liveState.ownerClientId } : {};
@@ -697,13 +703,15 @@ export function App(): React.JSX.Element {
           }
         }
       });
-      await refreshAll();
+      await loadSelectedThread(selectedThreadId);
     } catch (e) {
       setError(toErrorMessage(e));
     } finally {
-      setIsBusy(false);
+      if (modeSyncRequestIdRef.current === requestId) {
+        setIsModeSyncing(false);
+      }
     }
-  }, [liveState?.ownerClientId, refreshAll, selectedMode, selectedModelId, selectedReasoningEffort, selectedThreadId]);
+  }, [liveState?.ownerClientId, loadSelectedThread, selectedMode, selectedModelId, selectedReasoningEffort, selectedThreadId]);
 
   useEffect(() => {
     if (!selectedThreadId || !selectedMode || !hasHydratedModeFromLiveState) return;
@@ -1181,16 +1189,16 @@ export function App(): React.JSX.Element {
                           ? "bg-muted text-foreground hover:bg-muted"
                           : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
                       }`}
-                      disabled={!selectedThreadId || isBusy || !planModeOption}
+                      disabled={!selectedThreadId || !planModeOption}
                     >
                       Plan mode
                     </Button>
                     <Select
                       value={selectedModelId || APP_DEFAULT_VALUE}
                       onValueChange={(value) => setSelectedModelId(value === APP_DEFAULT_VALUE ? "" : value)}
-                      disabled={!selectedThreadId || isBusy}
+                      disabled={!selectedThreadId}
                     >
-                      <SelectTrigger className="h-8 w-[180px] rounded-full text-xs">
+                      <SelectTrigger className="h-8 w-[180px] rounded-full border-0 bg-transparent px-3 text-xs text-muted-foreground shadow-none hover:bg-muted/60 hover:text-foreground focus-visible:ring-0 data-[state=open]:bg-muted/70">
                         <SelectValue placeholder="Model" />
                       </SelectTrigger>
                       <SelectContent position="popper">
@@ -1207,9 +1215,9 @@ export function App(): React.JSX.Element {
                       onValueChange={(value) =>
                         setSelectedReasoningEffort(value === APP_DEFAULT_VALUE ? "" : value)
                       }
-                      disabled={!selectedThreadId || isBusy}
+                      disabled={!selectedThreadId}
                     >
-                      <SelectTrigger className="h-8 w-[165px] rounded-full text-xs">
+                      <SelectTrigger className="h-8 w-[165px] rounded-full border-0 bg-transparent px-3 text-xs text-muted-foreground shadow-none hover:bg-muted/60 hover:text-foreground focus-visible:ring-0 data-[state=open]:bg-muted/70">
                         <SelectValue placeholder="Effort" />
                       </SelectTrigger>
                       <SelectContent position="popper">
@@ -1221,6 +1229,12 @@ export function App(): React.JSX.Element {
                         ))}
                       </SelectContent>
                     </Select>
+                    {isModeSyncing && (
+                      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <Loader2 size={11} className="animate-spin" />
+                        syncing
+                      </span>
+                    )}
                     {pendingRequests.length > 0 && (
                       <span className="text-xs text-amber-500 dark:text-amber-400">
                         {pendingRequests.length} pending
