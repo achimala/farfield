@@ -73,14 +73,14 @@ Only mark items done when they are fully complete and verified.
 
 ## Stage 6: Trace Sanitization and Test Fixtures
 
-- [ ] Build a sanitizer tool for NDJSON traces.
-- [ ] Redact all personal or sensitive content:
-  - [ ] IDs and thread IDs
-  - [ ] Paths and usernames
-  - [ ] Message text and prompt content
-  - [ ] Any raw payload fields not needed for schema tests
-- [ ] Generate sanitized fixtures for tests.
-- [ ] Confirm no private conversation text remains in fixtures.
+- [x] Build a sanitizer tool for NDJSON traces.
+- [x] Redact all personal or sensitive content:
+  - [x] IDs and thread IDs
+  - [x] Paths and usernames
+  - [x] Message text and prompt content
+  - [x] Any raw payload fields not needed for schema tests
+- [x] Generate sanitized fixtures for tests.
+- [x] Confirm no private conversation text remains in fixtures.
 
 ## Stage 7: Documentation and DX Finish
 

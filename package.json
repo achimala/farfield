@@ -7,7 +7,8 @@
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "lint": "pnpm -r lint",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "sanitize:traces": "node scripts/sanitize-traces.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
