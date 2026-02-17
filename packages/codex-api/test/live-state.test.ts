@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseThreadStreamStateChangedBroadcast } from "@codex-monitor/codex-protocol";
-import { reduceThreadStreamEvents } from "../src/live-state.js";
+import { reduceThreadStreamEvents, ThreadStreamReductionError } from "../src/live-state.js";
 
 describe("live-state reducer", () => {
   it("applies snapshot then patches", () => {
@@ -138,5 +138,78 @@ describe("live-state reducer", () => {
 
     expect(thread?.conversationState?.id).toBe("thread-2");
     expect(thread?.conversationState?.turns.length).toBe(0);
+  });
+
+  it("throws reduction error with raw payload details when patch introduces invalid item type", () => {
+    const snapshotEvent = parseThreadStreamStateChangedBroadcast({
+      type: "broadcast",
+      method: "thread-stream-state-changed",
+      sourceClientId: "client-a",
+      version: 4,
+      params: {
+        conversationId: "thread-3",
+        type: "thread-stream-state-changed",
+        version: 4,
+        change: {
+          type: "snapshot",
+          conversationState: {
+            id: "thread-3",
+            turns: [
+              {
+                status: "completed",
+                items: [
+                  {
+                    id: "item-1",
+                    type: "userMessage",
+                    content: [{ type: "text", text: "hello" }]
+                  }
+                ]
+              }
+            ],
+            requests: []
+          }
+        }
+      }
+    });
+
+    const patchEvent = parseThreadStreamStateChangedBroadcast({
+      type: "broadcast",
+      method: "thread-stream-state-changed",
+      sourceClientId: "client-a",
+      version: 4,
+      params: {
+        conversationId: "thread-3",
+        type: "thread-stream-state-changed",
+        version: 4,
+        change: {
+          type: "patches",
+          patches: [
+            {
+              op: "replace",
+              path: ["turns", 0, "items", 0],
+              value: {
+                id: "item-2",
+                type: "newUnknownItemType"
+              }
+            }
+          ]
+        }
+      }
+    });
+
+    let captured: unknown;
+    try {
+      reduceThreadStreamEvents([snapshotEvent, patchEvent]);
+    } catch (error) {
+      captured = error;
+    }
+
+    expect(captured).toBeInstanceOf(ThreadStreamReductionError);
+    const reductionError = captured as ThreadStreamReductionError;
+    expect(reductionError.details.threadId).toBe("thread-3");
+    expect(reductionError.details.eventIndex).toBe(1);
+    expect(reductionError.details.patchIndex).toBe(0);
+    expect(reductionError.details.event.params.conversationId).toBe("thread-3");
+    expect(reductionError.details.patch.op).toBe("replace");
   });
 });

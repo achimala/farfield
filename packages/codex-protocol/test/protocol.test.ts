@@ -145,6 +145,33 @@ describe("codex-protocol schemas", () => {
     expect(parsed.turns[0]?.items[0]?.type).toBe("userMessage");
   });
 
+  it("parses steering user message item", () => {
+    const parsed = parseThreadConversationState({
+      id: "thread-123",
+      turns: [
+        {
+          status: "completed",
+          items: [
+            {
+              id: "item-steering",
+              type: "steeringUserMessage",
+              content: [
+                {
+                  type: "text",
+                  text: "please keep this concise"
+                }
+              ],
+              attachments: []
+            }
+          ]
+        }
+      ],
+      requests: []
+    });
+
+    expect(parsed.turns[0]?.items[0]?.type).toBe("steeringUserMessage");
+  });
+
   it("rejects thread conversation state with unknown item types", () => {
     expect(() =>
       parseThreadConversationState({

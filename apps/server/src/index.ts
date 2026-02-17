@@ -11,6 +11,7 @@ import {
   DesktopIpcClient,
   findLatestTurnParamsTemplate,
   reduceThreadStreamEvents,
+  ThreadStreamReductionError,
   type SendRequestOptions
 } from "@codex-monitor/codex-api";
 import {
@@ -427,7 +428,8 @@ function getThreadLiveState(threadId: string): {
       logger.warn(
         {
           threadId,
-          error: toErrorMessage(error)
+          error: toErrorMessage(error),
+          rawPayload: event
         },
         "invalid-thread-stream-event"
       );
@@ -447,18 +449,30 @@ function getThreadLiveState(threadId: string): {
     const reduced = reduceThreadStreamEvents(events);
     state = reduced.get(threadId);
   } catch (error) {
+    const reductionContext =
+      error instanceof ThreadStreamReductionError
+        ? {
+            threadId: error.details.threadId,
+            eventIndex: error.details.eventIndex,
+            patchIndex: error.details.patchIndex,
+            rawEvent: error.details.event,
+            rawPatch: error.details.patch
+          }
+        : null;
     logger.error(
       {
         threadId,
         eventCount: events.length,
-        error: toErrorMessage(error)
+        error: toErrorMessage(error),
+        reductionContext
       },
       "thread-stream-reduction-failed"
     );
     pushSystem("Thread stream reduction failed", {
       threadId,
       eventCount: events.length,
-      error: toErrorMessage(error)
+      error: toErrorMessage(error),
+      reductionContext
     });
     return {
       ownerClientId: threadOwnerById.get(threadId) ?? null,

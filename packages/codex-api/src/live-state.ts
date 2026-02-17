@@ -115,12 +115,48 @@ export interface ThreadStreamDerivedState {
   conversationState: ThreadConversationState | null;
 }
 
+export interface ThreadStreamReductionErrorDetails {
+  threadId: string;
+  eventIndex: number;
+  patchIndex: number;
+  event: ThreadStreamStateChangedBroadcast;
+  patch: ThreadStreamPatch;
+}
+
+export class ThreadStreamReductionError extends Error {
+  public readonly details: ThreadStreamReductionErrorDetails;
+
+  public constructor(
+    message: string,
+    details: ThreadStreamReductionErrorDetails,
+    cause?: unknown
+  ) {
+    super(message);
+    this.name = "ThreadStreamReductionError";
+    this.details = details;
+    if (cause !== undefined) {
+      (this as Error & { cause?: unknown }).cause = cause;
+    }
+  }
+}
+
+function toErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === "string") {
+    return error;
+  }
+  return String(error);
+}
+
 export function reduceThreadStreamEvents(
   events: ThreadStreamStateChangedBroadcast[]
 ): Map<string, ThreadStreamDerivedState> {
   const byThread = new Map<string, ThreadStreamDerivedState>();
 
-  for (const event of events) {
+  for (let eventIndex = 0; eventIndex < events.length; eventIndex += 1) {
+    const event = events[eventIndex] as ThreadStreamStateChangedBroadcast;
     const threadId = event.params.conversationId;
     const previous = byThread.get(threadId) ?? {
       ownerClientId: null,
@@ -148,8 +184,25 @@ export function reduceThreadStreamEvents(
     }
 
     let updated = next.conversationState;
-    for (const patch of change.patches) {
-      updated = applyStrictPatch(updated, patch);
+    for (let patchIndex = 0; patchIndex < change.patches.length; patchIndex += 1) {
+      const patch = change.patches[patchIndex] as ThreadStreamPatch;
+      try {
+        updated = applyStrictPatch(updated, patch);
+      } catch (error) {
+        throw new ThreadStreamReductionError(
+          `Thread stream reduction failed for thread ${threadId} at event ${eventIndex}, patch ${patchIndex}: ${toErrorMessage(
+            error
+          )}`,
+          {
+            threadId,
+            eventIndex,
+            patchIndex,
+            event,
+            patch
+          },
+          error
+        );
+      }
     }
 
     next.conversationState = updated;

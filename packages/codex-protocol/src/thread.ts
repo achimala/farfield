@@ -84,6 +84,15 @@ export const UserMessageItemSchema = z
   })
   .strict();
 
+export const SteeringUserMessageItemSchema = z
+  .object({
+    id: NonEmptyStringSchema,
+    type: z.literal("steeringUserMessage"),
+    content: z.array(UserMessagePartSchema),
+    attachments: z.array(JsonValueSchema).optional()
+  })
+  .strict();
+
 export const AgentMessageItemSchema = z
   .object({
     id: NonEmptyStringSchema,
@@ -206,6 +215,7 @@ export const WebSearchItemSchema = z
 
 export const TurnItemSchema = z.discriminatedUnion("type", [
   UserMessageItemSchema,
+  SteeringUserMessageItemSchema,
   AgentMessageItemSchema,
   ReasoningItemSchema,
   PlanItemSchema,
