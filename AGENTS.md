@@ -2,6 +2,16 @@
 
 This repo is a local Codex monitor workspace.
 
+## Absolutely Immutable Extremely Important Rules
+
+ABSOLUTELY NO FALLBACKS. Do not even SAY the word "fallback" to me.
+The types must be absolutely precise. You must NEVER write type instrospection code.
+Schema must be iron clad in Zod, and everything should fail hard with clear errors if anything mismatches the schema.
+No code outside of Zod can EVER do type introspection. Everything MUST operate on strict types ONLY.
+You CANNOT use `as any` or `unknown` in this codebase, they are FORBIDDEN.
+You must check these rules at the end of every turn. If not satisfied, you are not done: find a better solution that does not
+violate the rules. If you think that is impossible, STOP and ask the user.
+
 ## Basic Workflow
 
 1. Read the request and inspect the current code before changing anything.
