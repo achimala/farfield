@@ -3,14 +3,15 @@ import {
   JsonValueSchema,
   NonEmptyStringSchema,
   NonNegativeIntSchema,
-  NullableNonEmptyStringSchema
+  NullableNonEmptyStringSchema,
+  NullableStringSchema
 } from "./common.js";
 import { ProtocolValidationError } from "./errors.js";
 
 export const CollaborationModeSettingsSchema = z
   .object({
-    model: NullableNonEmptyStringSchema.optional(),
-    reasoning_effort: NullableNonEmptyStringSchema.optional(),
+    model: NullableStringSchema.optional(),
+    reasoning_effort: NullableStringSchema.optional(),
     developer_instructions: z.union([z.string(), z.null()]).optional()
   })
   .strict();
@@ -44,8 +45,8 @@ export const TurnStartParamsSchema = z
     threadId: NonEmptyStringSchema,
     input: z.array(InputPartSchema),
     cwd: NonEmptyStringSchema.optional(),
-    model: NullableNonEmptyStringSchema.optional(),
-    effort: NullableNonEmptyStringSchema.optional(),
+    model: NullableStringSchema.optional(),
+    effort: NullableStringSchema.optional(),
     approvalPolicy: NonEmptyStringSchema.optional(),
     sandboxPolicy: z.object({ type: NonEmptyStringSchema }).passthrough().optional(),
     summary: z.string().optional(),
@@ -283,10 +284,10 @@ export const ThreadConversationStateSchema = z
     requests: z.array(UserInputRequestSchema).default([]),
     createdAt: NonNegativeIntSchema.optional(),
     updatedAt: NonNegativeIntSchema.optional(),
-    title: z.string().optional(),
-    latestModel: NullableNonEmptyStringSchema.optional(),
-    latestReasoningEffort: NullableNonEmptyStringSchema.optional(),
-    previousTurnModel: NullableNonEmptyStringSchema.optional(),
+    title: NullableStringSchema.optional(),
+    latestModel: NullableStringSchema.optional(),
+    latestReasoningEffort: NullableStringSchema.optional(),
+    previousTurnModel: NullableStringSchema.optional(),
     latestCollaborationMode: z.union([CollaborationModeSchema, z.null()]).optional(),
     hasUnreadTurn: z.boolean().optional(),
     rolloutPath: z.string().optional(),

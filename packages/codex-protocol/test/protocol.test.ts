@@ -59,6 +59,51 @@ describe("codex-protocol schemas", () => {
     expect(parsed.params.change.type).toBe("patches");
   });
 
+  it("parses snapshot broadcast with null title and empty model defaults", () => {
+    const parsed = parseThreadStreamStateChangedBroadcast({
+      type: "broadcast",
+      method: "thread-stream-state-changed",
+      sourceClientId: "client-123",
+      version: 4,
+      params: {
+        conversationId: "thread-123",
+        type: "thread-stream-state-changed",
+        version: 4,
+        change: {
+          type: "snapshot",
+          conversationState: {
+            id: "thread-123",
+            turns: [],
+            requests: [],
+            createdAt: 1700000000,
+            updatedAt: 1700000000,
+            title: null,
+            latestModel: "",
+            latestReasoningEffort: null,
+            previousTurnModel: null,
+            latestCollaborationMode: {
+              mode: "default",
+              settings: {
+                model: "",
+                reasoning_effort: null,
+                developer_instructions: null
+              }
+            },
+            hasUnreadTurn: false,
+            rolloutPath: "/tmp/rollout.jsonl",
+            gitInfo: null,
+            resumeState: "resumed",
+            latestTokenUsageInfo: null,
+            cwd: "/tmp/workspace",
+            source: "vscode"
+          }
+        }
+      }
+    });
+
+    expect(parsed.params.change.type).toBe("snapshot");
+  });
+
   it("rejects invalid patch value for remove operation", () => {
     expect(() =>
       parseThreadStreamStateChangedBroadcast({
