@@ -169,12 +169,14 @@ export async function sendMessage(input: {
   text: string;
   cwd?: string;
 }): Promise<void> {
-  await request(`/api/threads/${encodeURIComponent(input.threadId)}/messages`, {
+  const { threadId, ...body } = input;
+
+  await request(`/api/threads/${encodeURIComponent(threadId)}/messages`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify(input)
+    body: JSON.stringify(body)
   });
 }
 
@@ -183,12 +185,14 @@ export async function setCollaborationMode(input: {
   ownerClientId?: string;
   collaborationMode: CollaborationMode;
 }): Promise<void> {
-  await request(`/api/threads/${encodeURIComponent(input.threadId)}/collaboration-mode`, {
+  const { threadId, ...body } = input;
+
+  await request(`/api/threads/${encodeURIComponent(threadId)}/collaboration-mode`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify(input)
+    body: JSON.stringify(body)
   });
 }
 
@@ -200,12 +204,14 @@ export async function submitUserInput(input: {
 }): Promise<void> {
   UserInputResponsePayloadSchema.parse(input.response);
 
-  await request(`/api/threads/${encodeURIComponent(input.threadId)}/user-input`, {
+  const { threadId, ...body } = input;
+
+  await request(`/api/threads/${encodeURIComponent(threadId)}/user-input`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify(input)
+    body: JSON.stringify(body)
   });
 }
 
@@ -213,12 +219,14 @@ export async function interruptThread(input: {
   threadId: string;
   ownerClientId?: string;
 }): Promise<void> {
-  await request(`/api/threads/${encodeURIComponent(input.threadId)}/interrupt`, {
+  const { threadId, ...body } = input;
+
+  await request(`/api/threads/${encodeURIComponent(threadId)}/interrupt`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify(input)
+    body: JSON.stringify(body)
   });
 }
 
