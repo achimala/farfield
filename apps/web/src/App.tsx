@@ -85,7 +85,7 @@ function formatDate(value: number | string | null | undefined): string {
 function threadLabel(thread: Thread): string {
   const text = thread.preview.trim();
   if (!text) return `thread ${thread.id.slice(0, 8)}`;
-  return text.length > 80 ? `${text.slice(0, 80)}…` : text;
+  return text;
 }
 
 function toErrorMessage(err: unknown): string {
@@ -705,7 +705,7 @@ export function App(): React.JSX.Element {
         </div>
 
         {/* Thread list */}
-        <div className="flex-1 overflow-y-auto py-1">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden py-1">
           {threads.length === 0 && (
             <div className="px-4 py-6 text-xs text-muted-foreground text-center">No threads</div>
           )}
@@ -720,15 +720,15 @@ export function App(): React.JSX.Element {
                   setMobileSidebarOpen(false);
                 }}
                 variant="ghost"
-                className={`w-full h-auto flex flex-col items-start justify-start gap-0 rounded-none px-3 py-2.5 text-left transition-colors ${
+                className={`w-full min-w-0 h-auto flex items-center justify-between gap-2 rounded-none px-3 py-2.5 text-left transition-colors ${
                   isSelected
                     ? "bg-muted text-foreground"
                     : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                 }`}
               >
-                <span className="text-xs truncate leading-5">{threadLabel(thread)}</span>
+                <span className="min-w-0 flex-1 text-xs truncate leading-5">{threadLabel(thread)}</span>
                 {thread.updatedAt && (
-                  <span className="text-[10px] text-muted-foreground/50 mt-0.5">
+                  <span className="shrink-0 text-[10px] text-muted-foreground/50">
                     {formatDate(thread.updatedAt)}
                   </span>
                 )}
