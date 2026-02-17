@@ -1,5 +1,25 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, Bug, CirclePause, Loader2, MessageSquare, RefreshCcw, Send } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react";
+import {
+  Activity,
+  ArrowUp,
+  Bug,
+  ChevronRight,
+  CirclePause,
+  Loader2,
+  Menu,
+  Moon,
+  RefreshCcw,
+  Settings2,
+  Sun,
+  X
+} from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   getHealth,
   getHistoryEntry,
@@ -20,20 +40,12 @@ import {
   stopTrace,
   submitUserInput
 } from "@/lib/api";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
+import { useTheme } from "@/hooks/useTheme";
+import { ConversationItem } from "@/components/ConversationItem";
+import { PlanPanel } from "@/components/PlanPanel";
+import { DiffBlock } from "@/components/DiffBlock";
 
+/* ── Types ─────────────────────────────────────────────────── */
 type Health = Awaited<ReturnType<typeof getHealth>>;
 type ThreadsResponse = Awaited<ReturnType<typeof listThreads>>;
 type ModesResponse = Awaited<ReturnType<typeof listCollaborationModes>>;
@@ -43,92 +55,230 @@ type StreamEventsResponse = Awaited<ReturnType<typeof getStreamEvents>>;
 type TraceStatus = Awaited<ReturnType<typeof getTraceStatus>>;
 type HistoryResponse = Awaited<ReturnType<typeof listDebugHistory>>;
 type HistoryDetail = Awaited<ReturnType<typeof getHistoryEntry>>;
-
-type ConversationState = NonNullable<LiveStateResponse["conversationState"]>;
 type PendingRequest = ReturnType<typeof getPendingUserInputRequests>[number];
+type Thread = ThreadsResponse["data"][number];
 
+/* ── Helpers ────────────────────────────────────────────────── */
 function formatDate(value: number | string | null | undefined): string {
-  if (typeof value === "number") {
-    return new Date(value * 1000).toLocaleString();
-  }
-
+  if (typeof value === "number") return new Date(value * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   if (typeof value === "string") {
-    const date = new Date(value);
-    if (!Number.isNaN(date.getTime())) {
-      return date.toLocaleString();
-    }
+    const d = new Date(value);
+    if (!Number.isNaN(d.getTime())) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     return value;
   }
-
-  return "-";
+  return "";
 }
 
-function threadLabel(thread: ThreadsResponse["data"][number]): string {
+function threadLabel(thread: Thread): string {
   const text = thread.preview.trim();
-  if (!text) {
-    return `(thread ${thread.id.slice(0, 8)})`;
-  }
-  return text.length > 92 ? `${text.slice(0, 92)}…` : text;
+  if (!text) return `thread ${thread.id.slice(0, 8)}`;
+  return text.length > 80 ? `${text.slice(0, 80)}…` : text;
 }
 
-function assertNever(value: never): never {
-  throw new Error(`Unexpected turn item: ${JSON.stringify(value)}`);
-}
-
-function getItemRole(item: ConversationState["turns"][number]["items"][number]): string {
-  switch (item.type) {
-    case "userMessage":
-      return "You";
-    case "agentMessage":
-      return "Codex";
-    case "reasoning":
-      return "Reasoning";
-    case "plan":
-      return "Plan";
-    case "userInputResponse":
-      return "User input";
-    case "commandExecution":
-      return "Command";
-    default:
-      return assertNever(item);
-  }
-}
-
-function getItemText(item: ConversationState["turns"][number]["items"][number]): string {
-  switch (item.type) {
-    case "userMessage":
-      return item.content.map((part) => part.text).join("\n");
-    case "agentMessage":
-      return item.text;
-    case "reasoning":
-      return item.summary?.join("\n") ?? item.text ?? "";
-    case "plan":
-      return item.text;
-    case "userInputResponse":
-      return JSON.stringify(item.answers, null, 2);
-    case "commandExecution":
-      return [
-        item.command,
-        item.status ? `status: ${item.status}` : "",
-        item.exitCode === null || item.exitCode === undefined ? "" : `exit: ${String(item.exitCode)}`,
-        item.aggregatedOutput ?? ""
-      ]
-        .filter(Boolean)
-        .join("\n");
-    default:
-      return assertNever(item);
-  }
-}
-
-function toErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+function toErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 const DEFAULT_EFFORT_OPTIONS = ["minimal", "low", "medium", "high", "xhigh"] as const;
 
-export function App(): React.JSX.Element {
-  const [error, setError] = useState("");
+/* ── Small UI atoms ─────────────────────────────────────────── */
+function StatusDot({ ok, label }: { ok: boolean | undefined; label: string }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span
+        className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+          ok === undefined ? "bg-muted-foreground/40" : ok ? "bg-success" : "bg-danger"
+        }`}
+      />
+      <span className="text-xs text-muted-foreground">{label}</span>
+    </div>
+  );
+}
 
+function IconBtn({
+  onClick,
+  disabled,
+  title,
+  active,
+  children
+}: {
+  onClick?: () => void;
+  disabled?: boolean;
+  title?: string;
+  active?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={`p-2 rounded-lg transition-colors disabled:opacity-40 ${
+        active
+          ? "bg-muted text-foreground"
+          : "text-muted-foreground hover:text-foreground hover:bg-muted"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+/* ── Stream event renderer ──────────────────────────────────── */
+function StreamEventCard({ event }: { event: unknown }) {
+  const [open, setOpen] = useState(false);
+  if (typeof event !== "object" || event === null) {
+    return (
+      <div className="text-xs font-mono text-muted-foreground px-2 py-1.5 rounded-md border border-border">
+        {String(event)}
+      </div>
+    );
+  }
+  const e = event as Record<string, unknown>;
+  const method = typeof e["method"] === "string" ? e["method"] : null;
+  const type = typeof e["type"] === "string" ? e["type"] : null;
+  const label = method ?? type ?? "event";
+
+  const params = e["params"] as Record<string, unknown> | undefined;
+  const changes = params?.["changes"];
+  const isFileChange = Array.isArray(changes);
+
+  return (
+    <div className="rounded-lg border border-border overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-2 px-2.5 py-1.5 bg-muted/30 hover:bg-muted/60 transition-colors text-left"
+      >
+        <ChevronRight
+          size={10}
+          className={`shrink-0 text-muted-foreground/60 transition-transform ${open ? "rotate-90" : ""}`}
+        />
+        <span className="font-mono text-[11px] text-muted-foreground truncate">{label}</span>
+      </button>
+      {open && (
+        <div className="border-t border-border px-2.5 py-2">
+          {isFileChange ? (
+            <DiffBlock
+              changes={
+                changes as Array<{
+                  path: string;
+                  kind: { type: string; move_path?: string | null };
+                  diff?: string;
+                }>
+              }
+            />
+          ) : (
+            <pre className="font-mono text-[11px] text-muted-foreground/80 whitespace-pre-wrap break-words">
+              {JSON.stringify(event, null, 2)}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Pending user input ─────────────────────────────────────── */
+function PendingRequestCard({
+  request,
+  answerDraft,
+  onDraftChange,
+  onSubmit,
+  onSkip,
+  isBusy
+}: {
+  request: PendingRequest;
+  answerDraft: Record<string, { option: string; freeform: string }>;
+  onDraftChange: (questionId: string, field: "option" | "freeform", value: string) => void;
+  onSubmit: () => void;
+  onSkip: () => void;
+  isBusy: boolean;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="rounded-xl border border-border bg-card p-4 space-y-3"
+    >
+      {request.params.questions.map((q) => {
+        const draft = answerDraft[q.id] ?? { option: "", freeform: "" };
+        return (
+          <div key={q.id} className="space-y-2">
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
+              {q.header}
+            </div>
+            <div className="text-sm font-medium text-foreground">{q.question}</div>
+            <div className="space-y-1">
+              {q.options.map((opt) => (
+                <label
+                  key={opt.label}
+                  className={`flex items-start gap-2.5 cursor-pointer p-2 rounded-lg transition-colors ${
+                    draft.option === opt.label
+                      ? "bg-muted text-foreground"
+                      : "hover:bg-muted/50 text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name={`q-${q.id}`}
+                    className="mt-0.5 shrink-0 accent-foreground"
+                    checked={draft.option === opt.label}
+                    onChange={() => onDraftChange(q.id, "option", opt.label)}
+                  />
+                  <span className="text-sm">
+                    <span className="font-medium">{opt.label}</span>
+                    {opt.description && (
+                      <span className="block text-xs text-muted-foreground/70 mt-0.5">
+                        {opt.description}
+                      </span>
+                    )}
+                  </span>
+                </label>
+              ))}
+            </div>
+            {q.isOther && (
+              <input
+                type={q.isSecret ? "password" : "text"}
+                value={draft.freeform}
+                onChange={(e) => onDraftChange(q.id, "freeform", e.target.value)}
+                placeholder="Free-form answer…"
+                className="w-full h-8 px-3 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+            )}
+          </div>
+        );
+      })}
+
+      <div className="flex gap-2 pt-1">
+        <button
+          type="button"
+          onClick={onSkip}
+          disabled={isBusy}
+          className="h-8 px-3 rounded-lg border border-border text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40"
+        >
+          Skip
+        </button>
+        <button
+          type="button"
+          onClick={onSubmit}
+          disabled={isBusy}
+          className="h-8 px-4 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-40"
+        >
+          Submit
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
+/* ── Main App ───────────────────────────────────────────────── */
+export function App(): React.JSX.Element {
+  const { theme, toggle: toggleTheme } = useTheme();
+
+  /* State */
+  const [error, setError] = useState("");
   const [health, setHealth] = useState<Health | null>(null);
   const [threads, setThreads] = useState<ThreadsResponse["data"]>([]);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
@@ -136,97 +286,86 @@ export function App(): React.JSX.Element {
   const [streamEvents, setStreamEvents] = useState<StreamEventsResponse["events"]>([]);
   const [modes, setModes] = useState<ModesResponse["data"]>([]);
   const [models, setModels] = useState<ModelsResponse["data"]>([]);
-
   const [messageDraft, setMessageDraft] = useState("");
   const [selectedModeKey, setSelectedModeKey] = useState("");
   const [selectedModelId, setSelectedModelId] = useState("");
   const [selectedReasoningEffort, setSelectedReasoningEffort] = useState("");
   const [isBusy, setIsBusy] = useState(false);
-
   const [traceStatus, setTraceStatus] = useState<TraceStatus | null>(null);
   const [traceLabel, setTraceLabel] = useState("capture");
   const [traceNote, setTraceNote] = useState("");
-
   const [history, setHistory] = useState<HistoryResponse["history"]>([]);
   const [selectedHistoryId, setSelectedHistoryId] = useState("");
   const [historyDetail, setHistoryDetail] = useState<HistoryDetail | null>(null);
   const [waitForReplayResponse, setWaitForReplayResponse] = useState(false);
-
   const [selectedRequestId, setSelectedRequestId] = useState<number | null>(null);
   const [answerDraft, setAnswerDraft] = useState<Record<string, { option: string; freeform: string }>>({});
 
+  /* UI state */
+  const [activeTab, setActiveTab] = useState<"chat" | "debug">("chat");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
+
+  /* Refs */
   const selectedThreadIdRef = useRef<string | null>(null);
   const refreshTimerRef = useRef<number | null>(null);
   const coreRefreshIntervalRef = useRef<number | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  /* Derived */
+  const selectedThread = useMemo(
+    () => threads.find((t) => t.id === selectedThreadId) ?? null,
+    [threads, selectedThreadId]
+  );
 
   const pendingRequests = useMemo(() => {
-    if (!liveState?.conversationState) {
-      return [] as PendingRequest[];
-    }
+    if (!liveState?.conversationState) return [] as PendingRequest[];
     return getPendingUserInputRequests(liveState.conversationState);
   }, [liveState]);
 
   const activeRequest = useMemo(() => {
-    if (!pendingRequests.length) {
-      return null;
-    }
-
-    if (selectedRequestId === null) {
-      return pendingRequests[0];
-    }
-
-    return pendingRequests.find((request) => request.id === selectedRequestId) ?? pendingRequests[0];
+    if (!pendingRequests.length) return null;
+    if (selectedRequestId === null) return pendingRequests[0];
+    return pendingRequests.find((r) => r.id === selectedRequestId) ?? pendingRequests[0];
   }, [pendingRequests, selectedRequestId]);
 
-  const selectedMode = useMemo(() => {
-    return modes.find((mode) => mode.mode === selectedModeKey) ?? null;
-  }, [modes, selectedModeKey]);
+  const selectedMode = useMemo(
+    () => modes.find((m) => m.mode === selectedModeKey) ?? null,
+    [modes, selectedModeKey]
+  );
 
   const effortOptions = useMemo(() => {
-    const values = new Set<string>(DEFAULT_EFFORT_OPTIONS);
-
-    for (const mode of modes) {
-      if (mode.reasoning_effort) {
-        values.add(mode.reasoning_effort);
-      }
-    }
-
-    const latestEffort = liveState?.conversationState?.latestReasoningEffort;
-    if (latestEffort) {
-      values.add(latestEffort);
-    }
-
-    if (selectedReasoningEffort) {
-      values.add(selectedReasoningEffort);
-    }
-
-    return Array.from(values);
+    const vals = new Set<string>(DEFAULT_EFFORT_OPTIONS);
+    for (const m of modes) if (m.reasoning_effort) vals.add(m.reasoning_effort);
+    const le = liveState?.conversationState?.latestReasoningEffort;
+    if (le) vals.add(le);
+    if (selectedReasoningEffort) vals.add(selectedReasoningEffort);
+    return Array.from(vals);
   }, [liveState?.conversationState?.latestReasoningEffort, modes, selectedReasoningEffort]);
 
   const modelOptions = useMemo(() => {
     const map = new Map<string, string>();
-
-    for (const model of models) {
-      const label = model.displayName && model.displayName !== model.id
-        ? `${model.displayName} (${model.id})`
-        : model.displayName || model.id;
-      map.set(model.id, label);
+    for (const m of models) {
+      const label =
+        m.displayName && m.displayName !== m.id
+          ? `${m.displayName} (${m.id})`
+          : m.displayName || m.id;
+      map.set(m.id, label);
     }
-
-    const latestModel = liveState?.conversationState?.latestModel;
-    if (latestModel && !map.has(latestModel)) {
-      map.set(latestModel, latestModel);
-    }
-
-    if (selectedModelId && !map.has(selectedModelId)) {
-      map.set(selectedModelId, selectedModelId);
-    }
-
+    const lm = liveState?.conversationState?.latestModel;
+    if (lm && !map.has(lm)) map.set(lm, lm);
+    if (selectedModelId && !map.has(selectedModelId)) map.set(selectedModelId, selectedModelId);
     return Array.from(map.entries()).map(([id, label]) => ({ id, label }));
   }, [liveState?.conversationState?.latestModel, models, selectedModelId]);
 
+  const turns = liveState?.conversationState?.turns ?? [];
+  const lastTurn = turns[turns.length - 1];
+  const isGenerating = lastTurn?.status === "in-progress";
+
+  /* Data loading */
   const loadCoreData = useCallback(async () => {
-    const [nextHealth, nextThreads, nextModes, nextModels, nextTrace, nextHistory] = await Promise.all([
+    const [nh, nt, nm, nmo, ntr, nhist] = await Promise.all([
       getHealth(),
       listThreads({ limit: 80, archived: false, all: true, maxPages: 20 }),
       listCollaborationModes(),
@@ -234,51 +373,32 @@ export function App(): React.JSX.Element {
       getTraceStatus(),
       listDebugHistory(120)
     ]);
-
-    setHealth(nextHealth);
-    setThreads(nextThreads.data);
-    setModes(nextModes.data);
-    setModels(nextModels.data);
-    setTraceStatus(nextTrace);
-    setHistory(nextHistory.history);
-
-    setSelectedThreadId((current) => {
-      if (current && nextThreads.data.some((thread) => thread.id === current)) {
-        return current;
-      }
-
-      const firstThread = nextThreads.data[0];
-      return firstThread?.id ?? null;
+    setHealth(nh);
+    setThreads(nt.data);
+    setModes(nm.data);
+    setModels(nmo.data);
+    setTraceStatus(ntr);
+    setHistory(nhist.history);
+    setSelectedThreadId((cur) => {
+      if (cur && nt.data.some((t) => t.id === cur)) return cur;
+      return nt.data[0]?.id ?? null;
     });
-
-    setSelectedModeKey((current) => {
-      if (current) {
-        return current;
-      }
-      const firstMode = nextModes.data[0];
-      return firstMode?.mode ?? "";
+    setSelectedModeKey((cur) => {
+      if (cur) return cur;
+      return nm.data[0]?.mode ?? "";
     });
   }, []);
 
   const loadSelectedThread = useCallback(async (threadId: string) => {
-    const [live, stream] = await Promise.all([
-      getLiveState(threadId),
-      getStreamEvents(threadId)
-    ]);
-
+    const [live, stream] = await Promise.all([getLiveState(threadId), getStreamEvents(threadId)]);
     setLiveState(live);
     setStreamEvents(stream.events);
   }, []);
 
   const loadLiveData = useCallback(async () => {
-    const [nextHealth, nextHistory] = await Promise.all([
-      getHealth(),
-      listDebugHistory(120)
-    ]);
-
-    setHealth(nextHealth);
-    setHistory(nextHistory.history);
-
+    const [nh, nhist] = await Promise.all([getHealth(), listDebugHistory(120)]);
+    setHealth(nh);
+    setHistory(nhist.history);
     if (selectedThreadIdRef.current) {
       await loadSelectedThread(selectedThreadIdRef.current);
     }
@@ -288,11 +408,9 @@ export function App(): React.JSX.Element {
     try {
       setError("");
       await loadCoreData();
-      if (selectedThreadIdRef.current) {
-        await loadSelectedThread(selectedThreadIdRef.current);
-      }
-    } catch (nextError) {
-      setError(toErrorMessage(nextError));
+      if (selectedThreadIdRef.current) await loadSelectedThread(selectedThreadIdRef.current);
+    } catch (e) {
+      setError(toErrorMessage(e));
     }
   }, [loadCoreData, loadSelectedThread]);
 
@@ -305,22 +423,11 @@ export function App(): React.JSX.Element {
   }, [refreshAll]);
 
   useEffect(() => {
-    if (coreRefreshIntervalRef.current) {
-      window.clearInterval(coreRefreshIntervalRef.current);
-      coreRefreshIntervalRef.current = null;
-    }
-
     coreRefreshIntervalRef.current = window.setInterval(() => {
-      void loadCoreData().catch((nextError) => {
-        setError(toErrorMessage(nextError));
-      });
+      void loadCoreData().catch((e) => setError(toErrorMessage(e)));
     }, 5000);
-
     return () => {
-      if (coreRefreshIntervalRef.current) {
-        window.clearInterval(coreRefreshIntervalRef.current);
-        coreRefreshIntervalRef.current = null;
-      }
+      if (coreRefreshIntervalRef.current) window.clearInterval(coreRefreshIntervalRef.current);
     };
   }, [loadCoreData]);
 
@@ -330,37 +437,21 @@ export function App(): React.JSX.Element {
       setStreamEvents([]);
       return;
     }
-
-    void loadSelectedThread(selectedThreadId).catch((nextError) => {
-      setError(toErrorMessage(nextError));
-    });
+    void loadSelectedThread(selectedThreadId).catch((e) => setError(toErrorMessage(e)));
   }, [loadSelectedThread, selectedThreadId]);
 
   useEffect(() => {
     const source = new EventSource("/events");
-
     source.onmessage = () => {
-      if (refreshTimerRef.current) {
-        window.clearTimeout(refreshTimerRef.current);
-      }
-
+      if (refreshTimerRef.current) window.clearTimeout(refreshTimerRef.current);
       refreshTimerRef.current = window.setTimeout(() => {
         refreshTimerRef.current = null;
-        void loadLiveData().catch((nextError) => {
-          setError(toErrorMessage(nextError));
-        });
+        void loadLiveData().catch((e) => setError(toErrorMessage(e)));
       }, 800);
     };
-
-    source.onerror = () => {
-      source.close();
-    };
-
+    source.onerror = () => source.close();
     return () => {
-      if (refreshTimerRef.current) {
-        window.clearTimeout(refreshTimerRef.current);
-        refreshTimerRef.current = null;
-      }
+      if (refreshTimerRef.current) window.clearTimeout(refreshTimerRef.current);
       source.close();
     };
   }, [loadLiveData]);
@@ -371,602 +462,613 @@ export function App(): React.JSX.Element {
       setAnswerDraft({});
       return;
     }
-
-    setSelectedRequestId((current) => current ?? activeRequest.id);
-    setAnswerDraft((previous) => {
+    setSelectedRequestId((cur) => cur ?? activeRequest.id);
+    setAnswerDraft((prev) => {
       const next: Record<string, { option: string; freeform: string }> = {};
-      for (const question of activeRequest.params.questions) {
-        const current = previous[question.id];
-        next[question.id] = {
-          option: current?.option ?? "",
-          freeform: current?.freeform ?? ""
-        };
+      for (const q of activeRequest.params.questions) {
+        next[q.id] = prev[q.id] ?? { option: "", freeform: "" };
       }
       return next;
     });
   }, [activeRequest]);
 
   useEffect(() => {
-    const conversationState = liveState?.conversationState;
-    if (!conversationState) {
-      return;
-    }
-
-    const latestMode = conversationState.latestCollaborationMode;
-    if (latestMode?.mode) {
-      setSelectedModeKey(latestMode.mode);
-    }
-
-    const nextModel = latestMode?.settings.model ?? conversationState.latestModel ?? "";
-    const nextReasoningEffort =
-      latestMode?.settings.reasoning_effort ?? conversationState.latestReasoningEffort ?? "";
-
-    setSelectedModelId(nextModel);
-    setSelectedReasoningEffort(nextReasoningEffort);
+    const cs = liveState?.conversationState;
+    if (!cs) return;
+    const lm = cs.latestCollaborationMode;
+    if (lm?.mode) setSelectedModeKey(lm.mode);
+    setSelectedModelId(lm?.settings.model ?? cs.latestModel ?? "");
+    setSelectedReasoningEffort(lm?.settings.reasoning_effort ?? cs.latestReasoningEffort ?? "");
   }, [liveState]);
 
-  const submitMessage = useCallback(async () => {
-    if (!selectedThreadId || !messageDraft.trim()) {
-      return;
+  // Auto-scroll to bottom
+  useEffect(() => {
+    if (scrollRef.current && activeTab === "chat") {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
+  }, [turns.length, activeTab]);
 
+  // Auto-resize textarea
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
+    }
+  }, [messageDraft]);
+
+  /* Actions */
+  const submitMessage = useCallback(async () => {
+    if (!selectedThreadId || !messageDraft.trim()) return;
     setIsBusy(true);
     try {
       setError("");
-      const ownerOptions = liveState?.ownerClientId ? { ownerClientId: liveState.ownerClientId } : {};
-      await sendMessage({
-        threadId: selectedThreadId,
-        ...ownerOptions,
-        text: messageDraft
-      });
+      const ownerOpts = liveState?.ownerClientId ? { ownerClientId: liveState.ownerClientId } : {};
+      await sendMessage({ threadId: selectedThreadId, ...ownerOpts, text: messageDraft });
       setMessageDraft("");
       await refreshAll();
-    } catch (nextError) {
-      setError(toErrorMessage(nextError));
+    } catch (e) {
+      setError(toErrorMessage(e));
     } finally {
       setIsBusy(false);
     }
   }, [liveState?.ownerClientId, messageDraft, refreshAll, selectedThreadId]);
 
   const applyMode = useCallback(async () => {
-    if (!selectedThreadId || !selectedMode) {
-      return;
-    }
-
+    if (!selectedThreadId || !selectedMode) return;
     setIsBusy(true);
     try {
       setError("");
-      const ownerOptions = liveState?.ownerClientId ? { ownerClientId: liveState.ownerClientId } : {};
+      const ownerOpts = liveState?.ownerClientId ? { ownerClientId: liveState.ownerClientId } : {};
       await setCollaborationMode({
         threadId: selectedThreadId,
-        ...ownerOptions,
+        ...ownerOpts,
         collaborationMode: {
           mode: selectedMode.mode,
           settings: {
             model: selectedModelId || null,
             reasoning_effort: selectedReasoningEffort || null,
-            developer_instructions: selectedMode.developer_instructions
+            developer_instructions: selectedMode.developer_instructions ?? null
           }
         }
       });
       await refreshAll();
-    } catch (nextError) {
-      setError(toErrorMessage(nextError));
+    } catch (e) {
+      setError(toErrorMessage(e));
     } finally {
       setIsBusy(false);
     }
-  }, [
-    liveState?.ownerClientId,
-    refreshAll,
-    selectedMode,
-    selectedModelId,
-    selectedReasoningEffort,
-    selectedThreadId
-  ]);
+  }, [liveState?.ownerClientId, refreshAll, selectedMode, selectedModelId, selectedReasoningEffort, selectedThreadId]);
 
   const submitPendingRequest = useCallback(async () => {
-    if (!selectedThreadId || !activeRequest) {
-      return;
-    }
-
+    if (!selectedThreadId || !activeRequest) return;
     const answers: Record<string, { answers: string[] }> = {};
-
-    for (const question of activeRequest.params.questions) {
-      const current = answerDraft[question.id] ?? { option: "", freeform: "" };
-      const text = current.option || current.freeform.trim();
-      if (text) {
-        answers[question.id] = { answers: [text] };
-      }
+    for (const q of activeRequest.params.questions) {
+      const cur = answerDraft[q.id] ?? { option: "", freeform: "" };
+      const text = cur.option || cur.freeform.trim();
+      if (text) answers[q.id] = { answers: [text] };
     }
-
     setIsBusy(true);
     try {
       setError("");
-      const ownerOptions = liveState?.ownerClientId ? { ownerClientId: liveState.ownerClientId } : {};
+      const ownerOpts = liveState?.ownerClientId ? { ownerClientId: liveState.ownerClientId } : {};
       await submitUserInput({
         threadId: selectedThreadId,
-        ...ownerOptions,
+        ...ownerOpts,
         requestId: activeRequest.id,
-        response: {
-          answers
-        }
+        response: { answers }
       });
       await refreshAll();
-    } catch (nextError) {
-      setError(toErrorMessage(nextError));
+    } catch (e) {
+      setError(toErrorMessage(e));
     } finally {
       setIsBusy(false);
     }
   }, [activeRequest, answerDraft, liveState?.ownerClientId, refreshAll, selectedThreadId]);
 
   const skipPendingRequest = useCallback(async () => {
-    if (!selectedThreadId || !activeRequest) {
-      return;
-    }
-
+    if (!selectedThreadId || !activeRequest) return;
     setIsBusy(true);
     try {
       setError("");
-      const ownerOptions = liveState?.ownerClientId ? { ownerClientId: liveState.ownerClientId } : {};
+      const ownerOpts = liveState?.ownerClientId ? { ownerClientId: liveState.ownerClientId } : {};
       await submitUserInput({
         threadId: selectedThreadId,
-        ...ownerOptions,
+        ...ownerOpts,
         requestId: activeRequest.id,
-        response: {
-          answers: {}
-        }
+        response: { answers: {} }
       });
       await refreshAll();
-    } catch (nextError) {
-      setError(toErrorMessage(nextError));
+    } catch (e) {
+      setError(toErrorMessage(e));
     } finally {
       setIsBusy(false);
     }
   }, [activeRequest, liveState?.ownerClientId, refreshAll, selectedThreadId]);
 
   const runInterrupt = useCallback(async () => {
-    if (!selectedThreadId) {
-      return;
-    }
-
+    if (!selectedThreadId) return;
     setIsBusy(true);
     try {
       setError("");
-      const ownerOptions = liveState?.ownerClientId ? { ownerClientId: liveState.ownerClientId } : {};
-      await interruptThread({
-        threadId: selectedThreadId,
-        ...ownerOptions
-      });
+      const ownerOpts = liveState?.ownerClientId ? { ownerClientId: liveState.ownerClientId } : {};
+      await interruptThread({ threadId: selectedThreadId, ...ownerOpts });
       await refreshAll();
-    } catch (nextError) {
-      setError(toErrorMessage(nextError));
+    } catch (e) {
+      setError(toErrorMessage(e));
     } finally {
       setIsBusy(false);
     }
   }, [liveState?.ownerClientId, refreshAll, selectedThreadId]);
 
-  const loadHistoryDetail = useCallback(async (entryId: string) => {
-    if (!entryId) {
-      setHistoryDetail(null);
-      return;
-    }
-
-    const detail = await getHistoryEntry(entryId);
+  const loadHistoryDetail = useCallback(async (id: string) => {
+    if (!id) { setHistoryDetail(null); return; }
+    const detail = await getHistoryEntry(id);
     setHistoryDetail(detail);
   }, []);
 
   useEffect(() => {
-    void loadHistoryDetail(selectedHistoryId).catch((nextError) => {
-      setError(toErrorMessage(nextError));
-    });
+    void loadHistoryDetail(selectedHistoryId).catch((e) => setError(toErrorMessage(e)));
   }, [loadHistoryDetail, selectedHistoryId]);
 
+  const handleAnswerChange = useCallback(
+    (questionId: string, field: "option" | "freeform", value: string) => {
+      setAnswerDraft((prev) => ({
+        ...prev,
+        [questionId]: { ...(prev[questionId] ?? { option: "", freeform: "" }), [field]: value }
+      }));
+    },
+    []
+  );
+
+  /* ── Render ─────────────────────────────────────────────── */
   return (
-    <div className="h-screen p-4">
-      <div className="mx-auto flex h-full max-w-[1500px] gap-4">
-        <Card className="w-[320px] shrink-0 overflow-hidden">
-          <CardHeader>
-            <CardTitle>Threads</CardTitle>
-            <CardDescription>{threads.length} total</CardDescription>
-          </CardHeader>
-          <CardContent className="flex h-[calc(100%-80px)] flex-col gap-3">
-            <Button variant="outline" size="sm" onClick={() => void refreshAll()} disabled={isBusy}>
-              <RefreshCcw className="mr-2 h-3.5 w-3.5" />
-              Refresh
-            </Button>
-            <ScrollArea className="h-full rounded-md border border-border bg-background/70">
-              <div className="space-y-1 p-2">
-                {threads.map((thread) => (
-                  <button
-                    key={thread.id}
-                    type="button"
-                    onClick={() => setSelectedThreadId(thread.id)}
-                    className={`w-full rounded-md border px-3 py-2 text-left text-sm transition ${
-                      selectedThreadId === thread.id
-                        ? "border-primary/30 bg-primary/10"
-                        : "border-transparent hover:border-border hover:bg-muted"
-                    }`}
-                  >
-                    <div className="font-medium">{threadLabel(thread)}</div>
-                    <div className="mt-1 text-xs text-muted-foreground">{formatDate(thread.updatedAt)}</div>
-                  </button>
-                ))}
-              </div>
-            </ScrollArea>
-          </CardContent>
-        </Card>
+    <div className="h-screen flex overflow-hidden bg-background text-foreground font-sans">
 
-        <div className="flex min-w-0 flex-1 flex-col gap-4">
-          <Card>
-            <CardContent className="flex flex-wrap items-center justify-between gap-2 p-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant={health?.state.appReady ? "success" : "danger"}>
-                  app {health?.state.appReady ? "ready" : "down"}
-                </Badge>
-                <Badge variant={health?.state.ipcConnected ? "success" : "danger"}>
-                  ipc {health?.state.ipcConnected ? "connected" : "down"}
-                </Badge>
-                <Badge variant={health?.state.ipcInitialized ? "success" : "danger"}>
-                  init {health?.state.ipcInitialized ? "ok" : "no"}
-                </Badge>
-                {liveState?.ownerClientId ? <Badge>owner {liveState.ownerClientId.slice(0, 8)}</Badge> : null}
-              </div>
+      {/* Mobile sidebar backdrop */}
+      <AnimatePresence>
+        {sidebarOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            className="md:hidden fixed inset-0 bg-black/50 z-40"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
+      </AnimatePresence>
 
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={runInterrupt} disabled={!selectedThreadId || isBusy}>
-                  <CirclePause className="mr-2 h-3.5 w-3.5" />
-                  Interrupt
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          {error ? (
-            <Card className="border-rose-300 bg-rose-50">
-              <CardContent className="p-3 text-sm text-rose-700">{error}</CardContent>
-            </Card>
-          ) : null}
-
-          <Card className="min-h-0 flex-1 overflow-hidden">
-            <CardHeader className="border-b border-border pb-3">
-              <CardTitle>{selectedThreadId ?? "No thread selected"}</CardTitle>
-              <CardDescription>
-                {liveState?.conversationState
-                  ? `${liveState.conversationState.turns.length} turns`
-                  : "Select a thread"}
-              </CardDescription>
-            </CardHeader>
-
-            <CardContent className="h-[calc(100%-82px)] min-h-0 p-4">
-              <Tabs defaultValue="chat" className="flex h-full min-h-0 flex-col">
-                <TabsList>
-                  <TabsTrigger value="chat">
-                    <MessageSquare className="mr-2 h-4 w-4" />
-                    Chat
-                  </TabsTrigger>
-                  <TabsTrigger value="debug">
-                    <Bug className="mr-2 h-4 w-4" />
-                    Debug
-                  </TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="chat" className="min-h-0 flex-1">
-                  <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto_auto] gap-3">
-                    <ScrollArea className="rounded-md border border-border bg-background/80">
-                      <div className="space-y-3 p-3">
-                        {(liveState?.conversationState?.turns ?? []).map((turn, turnIndex) => (
-                          <div key={`${turn.turnId ?? "turn"}-${turnIndex}`} className="space-y-2">
-                            <div className="text-xs text-muted-foreground">
-                              Turn {turnIndex + 1} • {turn.status}
-                            </div>
-                            {turn.items.map((item, itemIndex) => (
-                              <div key={item.id ?? `${turnIndex}-${itemIndex}`} className="rounded-md border border-border bg-card p-3">
-                                <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">
-                                  {getItemRole(item)}
-                                </div>
-                                <pre className="font-mono text-[12px] leading-5">{getItemText(item)}</pre>
-                              </div>
-                            ))}
-                          </div>
-                        ))}
-                      </div>
-                    </ScrollArea>
-
-                    <Card className="border border-border bg-background/80">
-                      <CardContent className="grid gap-2 p-3">
-                        <Textarea
-                          value={messageDraft}
-                          onChange={(event) => setMessageDraft(event.target.value)}
-                          placeholder="Send a message to this thread"
-                        />
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-muted-foreground">
-                            owner: {liveState?.ownerClientId ?? "unknown"}
-                          </span>
-                          <Button onClick={() => void submitMessage()} disabled={!selectedThreadId || isBusy}>
-                            {isBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-                            Send
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
-
-                    <Card className="border border-border bg-background/80">
-                      <CardHeader className="pb-2">
-                        <CardTitle>Plan Mode</CardTitle>
-                        <CardDescription>
-                          {pendingRequests.length} pending request set{pendingRequests.length === 1 ? "" : "s"}
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent className="space-y-3">
-                        <div className="flex flex-wrap items-end gap-2">
-                          <div className="min-w-[220px] flex-1">
-                            <div className="mb-1 text-xs text-muted-foreground">Mode</div>
-                            <select
-                              className="h-9 w-full rounded-md border border-border bg-card px-3 text-sm"
-                              value={selectedModeKey}
-                              onChange={(event) => setSelectedModeKey(event.target.value)}
-                            >
-                              {modes.map((mode) => (
-                                <option key={mode.mode} value={mode.mode}>
-                                  {mode.name}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                          <div className="min-w-[220px] flex-1">
-                            <div className="mb-1 text-xs text-muted-foreground">Model</div>
-                            <select
-                              className="h-9 w-full rounded-md border border-border bg-card px-3 text-sm"
-                              value={selectedModelId}
-                              onChange={(event) => setSelectedModelId(event.target.value)}
-                            >
-                              <option value="">Use app default</option>
-                              {modelOptions.map((model) => (
-                                <option key={model.id} value={model.id}>
-                                  {model.label}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                          <div className="min-w-[180px] flex-1">
-                            <div className="mb-1 text-xs text-muted-foreground">Reasoning effort</div>
-                            <select
-                              className="h-9 w-full rounded-md border border-border bg-card px-3 text-sm"
-                              value={selectedReasoningEffort}
-                              onChange={(event) => setSelectedReasoningEffort(event.target.value)}
-                            >
-                              <option value="">Use app default</option>
-                              {effortOptions.map((effort) => (
-                                <option key={effort} value={effort}>
-                                  {effort}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                          <Button variant="outline" onClick={() => void applyMode()} disabled={!selectedThreadId || isBusy || !selectedMode}>
-                            Apply mode
-                          </Button>
-                        </div>
-
-                        {!activeRequest ? (
-                          <div className="text-sm text-muted-foreground">No pending user input requests.</div>
-                        ) : (
-                          <div className="space-y-3">
-                            {pendingRequests.length > 1 ? (
-                              <select
-                                className="h-9 w-full rounded-md border border-border bg-card px-3 text-sm"
-                                value={String(activeRequest.id)}
-                                onChange={(event) => setSelectedRequestId(Number(event.target.value))}
-                              >
-                                {pendingRequests.map((request) => (
-                                  <option key={request.id} value={request.id}>
-                                    Request {request.id}
-                                  </option>
-                                ))}
-                              </select>
-                            ) : null}
-
-                            {activeRequest.params.questions.map((question) => {
-                              const current = answerDraft[question.id] ?? { option: "", freeform: "" };
-
-                              return (
-                                <div key={question.id} className="rounded-md border border-border bg-card p-3">
-                                  <div className="text-xs uppercase text-muted-foreground">{question.header}</div>
-                                  <div className="mt-1 text-sm font-medium">{question.question}</div>
-                                  <div className="mt-2 space-y-1">
-                                    {question.options.map((option) => (
-                                      <label key={`${question.id}-${option.label}`} className="flex items-start gap-2 text-sm">
-                                        <input
-                                          type="radio"
-                                          name={`q-${question.id}`}
-                                          checked={current.option === option.label}
-                                          onChange={() =>
-                                            setAnswerDraft((previous) => {
-                                              const prior = previous[question.id] ?? {
-                                                option: "",
-                                                freeform: ""
-                                              };
-                                              return {
-                                                ...previous,
-                                                [question.id]: {
-                                                  ...prior,
-                                                  option: option.label
-                                                }
-                                              };
-                                            })
-                                          }
-                                        />
-                                        <span>
-                                          <span className="font-medium">{option.label}</span>
-                                          <span className="block text-xs text-muted-foreground">{option.description}</span>
-                                        </span>
-                                      </label>
-                                    ))}
-                                  </div>
-                                  {question.isOther ? (
-                                    <Input
-                                      className="mt-2"
-                                      placeholder="Optional free-form answer"
-                                      value={current.freeform}
-                                      onChange={(event) =>
-                                        setAnswerDraft((previous) => {
-                                          const prior = previous[question.id] ?? {
-                                            option: "",
-                                            freeform: ""
-                                          };
-                                          return {
-                                            ...previous,
-                                            [question.id]: {
-                                              ...prior,
-                                              freeform: event.target.value
-                                            }
-                                          };
-                                        })
-                                      }
-                                    />
-                                  ) : null}
-                                </div>
-                              );
-                            })}
-
-                            <div className="flex gap-2">
-                              <Button variant="outline" onClick={() => void skipPendingRequest()} disabled={isBusy}>
-                                Skip
-                              </Button>
-                              <Button onClick={() => void submitPendingRequest()} disabled={isBusy}>
-                                Submit answer
-                              </Button>
-                            </div>
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  </div>
-                </TabsContent>
-
-                <TabsContent value="debug" className="min-h-0 flex-1">
-                  <div className="grid h-full min-h-0 grid-cols-[minmax(0,1fr)_360px] gap-3">
-                    <Card className="min-h-0 overflow-hidden border border-border bg-background/80">
-                      <CardHeader className="pb-2">
-                        <CardTitle className="flex items-center gap-2">
-                          <Activity className="h-4 w-4" />
-                          History + Replay
-                        </CardTitle>
-                        <CardDescription>{history.length} entries</CardDescription>
-                      </CardHeader>
-                      <CardContent className="grid h-[calc(100%-76px)] min-h-0 grid-cols-[280px_minmax(0,1fr)] gap-3">
-                        <ScrollArea className="rounded-md border border-border">
-                          <div className="space-y-1 p-2">
-                            {history
-                              .slice()
-                              .reverse()
-                              .map((entry) => (
-                                <button
-                                  key={entry.id}
-                                  type="button"
-                                  onClick={() => setSelectedHistoryId(entry.id)}
-                                  className={`w-full rounded-md border px-2 py-2 text-left text-xs ${
-                                    selectedHistoryId === entry.id
-                                      ? "border-primary/30 bg-primary/10"
-                                      : "border-transparent hover:border-border hover:bg-muted"
-                                  }`}
-                                >
-                                  <div className="font-medium">{entry.source} {entry.direction}</div>
-                                  <div className="mt-1 text-muted-foreground">{entry.at}</div>
-                                </button>
-                              ))}
-                          </div>
-                        </ScrollArea>
-
-                        <div className="space-y-2">
-                          {!historyDetail ? (
-                            <div className="text-sm text-muted-foreground">Select a history entry.</div>
-                          ) : (
-                            <>
-                              <div className="flex flex-wrap items-center gap-2">
-                                <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                                  <input
-                                    type="checkbox"
-                                    checked={waitForReplayResponse}
-                                    onChange={(event) => setWaitForReplayResponse(event.target.checked)}
-                                  />
-                                  wait for response
-                                </label>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() =>
-                                    void replayHistoryEntry({
-                                      entryId: historyDetail.entry.id,
-                                      waitForResponse: waitForReplayResponse
-                                    }).then(refreshAll)
-                                  }
-                                >
-                                  Replay
-                                </Button>
-                              </div>
-                              <ScrollArea className="h-[460px] rounded-md border border-border bg-muted/40 p-2">
-                                <pre className="font-mono text-[11px] leading-5">{JSON.stringify(historyDetail.fullPayload, null, 2)}</pre>
-                              </ScrollArea>
-                            </>
-                          )}
-                        </div>
-                      </CardContent>
-                    </Card>
-
-                    <div className="space-y-3">
-                      <Card className="border border-border bg-background/80">
-                        <CardHeader className="pb-2">
-                          <CardTitle>Tracing</CardTitle>
-                          <CardDescription>
-                            {traceStatus?.active ? `active: ${traceStatus.active.id}` : "inactive"}
-                          </CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-2">
-                          <Input value={traceLabel} onChange={(event) => setTraceLabel(event.target.value)} placeholder="trace label" />
-                          <Input value={traceNote} onChange={(event) => setTraceNote(event.target.value)} placeholder="marker note" />
-                          <div className="flex flex-wrap gap-2">
-                            <Button variant="outline" size="sm" onClick={() => void startTrace(traceLabel).then(refreshAll)}>
-                              Start
-                            </Button>
-                            <Button variant="outline" size="sm" onClick={() => void markTrace(traceNote).then(refreshAll)}>
-                              Mark
-                            </Button>
-                            <Button variant="outline" size="sm" onClick={() => void stopTrace().then(refreshAll)}>
-                              Stop
-                            </Button>
-                          </div>
-                        </CardContent>
-                      </Card>
-
-                      <Card className="border border-border bg-background/80">
-                        <CardHeader className="pb-2">
-                          <CardTitle>Stream Events</CardTitle>
-                          <CardDescription>{streamEvents.length} recent</CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                          <ScrollArea className="h-[320px] rounded-md border border-border">
-                            <div className="space-y-2 p-2 text-xs">
-                              {streamEvents
-                                .slice()
-                                .reverse()
-                                .map((event, index) => (
-                                  <div key={index} className="rounded border border-border p-2">
-                                    <pre className="font-mono text-[11px] leading-5">{JSON.stringify(event, null, 2)}</pre>
-                                  </div>
-                                ))}
-                            </div>
-                          </ScrollArea>
-                        </CardContent>
-                      </Card>
-                    </div>
-                  </div>
-                </TabsContent>
-              </Tabs>
-            </CardContent>
-          </Card>
+      {/* ── Sidebar ─────────────────────────────────────────── */}
+      <aside
+        className={`fixed md:relative z-50 flex flex-col w-64 h-full border-r border-sidebar-border bg-sidebar shrink-0 transition-transform duration-200 ease-in-out md:translate-x-0 ${
+          sidebarOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
+        {/* Sidebar header */}
+        <div className="flex items-center justify-between px-4 h-14 border-b border-sidebar-border shrink-0">
+          <div className="flex items-center gap-2">
+            <div className="w-5 h-5 rounded-md bg-foreground/90 shrink-0" />
+            <span className="text-sm font-semibold">Codex Monitor</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSidebarOpen(false)}
+            className="md:hidden p-1 rounded text-muted-foreground hover:text-foreground"
+          >
+            <X size={14} />
+          </button>
         </div>
+
+        {/* Thread list */}
+        <div className="flex-1 overflow-y-auto py-1">
+          {threads.length === 0 && (
+            <div className="px-4 py-6 text-xs text-muted-foreground text-center">No threads</div>
+          )}
+          {threads.map((thread) => {
+            const isSelected = thread.id === selectedThreadId;
+            return (
+              <button
+                key={thread.id}
+                type="button"
+                onClick={() => {
+                  setSelectedThreadId(thread.id);
+                  setSidebarOpen(false);
+                }}
+                className={`w-full flex flex-col px-3 py-2.5 text-left transition-colors ${
+                  isSelected
+                    ? "bg-muted text-foreground"
+                    : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                }`}
+              >
+                <span className="text-xs truncate leading-5">{threadLabel(thread)}</span>
+                {thread.updatedAt && (
+                  <span className="text-[10px] text-muted-foreground/50 mt-0.5">
+                    {formatDate(thread.updatedAt)}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Sidebar footer — status */}
+        <div className="p-4 border-t border-sidebar-border space-y-2 shrink-0">
+          <StatusDot ok={health?.state.appReady} label="App" />
+          <StatusDot ok={health?.state.ipcConnected} label="IPC" />
+          <StatusDot ok={health?.state.ipcInitialized} label="Init" />
+          {liveState?.ownerClientId && (
+            <div className="text-[10px] text-muted-foreground/50 font-mono pt-1">
+              {liveState.ownerClientId.slice(0, 8)}
+            </div>
+          )}
+        </div>
+      </aside>
+
+      {/* ── Main area ───────────────────────────────────────── */}
+      <div className="flex-1 flex flex-col min-w-0">
+
+        {/* Header */}
+        <header className="flex items-center justify-between px-3 h-14 border-b border-border shrink-0 gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <IconBtn onClick={() => setSidebarOpen(true)} title="Threads">
+              <Menu size={15} />
+            </IconBtn>
+            <div className="min-w-0">
+              <div className="text-sm font-medium truncate leading-5">
+                {selectedThread ? threadLabel(selectedThread) : "No thread selected"}
+              </div>
+              {isGenerating && (
+                <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <Loader2 size={9} className="animate-spin" />
+                  <span>generating</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-0.5 shrink-0">
+            <IconBtn
+              onClick={() => void refreshAll()}
+              disabled={isBusy}
+              title="Refresh"
+            >
+              <RefreshCcw size={14} className={isBusy ? "animate-spin" : ""} />
+            </IconBtn>
+            <IconBtn
+              onClick={() => void runInterrupt()}
+              disabled={!selectedThreadId || isBusy}
+              title="Interrupt"
+            >
+              <CirclePause size={14} />
+            </IconBtn>
+            <IconBtn
+              onClick={() => setActiveTab(activeTab === "debug" ? "chat" : "debug")}
+              active={activeTab === "debug"}
+              title="Debug"
+            >
+              <Bug size={14} />
+            </IconBtn>
+            <IconBtn onClick={toggleTheme} title="Toggle theme">
+              {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
+            </IconBtn>
+          </div>
+        </header>
+
+        {/* Error bar */}
+        <AnimatePresence>
+          {error && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="overflow-hidden shrink-0"
+            >
+              <div className="flex items-center justify-between px-4 py-2 bg-destructive/10 border-b border-destructive/20 text-sm text-destructive">
+                <span className="truncate">{error}</span>
+                <button
+                  type="button"
+                  onClick={() => setError("")}
+                  className="ml-3 shrink-0 opacity-60 hover:opacity-100"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* ── Chat tab ──────────────────────────────────────── */}
+        {activeTab === "chat" && (
+          <div className="flex-1 flex flex-col min-h-0">
+
+            {/* Conversation */}
+            <div ref={scrollRef} className="flex-1 overflow-y-auto">
+              <div className="max-w-3xl mx-auto px-4 py-8">
+                {turns.length === 0 ? (
+                  <div className="text-center py-20 text-sm text-muted-foreground">
+                    {selectedThreadId ? "No messages yet" : "Select a thread from the sidebar"}
+                  </div>
+                ) : (
+                  <div className="space-y-8">
+                    {turns.map((turn, ti) => {
+                      const isLastTurn = ti === turns.length - 1;
+                      const turnInProgress = isLastTurn && isGenerating;
+                      const items = turn.items ?? [];
+                      return (
+                        <div key={turn.turnId ?? ti} className="space-y-3">
+                          {items.map((item, ii) => (
+                            <ConversationItem
+                              key={item.id ?? `${ti}-${ii}`}
+                              item={item}
+                              isLast={ii === items.length - 1}
+                              turnIsInProgress={turnInProgress}
+                            />
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Input area */}
+            <div className="border-t border-border px-4 py-4 shrink-0">
+              <div className="max-w-3xl mx-auto space-y-2">
+
+                {/* Pending user input */}
+                <AnimatePresence>
+                  {activeRequest && (
+                    <PendingRequestCard
+                      request={activeRequest}
+                      answerDraft={answerDraft}
+                      onDraftChange={handleAnswerChange}
+                      onSubmit={() => void submitPendingRequest()}
+                      onSkip={() => void skipPendingRequest()}
+                      isBusy={isBusy}
+                    />
+                  )}
+                </AnimatePresence>
+
+                {/* Plan panel */}
+                <AnimatePresence>
+                  {planOpen && (
+                    <PlanPanel
+                      modes={modes}
+                      modelOptions={modelOptions}
+                      effortOptions={effortOptions}
+                      selectedModeKey={selectedModeKey}
+                      selectedModelId={selectedModelId}
+                      selectedReasoningEffort={selectedReasoningEffort}
+                      onModeChange={setSelectedModeKey}
+                      onModelChange={setSelectedModelId}
+                      onEffortChange={setSelectedReasoningEffort}
+                      onApply={() => void applyMode()}
+                      isBusy={isBusy}
+                      hasThread={!!selectedThreadId}
+                      hasMode={!!selectedMode}
+                    />
+                  )}
+                </AnimatePresence>
+
+                {/* Composer */}
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-end gap-2 rounded-2xl border border-border bg-card px-4 py-3 focus-within:border-muted-foreground/40 transition-colors">
+                    <textarea
+                      ref={textareaRef}
+                      value={messageDraft}
+                      onChange={(e) => setMessageDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                          e.preventDefault();
+                          void submitMessage();
+                        }
+                      }}
+                      placeholder="Message Codex…"
+                      rows={1}
+                      className="flex-1 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none min-h-[22px] max-h-[200px] leading-6"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void submitMessage()}
+                      disabled={!selectedThreadId || isBusy || !messageDraft.trim()}
+                      className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg bg-foreground text-background disabled:opacity-30 hover:opacity-80 transition-opacity"
+                    >
+                      {isBusy ? (
+                        <Loader2 size={13} className="animate-spin" />
+                      ) : (
+                        <ArrowUp size={13} />
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Toolbar */}
+                  <div className="flex items-center gap-2 px-1">
+                    <button
+                      type="button"
+                      onClick={() => setPlanOpen((v) => !v)}
+                      className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full transition-colors ${
+                        planOpen
+                          ? "bg-muted text-foreground"
+                          : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
+                      }`}
+                    >
+                      <Settings2 size={11} />
+                      Plan mode
+                    </button>
+                    {pendingRequests.length > 0 && (
+                      <span className="text-xs text-amber-500 dark:text-amber-400">
+                        {pendingRequests.length} pending
+                      </span>
+                    )}
+                    <span className="ml-auto text-[11px] text-muted-foreground/40 select-none">
+                      ⌘↵ send
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Debug tab ─────────────────────────────────────── */}
+        {activeTab === "debug" && (
+          <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+            <div className="flex-1 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_300px] min-h-0 divide-y md:divide-y-0 md:divide-x divide-border overflow-hidden">
+
+              {/* Left: History */}
+              <div className="flex flex-col min-h-0 overflow-hidden">
+                <div className="flex items-center gap-2 px-4 py-3 border-b border-border shrink-0">
+                  <Activity size={13} className="text-muted-foreground" />
+                  <span className="text-sm font-medium">History</span>
+                  <span className="text-xs text-muted-foreground/60">{history.length} entries</span>
+                </div>
+
+                <div className="flex-1 grid grid-cols-[200px_minmax(0,1fr)] min-h-0 divide-x divide-border overflow-hidden">
+                  {/* Entry list */}
+                  <div className="overflow-y-auto py-1">
+                    {history
+                      .slice()
+                      .reverse()
+                      .map((entry) => (
+                        <button
+                          key={entry.id}
+                          type="button"
+                          onClick={() => setSelectedHistoryId(entry.id)}
+                          className={`w-full text-left px-3 py-2 transition-colors ${
+                            selectedHistoryId === entry.id
+                              ? "bg-muted text-foreground"
+                              : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5 mb-0.5">
+                            <span
+                              className={`text-[9px] px-1.5 py-0.5 rounded font-mono uppercase leading-4 ${
+                                entry.direction === "in"
+                                  ? "bg-success/15 text-success"
+                                  : entry.direction === "out"
+                                  ? "bg-blue-500/15 text-blue-400"
+                                  : "bg-muted text-muted-foreground"
+                              }`}
+                            >
+                              {entry.source} {entry.direction}
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-muted-foreground/50 font-mono truncate">
+                            {entry.at}
+                          </div>
+                        </button>
+                      ))}
+                  </div>
+
+                  {/* Payload detail */}
+                  <div className="overflow-y-auto p-3 space-y-3">
+                    {!historyDetail ? (
+                      <div className="text-xs text-muted-foreground py-4">Select an entry</div>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-2">
+                          <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+                            <input
+                              type="checkbox"
+                              className="accent-foreground"
+                              checked={waitForReplayResponse}
+                              onChange={(e) => setWaitForReplayResponse(e.target.checked)}
+                            />
+                            wait for response
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void replayHistoryEntry({
+                                entryId: historyDetail.entry.id,
+                                waitForResponse: waitForReplayResponse
+                              }).then(refreshAll)
+                            }
+                            className="h-7 px-3 text-xs rounded-lg border border-border hover:bg-muted transition-colors"
+                          >
+                            Replay
+                          </button>
+                        </div>
+                        <pre className="font-mono text-[11px] text-muted-foreground leading-5 whitespace-pre-wrap break-words">
+                          {JSON.stringify(historyDetail.fullPayload, null, 2)}
+                        </pre>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Right: Trace + Stream Events */}
+              <div className="flex flex-col min-h-0 overflow-hidden divide-y divide-border">
+
+                {/* Trace controls */}
+                <div className="p-4 space-y-3 shrink-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">Trace</span>
+                    <span
+                      className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                        traceStatus?.active
+                          ? "bg-success/15 text-success"
+                          : "bg-muted text-muted-foreground"
+                      }`}
+                    >
+                      {traceStatus?.active ? "recording" : "idle"}
+                    </span>
+                  </div>
+                  <input
+                    value={traceLabel}
+                    onChange={(e) => setTraceLabel(e.target.value)}
+                    placeholder="label"
+                    className="h-7 w-full px-2.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                  <input
+                    value={traceNote}
+                    onChange={(e) => setTraceNote(e.target.value)}
+                    placeholder="marker note"
+                    className="h-7 w-full px-2.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                  <div className="flex gap-1.5">
+                    {(["Start", "Mark", "Stop"] as const).map((btn) => (
+                      <button
+                        key={btn}
+                        type="button"
+                        onClick={() => {
+                          const action =
+                            btn === "Start"
+                              ? startTrace(traceLabel)
+                              : btn === "Mark"
+                              ? markTrace(traceNote)
+                              : stopTrace();
+                          void action.then(refreshAll);
+                        }}
+                        className="h-7 px-3 text-xs rounded-lg border border-border hover:bg-muted transition-colors"
+                      >
+                        {btn}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Stream events */}
+                <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+                  <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border shrink-0">
+                    <span className="text-xs font-medium">Stream Events</span>
+                    <span className="text-xs text-muted-foreground/60">{streamEvents.length}</span>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
+                    {streamEvents
+                      .slice()
+                      .reverse()
+                      .map((evt, i) => (
+                        <StreamEventCard key={i} event={evt} />
+                      ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

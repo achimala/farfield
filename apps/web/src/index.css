@@ -1,25 +1,111 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
-:root {
-  color: theme("colors.foreground");
-  background: theme("colors.background");
+/* Class-based dark mode variant */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* Typography */
+  --font-sans: "Geist", "SF Pro Text", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono: "Geist Mono", "IBM Plex Mono", "SF Mono", "Fira Code", monospace;
+
+  /* Border radius */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --radius-2xl: 1.25rem;
+
+  /* Light mode defaults — overridden in .dark below */
+  --color-background: #ffffff;
+  --color-foreground: #0a0a0a;
+  --color-card: #f9f9f9;
+  --color-card-foreground: #0a0a0a;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #0a0a0a;
+  --color-primary: #171717;
+  --color-primary-foreground: #fafafa;
+  --color-secondary: #f5f5f5;
+  --color-secondary-foreground: #171717;
+  --color-muted: #f5f5f5;
+  --color-muted-foreground: #737373;
+  --color-accent: #f0f0f0;
+  --color-accent-foreground: #171717;
+  --color-destructive: #ef4444;
+  --color-destructive-foreground: #fafafa;
+  --color-success: #16a34a;
+  --color-danger: #dc2626;
+  --color-border: #e5e5e5;
+  --color-input: #e5e5e5;
+  --color-ring: #0a0a0a;
+  --color-sidebar: #f5f5f5;
+  --color-sidebar-border: #e5e5e5;
 }
+
+/* Dark mode overrides — these cascade over the @theme :root values */
+.dark {
+  --color-background: #212121;
+  --color-foreground: #ececec;
+  --color-card: #2a2a2a;
+  --color-card-foreground: #ececec;
+  --color-popover: #2a2a2a;
+  --color-popover-foreground: #ececec;
+  --color-primary: #ececec;
+  --color-primary-foreground: #171717;
+  --color-secondary: #3a3a3a;
+  --color-secondary-foreground: #ececec;
+  --color-muted: #2a2a2a;
+  --color-muted-foreground: #8c8c8c;
+  --color-accent: #3a3a3a;
+  --color-accent-foreground: #ececec;
+  --color-destructive: #f87171;
+  --color-destructive-foreground: #171717;
+  --color-success: #4ade80;
+  --color-danger: #f87171;
+  --color-border: #363636;
+  --color-input: #363636;
+  --color-ring: #ececec;
+  --color-sidebar: #171717;
+  --color-sidebar-border: #2d2d2d;
+}
+
+/* ── Reset ─────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
 
 body {
-  margin: 0;
-  min-height: 100vh;
-  background: radial-gradient(circle at top left, #f8fbff 0%, #f4f7fb 40%, #eef2f7 100%);
-  font-family: "Söhne", "Geist", "SF Pro Text", sans-serif;
+  font-family: var(--font-sans);
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-* {
-  box-sizing: border-box;
+pre, code { font-family: var(--font-mono); margin: 0; }
+pre { white-space: pre-wrap; word-break: break-word; }
+
+/* ── Scrollbar ──────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-muted-foreground); }
+
+/* ── Reasoning shimmer ──────────────────────────────────── */
+@keyframes reasoning-shimmer {
+  0%   { background-position: -300% center; }
+  100% { background-position:  300% center; }
 }
 
-pre {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
+.reasoning-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-muted-foreground) 0%,
+    var(--color-foreground) 35%,
+    var(--color-muted-foreground) 65%,
+    var(--color-foreground) 100%
+  );
+  background-size: 300% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: reasoning-shimmer 2.2s linear infinite;
 }

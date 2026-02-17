@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm install:*)",
+      "Bash(pnpm add:*)",
+      "Bash(pnpm --filter @codex-monitor/web typecheck:*)",
+      "Bash(pnpm --filter @codex-monitor/web build:*)"
+    ]
+  }
+}
