@@ -135,7 +135,8 @@ export const CommandActionSchema = z
     type: NonEmptyStringSchema,
     command: z.string().optional(),
     name: z.string().optional(),
-    path: z.string().optional()
+    path: z.union([z.string(), z.null()]).optional(),
+    query: z.string().optional()
   })
   .strict();
 
