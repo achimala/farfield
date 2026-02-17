@@ -27,6 +27,7 @@ import {
   getLiveState,
   getPendingUserInputRequests,
   getStreamEvents,
+  readThread,
   getTraceStatus,
   interruptThread,
   listCollaborationModes,
@@ -71,6 +72,7 @@ type ModesResponse = Awaited<ReturnType<typeof listCollaborationModes>>;
 type ModelsResponse = Awaited<ReturnType<typeof listModels>>;
 type LiveStateResponse = Awaited<ReturnType<typeof getLiveState>>;
 type StreamEventsResponse = Awaited<ReturnType<typeof getStreamEvents>>;
+type ReadThreadResponse = Awaited<ReturnType<typeof readThread>>;
 type TraceStatus = Awaited<ReturnType<typeof getTraceStatus>>;
 type HistoryResponse = Awaited<ReturnType<typeof listDebugHistory>>;
 type HistoryDetail = Awaited<ReturnType<typeof getHistoryEntry>>;
@@ -348,6 +350,7 @@ export function App(): React.JSX.Element {
   const [threads, setThreads] = useState<ThreadsResponse["data"]>([]);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(initialUiState.threadId);
   const [liveState, setLiveState] = useState<LiveStateResponse | null>(null);
+  const [readThreadState, setReadThreadState] = useState<ReadThreadResponse | null>(null);
   const [streamEvents, setStreamEvents] = useState<StreamEventsResponse["events"]>([]);
   const [modes, setModes] = useState<ModesResponse["data"]>([]);
   const [models, setModels] = useState<ModelsResponse["data"]>([]);
@@ -391,11 +394,12 @@ export function App(): React.JSX.Element {
     () => threads.find((t) => t.id === selectedThreadId) ?? null,
     [threads, selectedThreadId]
   );
+  const conversationState = readThreadState?.thread ?? null;
 
   const pendingRequests = useMemo(() => {
-    if (!liveState?.conversationState) return [] as PendingRequest[];
-    return getPendingUserInputRequests(liveState.conversationState);
-  }, [liveState]);
+    if (!conversationState) return [] as PendingRequest[];
+    return getPendingUserInputRequests(conversationState);
+  }, [conversationState]);
 
   const activeRequest = useMemo(() => {
     if (!pendingRequests.length) return null;
@@ -420,11 +424,11 @@ export function App(): React.JSX.Element {
   const effortOptions = useMemo(() => {
     const vals = new Set<string>(DEFAULT_EFFORT_OPTIONS);
     for (const m of modes) if (m.reasoning_effort) vals.add(m.reasoning_effort);
-    const le = liveState?.conversationState?.latestReasoningEffort;
+    const le = conversationState?.latestReasoningEffort;
     if (le) vals.add(le);
     if (selectedReasoningEffort) vals.add(selectedReasoningEffort);
     return Array.from(vals);
-  }, [liveState?.conversationState?.latestReasoningEffort, modes, selectedReasoningEffort]);
+  }, [conversationState?.latestReasoningEffort, modes, selectedReasoningEffort]);
 
   const modelOptions = useMemo(() => {
     const map = new Map<string, string>();
@@ -435,25 +439,25 @@ export function App(): React.JSX.Element {
           : m.displayName || m.id;
       map.set(m.id, label);
     }
-    const lm = liveState?.conversationState?.latestModel;
+    const lm = conversationState?.latestModel;
     if (lm && !map.has(lm)) map.set(lm, lm);
     if (selectedModelId && !map.has(selectedModelId)) map.set(selectedModelId, selectedModelId);
     return Array.from(map.entries()).map(([id, label]) => ({ id, label }));
-  }, [liveState?.conversationState?.latestModel, models, selectedModelId]);
+  }, [conversationState?.latestModel, models, selectedModelId]);
   const currentAppDefaultModelLabel = useMemo(() => {
-    const currentModelId = liveState?.conversationState?.latestModel;
+    const currentModelId = conversationState?.latestModel;
     if (!currentModelId) return "Model: app default";
     const matched = modelOptions.find((option) => option.id === currentModelId);
     const shown = matched?.label ?? currentModelId;
     return `Model: app default (${shown})`;
-  }, [liveState?.conversationState?.latestModel, modelOptions]);
+  }, [conversationState?.latestModel, modelOptions]);
   const currentAppDefaultEffortLabel = useMemo(() => {
-    const currentEffort = liveState?.conversationState?.latestReasoningEffort;
+    const currentEffort = conversationState?.latestReasoningEffort;
     if (!currentEffort) return "Effort: app default";
     return `Effort: app default (${currentEffort})`;
-  }, [liveState?.conversationState?.latestReasoningEffort]);
+  }, [conversationState?.latestReasoningEffort]);
 
-  const turns = liveState?.conversationState?.turns ?? [];
+  const turns = conversationState?.turns ?? [];
   const conversationItemCount = useMemo(
     () => turns.reduce((count, turn) => count + (turn.items?.length ?? 0), 0),
     [turns]
@@ -517,8 +521,13 @@ export function App(): React.JSX.Element {
   }, []);
 
   const loadSelectedThread = useCallback(async (threadId: string) => {
-    const [live, stream] = await Promise.all([getLiveState(threadId), getStreamEvents(threadId)]);
+    const [live, stream, read] = await Promise.all([
+      getLiveState(threadId),
+      getStreamEvents(threadId),
+      readThread(threadId)
+    ]);
     setLiveState(live);
+    setReadThreadState(read);
     setStreamEvents(stream.events);
   }, []);
 
@@ -579,6 +588,7 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     if (!selectedThreadId) {
       setLiveState(null);
+      setReadThreadState(null);
       setStreamEvents([]);
       return;
     }
@@ -618,7 +628,7 @@ export function App(): React.JSX.Element {
   }, [activeRequest]);
 
   useEffect(() => {
-    const cs = liveState?.conversationState;
+    const cs = conversationState;
     if (!cs) return;
     const lm = cs.latestCollaborationMode;
     const nextModeKey = lm?.mode ?? selectedModeKey;
@@ -629,7 +639,7 @@ export function App(): React.JSX.Element {
     setSelectedReasoningEffort(nextReasoningEffort);
     lastAppliedModeSignatureRef.current = `${nextModeKey}|${nextModelId}|${nextReasoningEffort}`;
     setHasHydratedModeFromLiveState(true);
-  }, [liveState, selectedModeKey]);
+  }, [conversationState, selectedModeKey]);
 
   useEffect(() => {
     lastAppliedModeSignatureRef.current = "";
@@ -698,12 +708,12 @@ export function App(): React.JSX.Element {
       setSuppressEntryAnimations(false);
       return;
     }
-    if (!liveState?.conversationState) return;
+    if (!conversationState) return;
     const timer = window.setTimeout(() => setSuppressEntryAnimations(false), 0);
     return () => {
       window.clearTimeout(timer);
     };
-  }, [liveState?.conversationState, selectedThreadId, suppressEntryAnimations]);
+  }, [conversationState, selectedThreadId, suppressEntryAnimations]);
 
   // Auto-resize textarea
   useEffect(() => {
