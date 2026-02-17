@@ -3,110 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Codex IPC Monitor</title>
-    <link rel="stylesheet" href="/style.css" />
+    <title>Codex Companion</title>
+    <link rel="stylesheet" href="/app.bundle.css" />
   </head>
   <body>
-    <main class="page">
-      <header class="top">
-        <h1>Codex IPC Monitor</h1>
-        <div id="status" class="status">Loading...</div>
-      </header>
-
-      <section class="card controls">
-        <div class="control-row">
-          <button id="reconnectBtn" type="button">Reconnect socket</button>
-          <button id="clearBtn" type="button">Clear screen log</button>
-        </div>
-        <p class="hint">
-          This tool is local only. It reads and writes messages to your running
-          Codex desktop socket.
-        </p>
-      </section>
-
-      <section class="grid">
-        <section class="card">
-          <h2>Send request</h2>
-          <form id="requestForm">
-            <label>
-              Method
-              <input id="requestMethod" value="thread-follower-start-turn" />
-            </label>
-
-            <label>
-              Target client id (optional)
-              <input
-                id="requestTargetClientId"
-                placeholder="e.g. 01f202bf-6036-40a6-8124-e20ee0fef3a6"
-              />
-            </label>
-
-            <label>
-              Version (optional integer)
-              <input id="requestVersion" type="number" min="0" />
-            </label>
-
-            <label>
-              Params (JSON object)
-              <textarea id="requestParams" rows="6">{}</textarea>
-            </label>
-
-            <button type="submit">Send request</button>
-          </form>
-        </section>
-
-        <section class="card">
-          <h2>Send broadcast</h2>
-          <form id="broadcastForm">
-            <label>
-              Method
-              <input id="broadcastMethod" value="thread-stream-state-changed" />
-            </label>
-
-            <label>
-              Version (optional integer)
-              <input id="broadcastVersion" type="number" min="0" />
-            </label>
-
-            <label>
-              Params (JSON object)
-              <textarea id="broadcastParams" rows="6">{}</textarea>
-            </label>
-
-            <button type="submit">Send broadcast</button>
-          </form>
-        </section>
-      </section>
-
-      <section class="card">
-        <h2>Socket details</h2>
-        <dl class="details">
-          <dt>Socket path</dt>
-          <dd id="socketPath">-</dd>
-
-          <dt>Transport connected</dt>
-          <dd id="transportConnected">-</dd>
-
-          <dt>Initialized</dt>
-          <dd id="initialized">-</dd>
-
-          <dt>Monitor client id</dt>
-          <dd id="clientId">-</dd>
-
-          <dt>Last error</dt>
-          <dd id="lastError">-</dd>
-        </dl>
-      </section>
-
-      <section class="card">
-        <h2>Live messages</h2>
-        <p class="hint">
-          You will see inbound, outbound, and system messages here.
-        </p>
-        <div id="log" class="log"></div>
-      </section>
-    </main>
-
-    <script src="/app.js"></script>
+    <div id="root"></div>
+    <script type="module" src="/app.bundle.js"></script>
   </body>
 </html>

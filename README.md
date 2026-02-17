@@ -1,10 +1,13 @@
-# Codex IPC Monitor
+# Codex Companion
 
-Local web app that:
+Local web app that gives you a higher-level view and control layer for Codex.
+The front end is now a bundled React app with lighter polling-based updates.
 
-- shows live messages from the running Codex desktop IPC socket
-- sends raw IPC requests
-- sends raw IPC broadcasts
+- lists threads
+- opens a thread and shows a readable timeline
+- sends messages to the selected thread
+- interrupts active turns
+- keeps raw desktop IPC controls in an advanced section
 
 ## Run
 
@@ -21,8 +24,10 @@ http://127.0.0.1:4311
 
 ## Notes
 
-- This tool talks to the local desktop socket:
-  - macOS: `$(python3 -c 'import os,tempfile; print(os.path.join(tempfile.gettempdir(),"codex-ipc"))')`
-- Most methods are private internal methods and may change.
-- If you send a method with no handler, you will usually get `no-client-found`.
-- The UI lets you set a custom message `version` if you need to match an internal method version.
+- Uses two local channels:
+1. `codex app-server` over stdio for thread and turn actions.
+2. Desktop IPC socket for advanced raw mode.
+- The default view uses polling to reduce browser CPU.
+- The raw live feed is optional and off by default.
+- Everything is local to your machine.
+- Internal methods can change between app versions.
