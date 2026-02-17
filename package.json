@@ -1,0 +1,9 @@
+{
+  "name": "codex-ipc-monitor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local web monitor and sender for Codex desktop IPC messages",
+  "scripts": {
+    "start": "node server.js"
+  }
+}
