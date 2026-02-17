@@ -20,7 +20,7 @@ import {
   Sun,
   X
 } from "lucide-react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, LayoutGroup, motion } from "framer-motion";
 import {
   getHealth,
   getHistoryEntry,
@@ -661,6 +661,7 @@ export function App(): React.JSX.Element {
   /* ── Render ─────────────────────────────────────────────── */
   return (
     <TooltipProvider delayDuration={120}>
+      <LayoutGroup>
       <div className="h-screen flex overflow-hidden bg-background text-foreground font-sans">
 
       {/* Mobile sidebar backdrop */}
@@ -693,15 +694,31 @@ export function App(): React.JSX.Element {
             <div className="w-5 h-5 rounded-md bg-foreground/90 shrink-0" />
             <span className="text-sm font-semibold">Codex Monitor</span>
           </div>
-          <Button
-            type="button"
-            onClick={() => setMobileSidebarOpen(false)}
-            variant="ghost"
-            size="icon"
-            className="md:hidden h-7 w-7 text-muted-foreground hover:text-foreground"
-          >
-            <X size={14} />
-          </Button>
+          <div className="flex items-center gap-1">
+            <AnimatePresence initial={false}>
+              {desktopSidebarOpen && (
+                <motion.div
+                  key="desktop-toggle-in-sidebar"
+                  layoutId="desktop-sidebar-toggle"
+                  transition={{ duration: 0.22, ease: "easeInOut" }}
+                  className="hidden md:block"
+                >
+                  <IconBtn onClick={() => setDesktopSidebarOpen(false)} title="Hide sidebar">
+                    <PanelLeft size={15} />
+                  </IconBtn>
+                </motion.div>
+              )}
+            </AnimatePresence>
+            <Button
+              type="button"
+              onClick={() => setMobileSidebarOpen(false)}
+              variant="ghost"
+              size="icon"
+              className="md:hidden h-7 w-7 text-muted-foreground hover:text-foreground"
+            >
+              <X size={14} />
+            </Button>
+          </div>
         </div>
 
         {/* Thread list */}
@@ -761,14 +778,20 @@ export function App(): React.JSX.Element {
                 <Menu size={15} />
               </IconBtn>
             </div>
-            <div className="hidden md:block">
-              <IconBtn
-                onClick={() => setDesktopSidebarOpen((open) => !open)}
-                title={desktopSidebarOpen ? "Hide sidebar" : "Show sidebar"}
-              >
-                <PanelLeft size={15} />
-              </IconBtn>
-            </div>
+            <AnimatePresence initial={false}>
+              {!desktopSidebarOpen && (
+                <motion.div
+                  key="desktop-toggle-in-header"
+                  layoutId="desktop-sidebar-toggle"
+                  transition={{ duration: 0.22, ease: "easeInOut" }}
+                  className="hidden md:block"
+                >
+                  <IconBtn onClick={() => setDesktopSidebarOpen(true)} title="Show sidebar">
+                    <PanelLeft size={15} />
+                  </IconBtn>
+                </motion.div>
+              )}
+            </AnimatePresence>
             <div className="min-w-0">
               <div className="text-sm font-medium truncate leading-5">
                 {selectedThread ? threadLabel(selectedThread) : "No thread selected"}
@@ -1141,6 +1164,7 @@ export function App(): React.JSX.Element {
         )}
       </div>
       </div>
+      </LayoutGroup>
     </TooltipProvider>
   );
 }
