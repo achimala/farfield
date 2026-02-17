@@ -32,6 +32,8 @@ export class ChildProcessAppServerTransport implements AppServerTransport {
   private process: ChildProcessWithoutNullStreams | null = null;
   private readonly pending = new Map<number, PendingRequest>();
   private requestId = 0;
+  private initialized = false;
+  private initializeInFlight: Promise<void> | null = null;
 
   public constructor(options: ChildProcessAppServerTransportOptions) {
     this.executablePath = options.executablePath;
@@ -61,11 +63,15 @@ export class ChildProcessAppServerTransport implements AppServerTransport {
       const reason = `app-server exited (code=${String(code)}, signal=${String(signal)})`;
       this.rejectAll(new AppServerError(reason));
       this.process = null;
+      this.initialized = false;
+      this.initializeInFlight = null;
     });
 
     child.on("error", (error) => {
       this.rejectAll(new AppServerError(`app-server process error: ${error.message}`));
       this.process = null;
+      this.initialized = false;
+      this.initializeInFlight = null;
     });
 
     const lineReader = readline.createInterface({ input: child.stdout });
@@ -134,8 +140,7 @@ export class ChildProcessAppServerTransport implements AppServerTransport {
     this.pending.clear();
   }
 
-  public async request(method: string, params: unknown, timeoutMs?: number): Promise<unknown> {
-    this.ensureStarted();
+  private async sendRequest(method: string, params: unknown, timeoutMs?: number): Promise<unknown> {
     const processHandle = this.process;
     if (!processHandle) {
       throw new AppServerError("app-server failed to start");
@@ -143,14 +148,12 @@ export class ChildProcessAppServerTransport implements AppServerTransport {
 
     const id = ++this.requestId;
     const timeout = timeoutMs ?? this.requestTimeoutMs;
-
     const requestPayload = JsonRpcRequestSchema.parse({
       jsonrpc: "2.0",
       id,
       method,
       params
     });
-
     const encoded = JSON.stringify(requestPayload) + "\n";
 
     return new Promise((resolve, reject) => {
@@ -178,6 +181,53 @@ export class ChildProcessAppServerTransport implements AppServerTransport {
     });
   }
 
+  private async ensureInitialized(): Promise<void> {
+    if (this.initialized) {
+      return;
+    }
+
+    if (this.initializeInFlight) {
+      return this.initializeInFlight;
+    }
+
+    this.initializeInFlight = (async () => {
+      const result = await this.sendRequest(
+        "initialize",
+        {
+          clientInfo: {
+            name: "codex-monitor",
+            version: "0.2.0"
+          }
+        },
+        this.requestTimeoutMs
+      );
+
+      if (!result || typeof result !== "object") {
+        throw new AppServerError("app-server initialize returned invalid result");
+      }
+
+      this.initialized = true;
+    })().finally(() => {
+      this.initializeInFlight = null;
+    });
+
+    return this.initializeInFlight;
+  }
+
+  public async request(method: string, params: unknown, timeoutMs?: number): Promise<unknown> {
+    this.ensureStarted();
+
+    if (method !== "initialize") {
+      await this.ensureInitialized();
+    }
+
+    const result = await this.sendRequest(method, params, timeoutMs);
+    if (method === "initialize") {
+      this.initialized = true;
+    }
+    return result;
+  }
+
   public async close(): Promise<void> {
     const processHandle = this.process;
     if (!processHandle) {
@@ -185,6 +235,8 @@ export class ChildProcessAppServerTransport implements AppServerTransport {
     }
 
     this.process = null;
+    this.initialized = false;
+    this.initializeInFlight = null;
     this.rejectAll(new AppServerError("app-server transport closed"));
 
     processHandle.kill("SIGTERM");

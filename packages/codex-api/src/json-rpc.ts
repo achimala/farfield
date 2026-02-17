@@ -12,7 +12,7 @@ export const JsonRpcRequestSchema = z
 
 export const JsonRpcResponseSchema = z
   .object({
-    jsonrpc: z.literal("2.0"),
+    jsonrpc: z.literal("2.0").optional(),
     id: z.number().int().nonnegative(),
     result: z.unknown().optional(),
     error: z
@@ -24,7 +24,15 @@ export const JsonRpcResponseSchema = z
       .strict()
       .optional()
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    if (value.result === undefined && value.error === undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Response must include either result or error"
+      });
+    }
+  });
 
 export type JsonRpcResponse = z.infer<typeof JsonRpcResponseSchema>;
 

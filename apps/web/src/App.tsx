@@ -149,6 +149,7 @@ export function App(): React.JSX.Element {
 
   const selectedThreadIdRef = useRef<string | null>(null);
   const refreshTimerRef = useRef<number | null>(null);
+  const coreRefreshIntervalRef = useRef<number | null>(null);
 
   const pendingRequests = useMemo(() => {
     if (!liveState?.conversationState) {
@@ -197,13 +198,14 @@ export function App(): React.JSX.Element {
       }
     }
 
-    if (!selectedModeKey && nextModes.data.length > 0) {
-      const firstMode = nextModes.data[0];
-      if (firstMode) {
-        setSelectedModeKey(firstMode.mode);
+    setSelectedModeKey((current) => {
+      if (current) {
+        return current;
       }
-    }
-  }, [selectedModeKey]);
+      const firstMode = nextModes.data[0];
+      return firstMode?.mode ?? "";
+    });
+  }, []);
 
   const loadSelectedThread = useCallback(async (threadId: string) => {
     const [thread, live, stream] = await Promise.all([
@@ -216,6 +218,20 @@ export function App(): React.JSX.Element {
     setLiveState(live);
     setStreamEvents(stream.events);
   }, []);
+
+  const loadLiveData = useCallback(async () => {
+    const [nextHealth, nextHistory] = await Promise.all([
+      getHealth(),
+      listDebugHistory(120)
+    ]);
+
+    setHealth(nextHealth);
+    setHistory(nextHistory.history);
+
+    if (selectedThreadIdRef.current) {
+      await loadSelectedThread(selectedThreadIdRef.current);
+    }
+  }, [loadSelectedThread]);
 
   const refreshAll = useCallback(async () => {
     try {
@@ -236,6 +252,26 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     void refreshAll();
   }, [refreshAll]);
+
+  useEffect(() => {
+    if (coreRefreshIntervalRef.current) {
+      window.clearInterval(coreRefreshIntervalRef.current);
+      coreRefreshIntervalRef.current = null;
+    }
+
+    coreRefreshIntervalRef.current = window.setInterval(() => {
+      void loadCoreData().catch((nextError) => {
+        setError(nextError instanceof Error ? nextError.message : String(nextError));
+      });
+    }, 5000);
+
+    return () => {
+      if (coreRefreshIntervalRef.current) {
+        window.clearInterval(coreRefreshIntervalRef.current);
+        coreRefreshIntervalRef.current = null;
+      }
+    };
+  }, [loadCoreData]);
 
   useEffect(() => {
     if (!selectedThreadId) {
@@ -260,8 +296,10 @@ export function App(): React.JSX.Element {
 
       refreshTimerRef.current = window.setTimeout(() => {
         refreshTimerRef.current = null;
-        void refreshAll();
-      }, 250);
+        void loadLiveData().catch((nextError) => {
+          setError(nextError instanceof Error ? nextError.message : String(nextError));
+        });
+      }, 800);
     };
 
     source.onerror = () => {
@@ -275,7 +313,7 @@ export function App(): React.JSX.Element {
       }
       source.close();
     };
-  }, [refreshAll]);
+  }, [loadLiveData]);
 
   useEffect(() => {
     if (!activeRequest) {
