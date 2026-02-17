@@ -3,21 +3,12 @@ import { NonEmptyStringSchema, NonNegativeIntSchema } from "./common.js";
 import { ProtocolValidationError } from "./errors.js";
 import { ThreadStreamStateChangedParamsSchema } from "./thread.js";
 
-export const IpcInitializeFrameSchema = z
-  .object({
-    type: z.literal("initialize"),
-    requestId: NonNegativeIntSchema.optional(),
-    method: NonEmptyStringSchema.optional(),
-    params: z.unknown().optional(),
-    clientId: NonEmptyStringSchema.optional(),
-    version: NonNegativeIntSchema.optional()
-  })
-  .strict();
+export const IpcRequestIdSchema = NonEmptyStringSchema;
 
 export const IpcRequestFrameSchema = z
   .object({
     type: z.literal("request"),
-    requestId: NonNegativeIntSchema,
+    requestId: IpcRequestIdSchema,
     method: NonEmptyStringSchema,
     params: z.unknown().optional(),
     targetClientId: NonEmptyStringSchema.optional(),
@@ -29,8 +20,10 @@ export const IpcRequestFrameSchema = z
 export const IpcResponseFrameSchema = z
   .object({
     type: z.literal("response"),
-    requestId: NonNegativeIntSchema,
-    success: z.boolean().optional(),
+    requestId: IpcRequestIdSchema,
+    method: NonEmptyStringSchema.optional(),
+    handledByClientId: NonEmptyStringSchema.optional(),
+    resultType: z.enum(["success", "error"]),
     result: z.unknown().optional(),
     error: z.unknown().optional()
   })
@@ -47,11 +40,32 @@ export const IpcBroadcastFrameSchema = z
   })
   .strict();
 
+export const IpcClientDiscoveryRequestFrameSchema = z
+  .object({
+    type: z.literal("client-discovery-request"),
+    requestId: IpcRequestIdSchema,
+    request: IpcRequestFrameSchema
+  })
+  .strict();
+
+export const IpcClientDiscoveryResponseFrameSchema = z
+  .object({
+    type: z.literal("client-discovery-response"),
+    requestId: IpcRequestIdSchema,
+    response: z
+      .object({
+        canHandle: z.boolean()
+      })
+      .strict()
+  })
+  .strict();
+
 export const IpcFrameSchema = z.union([
-  IpcInitializeFrameSchema,
   IpcRequestFrameSchema,
   IpcResponseFrameSchema,
-  IpcBroadcastFrameSchema
+  IpcBroadcastFrameSchema,
+  IpcClientDiscoveryRequestFrameSchema,
+  IpcClientDiscoveryResponseFrameSchema
 ]);
 
 export const ThreadStreamStateChangedBroadcastSchema = z
@@ -68,6 +82,8 @@ export type IpcFrame = z.infer<typeof IpcFrameSchema>;
 export type IpcRequestFrame = z.infer<typeof IpcRequestFrameSchema>;
 export type IpcResponseFrame = z.infer<typeof IpcResponseFrameSchema>;
 export type IpcBroadcastFrame = z.infer<typeof IpcBroadcastFrameSchema>;
+export type IpcClientDiscoveryRequestFrame = z.infer<typeof IpcClientDiscoveryRequestFrameSchema>;
+export type IpcClientDiscoveryResponseFrame = z.infer<typeof IpcClientDiscoveryResponseFrameSchema>;
 export type ThreadStreamStateChangedBroadcast = z.infer<
   typeof ThreadStreamStateChangedBroadcastSchema
 >;

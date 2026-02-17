@@ -1,11 +1,12 @@
+import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import net from "node:net";
 import {
   IpcBroadcastFrameSchema,
+  IpcClientDiscoveryResponseFrameSchema,
   IpcFrameSchema,
   IpcRequestFrameSchema,
   IpcResponseFrameSchema,
-  type IpcBroadcastFrame,
   type IpcFrame,
   type IpcResponseFrame,
   parseIpcFrame
@@ -37,13 +38,16 @@ export interface IpcConnectionState {
 }
 export type IpcConnectionListener = (state: IpcConnectionState) => void;
 
+const MAX_FRAME_SIZE_BYTES = 256 * 1024 * 1024;
+const INITIALIZING_CLIENT_ID = "initializing-client";
+
 export class DesktopIpcClient {
   private readonly socketPath: string;
   private readonly requestTimeoutMs: number;
   private socket: net.Socket | null = null;
   private buffer = Buffer.alloc(0);
-  private requestId = 0;
-  private readonly pending = new Map<number, PendingRequest>();
+  private clientId: string | null = null;
+  private readonly pending = new Map<string, PendingRequest>();
   private readonly events = new EventEmitter();
 
   public constructor(options: DesktopIpcClientOptions) {
@@ -82,6 +86,7 @@ export class DesktopIpcClient {
       this.rejectAll(new DesktopIpcError("IPC socket closed"));
       this.socket = null;
       this.buffer = Buffer.alloc(0);
+      this.clientId = null;
       this.emitConnectionState({
         connected: false,
         reason: "IPC socket closed"
@@ -105,6 +110,7 @@ export class DesktopIpcClient {
     }
 
     this.socket = null;
+    this.clientId = null;
     this.rejectAll(new DesktopIpcError("IPC client disconnected"));
 
     await new Promise<void>((resolve) => {
@@ -136,11 +142,52 @@ export class DesktopIpcClient {
     this.events.emit("connection-state", state);
   }
 
+  private writeFrame(frame: unknown): void {
+    const socket = this.ensureSocket();
+    const encoded = Buffer.from(JSON.stringify(frame), "utf8");
+    const header = Buffer.alloc(4);
+    header.writeUInt32LE(encoded.length, 0);
+    socket.write(Buffer.concat([header, encoded]));
+  }
+
+  private respondClientDiscovery(requestId: string): void {
+    const response = IpcClientDiscoveryResponseFrameSchema.parse({
+      type: "client-discovery-response",
+      requestId,
+      response: {
+        canHandle: false
+      }
+    });
+
+    this.writeFrame(response);
+  }
+
+  private respondNoHandler(requestId: string): void {
+    const response = IpcResponseFrameSchema.parse({
+      type: "response",
+      requestId,
+      resultType: "error",
+      error: "no-handler-for-request"
+    });
+
+    this.writeFrame(response);
+  }
+
   private handleData(chunk: Buffer): void {
     this.buffer = Buffer.concat([this.buffer, chunk]);
 
     while (this.buffer.length >= 4) {
-      const size = this.buffer.readUInt32BE(0);
+      const size = this.buffer.readUInt32LE(0);
+      if (size > MAX_FRAME_SIZE_BYTES) {
+        this.rejectAll(
+          new DesktopIpcError(
+            `IPC frame exceeded limit (${String(size)} > ${String(MAX_FRAME_SIZE_BYTES)})`
+          )
+        );
+        this.socket?.destroy();
+        return;
+      }
+
       if (this.buffer.length < 4 + size) {
         return;
       }
@@ -159,6 +206,16 @@ export class DesktopIpcClient {
       const frame = parseIpcFrame(raw);
       this.emitFrame(frame);
 
+      if (frame.type === "client-discovery-request") {
+        this.respondClientDiscovery(frame.requestId);
+        continue;
+      }
+
+      if (frame.type === "request") {
+        this.respondNoHandler(frame.requestId);
+        continue;
+      }
+
       if (frame.type !== "response") {
         continue;
       }
@@ -171,7 +228,7 @@ export class DesktopIpcClient {
       this.pending.delete(frame.requestId);
       clearTimeout(pending.timer);
 
-      if (frame.error) {
+      if (frame.resultType === "error") {
         pending.reject(
           new DesktopIpcError(
             `IPC ${pending.method} failed: ${
@@ -182,16 +239,18 @@ export class DesktopIpcClient {
         continue;
       }
 
+      const result = frame.result;
+      if (
+        frame.method === "initialize" &&
+        result &&
+        typeof result === "object" &&
+        typeof (result as Record<string, unknown>)["clientId"] === "string"
+      ) {
+        this.clientId = (result as Record<string, unknown>)["clientId"] as string;
+      }
+
       pending.resolve(IpcResponseFrameSchema.parse(frame));
     }
-  }
-
-  private writeFrame(frame: unknown): void {
-    const socket = this.ensureSocket();
-    const encoded = Buffer.from(JSON.stringify(frame), "utf8");
-    const header = Buffer.alloc(4);
-    header.writeUInt32BE(encoded.length, 0);
-    socket.write(Buffer.concat([header, encoded]));
   }
 
   public sendBroadcast(method: string, params: unknown, options: SendRequestOptions = {}): void {
@@ -199,6 +258,7 @@ export class DesktopIpcClient {
       type: "broadcast",
       method,
       params,
+      sourceClientId: this.clientId ?? INITIALIZING_CLIENT_ID,
       targetClientId: options.targetClientId,
       version: options.version
     });
@@ -211,13 +271,14 @@ export class DesktopIpcClient {
     params: unknown,
     options: SendRequestOptions = {}
   ): Promise<IpcResponseFrame> {
-    const requestId = ++this.requestId;
+    const requestId = randomUUID();
 
     const frame = IpcRequestFrameSchema.parse({
       type: "request",
       requestId,
       method,
       params,
+      sourceClientId: this.clientId ?? INITIALIZING_CLIENT_ID,
       targetClientId: options.targetClientId,
       version: options.version
     });
@@ -242,15 +303,16 @@ export class DesktopIpcClient {
     return responsePromise;
   }
 
-  public async initialize(userAgent: string): Promise<IpcResponseFrame> {
-    const requestId = ++this.requestId;
-    const frame = IpcFrameSchema.parse({
-      type: "initialize",
+  public async initialize(_userAgent: string): Promise<IpcResponseFrame> {
+    const requestId = randomUUID();
+    const frame = IpcRequestFrameSchema.parse({
+      type: "request",
       requestId,
+      sourceClientId: INITIALIZING_CLIENT_ID,
+      version: 1,
+      method: "initialize",
       params: {
-        clientName: "codex-monitor",
-        clientVersion: "0.2.0",
-        userAgent
+        clientType: "codex-monitor-web"
       }
     });
 

@@ -13,7 +13,6 @@ import {
 import {
   type CollaborationMode,
   type IpcFrame,
-  type ThreadStreamStateChangedBroadcast,
   parseThreadStreamStateChangedBroadcast,
   parseUserInputResponsePayload
 } from "@codex-monitor/codex-protocol";
@@ -33,6 +32,7 @@ const HOST = process.env["HOST"] ?? "127.0.0.1";
 const PORT = Number(process.env["PORT"] ?? 4311);
 const HISTORY_LIMIT = 2_000;
 const USER_AGENT = "codex-monitor-web/0.2.0";
+const IPC_RECONNECT_DELAY_MS = 1_000;
 
 const TRACE_DIR = path.resolve(process.cwd(), "traces");
 const DEFAULT_WORKSPACE = path.resolve(process.cwd());
@@ -135,7 +135,7 @@ const history: HistoryEntry[] = [];
 const historyById = new Map<string, unknown>();
 
 const threadOwnerById = new Map<string, string>();
-const streamEventsByThreadId = new Map<string, ThreadStreamStateChangedBroadcast[]>();
+const streamEventsByThreadId = new Map<string, IpcFrame[]>();
 
 const sseClients = new Set<ServerResponse>();
 
@@ -152,6 +152,7 @@ const runtimeState = {
 };
 
 let bootstrapInFlight: Promise<void> | null = null;
+let reconnectTimer: NodeJS.Timeout | null = null;
 
 function getRuntimeStateSnapshot(): Record<string, unknown> {
   return {
@@ -261,6 +262,17 @@ function requireIpcReady(res: ServerResponse): boolean {
   return false;
 }
 
+function scheduleIpcReconnect(): void {
+  if (reconnectTimer) {
+    return;
+  }
+
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    void bootstrapConnections();
+  }, IPC_RECONNECT_DELAY_MS);
+}
+
 const appClient = new AppServerClient({
   executablePath: runtimeState.appExecutable,
   userAgent: USER_AGENT,
@@ -306,7 +318,22 @@ function getThreadLiveState(threadId: string): {
   ownerClientId: string | null;
   conversationState: unknown;
 } {
-  const events = streamEventsByThreadId.get(threadId) ?? [];
+  const rawEvents = streamEventsByThreadId.get(threadId) ?? [];
+  if (rawEvents.length === 0) {
+    return {
+      ownerClientId: threadOwnerById.get(threadId) ?? null,
+      conversationState: null
+    };
+  }
+
+  const events = rawEvents.flatMap((event) => {
+    try {
+      return [parseThreadStreamStateChangedBroadcast(event)];
+    } catch {
+      return [];
+    }
+  });
+
   if (events.length === 0) {
     return {
       ownerClientId: threadOwnerById.get(threadId) ?? null,
@@ -325,8 +352,17 @@ function getThreadLiveState(threadId: string): {
 
 function extractThreadId(frame: IpcFrame): string | null {
   if (frame.type === "broadcast" && frame.method === "thread-stream-state-changed") {
-    const parsed = parseThreadStreamStateChangedBroadcast(frame);
-    return parsed.params.conversationId;
+    const params = frame.params;
+    if (!params || typeof params !== "object") {
+      return null;
+    }
+
+    const conversationId = (params as Record<string, unknown>)["conversationId"];
+    if (typeof conversationId === "string" && conversationId.trim()) {
+      return conversationId.trim();
+    }
+
+    return null;
   }
 
   if (frame.type !== "request") {
@@ -371,7 +407,7 @@ async function sendIpcRequest(
     method,
     threadId: extractThreadId({
       type: "request",
-      requestId: 0,
+      requestId: "monitor-preview-request-id",
       method,
       params,
       targetClientId: options.targetClientId,
@@ -396,7 +432,7 @@ function sendIpcBroadcast(method: string, params: unknown, options: SendRequestO
     method,
     threadId: extractThreadId({
       type: "request",
-      requestId: 0,
+      requestId: "monitor-preview-request-id",
       method,
       params,
       targetClientId: options.targetClientId,
@@ -411,6 +447,10 @@ ipcClient.onConnectionState((state) => {
   runtimeState.ipcConnected = state.connected;
   if (!state.connected) {
     runtimeState.ipcInitialized = false;
+    scheduleIpcReconnect();
+  } else if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
   }
 
   if (state.reason) {
@@ -433,15 +473,26 @@ ipcClient.onFrame((frame) => {
   });
 
   if (frame.type === "broadcast" && frame.method === "thread-stream-state-changed") {
-    const parsed = parseThreadStreamStateChangedBroadcast(frame);
-    threadOwnerById.set(parsed.params.conversationId, parsed.sourceClientId);
+    const params = frame.params;
+    if (!params || typeof params !== "object") {
+      return;
+    }
 
-    const current = streamEventsByThreadId.get(parsed.params.conversationId) ?? [];
-    current.push(parsed);
+    const conversationId = (params as Record<string, unknown>)["conversationId"];
+    if (typeof conversationId !== "string" || !conversationId.trim()) {
+      return;
+    }
+
+    if (frame.sourceClientId && frame.sourceClientId.trim()) {
+      threadOwnerById.set(conversationId, frame.sourceClientId);
+    }
+
+    const current = streamEventsByThreadId.get(conversationId) ?? [];
+    current.push(frame);
     if (current.length > 400) {
       current.splice(0, current.length - 400);
     }
-    streamEventsByThreadId.set(parsed.params.conversationId, current);
+    streamEventsByThreadId.set(conversationId, current);
   }
 });
 

@@ -17,10 +17,11 @@ function isIpcFrameCandidate(value: unknown): boolean {
 
   const record = value as Record<string, unknown>;
   return (
-    record["type"] === "initialize" ||
     record["type"] === "request" ||
     record["type"] === "response" ||
-    record["type"] === "broadcast"
+    record["type"] === "broadcast" ||
+    record["type"] === "client-discovery-request" ||
+    record["type"] === "client-discovery-response"
   );
 }
 
