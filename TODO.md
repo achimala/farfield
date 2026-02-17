@@ -84,14 +84,14 @@ Only mark items done when they are fully complete and verified.
 
 ## Stage 7: Documentation and DX Finish
 
-- [ ] Write root `README.md` with:
-  - [ ] Architecture overview
-  - [ ] Setup and local run
-  - [ ] Package responsibilities
-  - [ ] Debug workflow
-- [ ] Document strict fail-fast principles.
-- [ ] Add clear developer commands and examples.
-- [ ] Ensure all tests and builds pass from root.
+- [x] Write root `README.md` with:
+  - [x] Architecture overview
+  - [x] Setup and local run
+  - [x] Package responsibilities
+  - [x] Debug workflow
+- [x] Document strict fail-fast principles.
+- [x] Add clear developer commands and examples.
+- [x] Ensure all tests and builds pass from root.
 
 ## Stage 8: Final Cleanup
 
