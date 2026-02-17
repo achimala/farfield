@@ -109,20 +109,37 @@ export const UserInputResponseItemSchema = z
   })
   .strict();
 
-export const UnknownTurnItemSchema = z
+export const CommandActionSchema = z
   .object({
     type: NonEmptyStringSchema,
-    id: z.union([NonEmptyStringSchema, z.null()]).optional()
+    command: z.string().optional(),
+    name: z.string().optional(),
+    path: z.string().optional()
   })
-  .passthrough();
+  .strict();
 
-export const TurnItemSchema = z.union([
+export const CommandExecutionItemSchema = z
+  .object({
+    type: z.literal("commandExecution"),
+    id: NonEmptyStringSchema,
+    command: z.string(),
+    cwd: z.string().optional(),
+    processId: z.string().optional(),
+    status: NonEmptyStringSchema,
+    commandActions: z.array(CommandActionSchema).optional(),
+    aggregatedOutput: z.union([z.string(), z.null()]).optional(),
+    exitCode: z.union([z.number().int(), z.null()]).optional(),
+    durationMs: z.union([NonNegativeIntSchema, z.null()]).optional()
+  })
+  .strict();
+
+export const TurnItemSchema = z.discriminatedUnion("type", [
   UserMessageItemSchema,
   AgentMessageItemSchema,
   ReasoningItemSchema,
   PlanItemSchema,
   UserInputResponseItemSchema,
-  UnknownTurnItemSchema
+  CommandExecutionItemSchema
 ]);
 
 export const UserInputOptionSchema = z

@@ -71,68 +71,53 @@ function threadLabel(thread: ThreadsResponse["data"][number]): string {
   return text.length > 92 ? `${text.slice(0, 92)}…` : text;
 }
 
+function assertNever(value: never): never {
+  throw new Error(`Unexpected turn item: ${JSON.stringify(value)}`);
+}
+
 function getItemRole(item: ConversationState["turns"][number]["items"][number]): string {
-  if (item.type === "userMessage") {
-    return "You";
+  switch (item.type) {
+    case "userMessage":
+      return "You";
+    case "agentMessage":
+      return "Codex";
+    case "reasoning":
+      return "Reasoning";
+    case "plan":
+      return "Plan";
+    case "userInputResponse":
+      return "User input";
+    case "commandExecution":
+      return "Command";
+    default:
+      return assertNever(item);
   }
-  if (item.type === "agentMessage") {
-    return "Codex";
-  }
-  if (item.type === "reasoning") {
-    return "Reasoning";
-  }
-  if (item.type === "plan") {
-    return "Plan";
-  }
-  if (item.type === "userInputResponse") {
-    return "User input";
-  }
-  return item.type;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function readTextContent(value: unknown): string {
-  if (!Array.isArray(value)) {
-    return "";
-  }
-
-  return value
-    .map((part) => {
-      if (!isRecord(part) || typeof part["text"] !== "string") {
-        return "";
-      }
-      return part["text"];
-    })
-    .filter(Boolean)
-    .join("\n");
 }
 
 function getItemText(item: ConversationState["turns"][number]["items"][number]): string {
-  if (item.type === "userMessage") {
-    return readTextContent(isRecord(item) ? item.content : undefined);
+  switch (item.type) {
+    case "userMessage":
+      return item.content.map((part) => part.text).join("\n");
+    case "agentMessage":
+      return item.text;
+    case "reasoning":
+      return item.summary?.join("\n") ?? item.text ?? "";
+    case "plan":
+      return item.text;
+    case "userInputResponse":
+      return JSON.stringify(item.answers, null, 2);
+    case "commandExecution":
+      return [
+        item.command,
+        item.status ? `status: ${item.status}` : "",
+        item.exitCode === null || item.exitCode === undefined ? "" : `exit: ${String(item.exitCode)}`,
+        item.aggregatedOutput ?? ""
+      ]
+        .filter(Boolean)
+        .join("\n");
+    default:
+      return assertNever(item);
   }
-  if (item.type === "agentMessage") {
-    return isRecord(item) && typeof item.text === "string" ? item.text : "";
-  }
-  if (item.type === "reasoning") {
-    if (isRecord(item) && Array.isArray(item.summary)) {
-      const lines = item.summary.filter((line): line is string => typeof line === "string");
-      if (lines.length > 0) {
-        return lines.join("\n");
-      }
-    }
-    return isRecord(item) && typeof item.text === "string" ? item.text : "";
-  }
-  if (item.type === "plan") {
-    return isRecord(item) && typeof item.text === "string" ? item.text : "";
-  }
-  if (item.type === "userInputResponse") {
-    return JSON.stringify(isRecord(item) ? item.answers ?? {} : {}, null, 2);
-  }
-  return JSON.stringify(item, null, 2);
 }
 
 function toErrorMessage(error: unknown): string {

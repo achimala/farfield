@@ -115,7 +115,30 @@ describe("codex-protocol schemas", () => {
     expect(parsed.turns[0]?.items[0]?.type).toBe("userInputResponse");
   });
 
-  it("parses thread conversation state with unknown item types", () => {
+  it("rejects thread conversation state with unknown item types", () => {
+    expect(() =>
+      parseThreadConversationState({
+        id: "thread-123",
+        turns: [
+          {
+            status: "completed",
+            items: [
+              {
+                id: "item-unknown",
+                type: "toolCall",
+                payload: {
+                  hello: "world"
+                }
+              }
+            ]
+          }
+        ],
+        requests: []
+      })
+    ).toThrowError(/ThreadConversationState did not match expected schema/);
+  });
+
+  it("parses thread conversation state with command execution item", () => {
     const parsed = parseThreadConversationState({
       id: "thread-123",
       turns: [
@@ -123,11 +146,23 @@ describe("codex-protocol schemas", () => {
           status: "completed",
           items: [
             {
-              id: "item-unknown",
-              type: "toolCall",
-              payload: {
-                hello: "world"
-              }
+              id: "item-cmd",
+              type: "commandExecution",
+              command: "echo hello",
+              cwd: "/tmp",
+              processId: "123",
+              status: "completed",
+              commandActions: [
+                {
+                  type: "read",
+                  command: "cat file.txt",
+                  name: "file.txt",
+                  path: "file.txt"
+                }
+              ],
+              aggregatedOutput: "hello",
+              exitCode: 0,
+              durationMs: 5
             }
           ]
         }
@@ -135,7 +170,7 @@ describe("codex-protocol schemas", () => {
       requests: []
     });
 
-    expect(parsed.turns[0]?.items[0]?.type).toBe("toolCall");
+    expect(parsed.turns[0]?.items[0]?.type).toBe("commandExecution");
   });
 
   it("parses generic ipc request frames", () => {
