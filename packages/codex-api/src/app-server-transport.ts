@@ -197,6 +197,9 @@ export class ChildProcessAppServerTransport implements AppServerTransport {
           clientInfo: {
             name: "codex-monitor",
             version: "0.2.0"
+          },
+          capabilities: {
+            experimentalApi: true
           }
         },
         this.requestTimeoutMs
