@@ -954,62 +954,72 @@ export function App(): React.JSX.Element {
 
             {/* Conversation */}
             <div ref={scrollRef} className="flex-1 overflow-y-auto">
-              <div ref={chatContentRef} className="max-w-3xl mx-auto px-4 py-8">
-                {turns.length === 0 ? (
-                  <div className="text-center py-20 text-sm text-muted-foreground">
-                    {selectedThreadId ? "No messages yet" : "Select a thread from the sidebar"}
-                  </div>
-                ) : (
-                  <motion.div layout={!suppressEntryAnimations} className="space-y-8">
-                    {hasHiddenChatItems && (
-                      <div className="flex justify-center">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="rounded-full"
-                          onClick={() => {
-                            setVisibleChatItemLimit((limit) =>
-                              Math.min(conversationItemCount, limit + VISIBLE_CHAT_ITEMS_STEP)
-                            );
-                          }}
-                        >
-                          Show older messages ({firstVisibleChatItemIndex})
-                        </Button>
-                      </div>
-                    )}
-                    {visibleTurns.map(({ turn, turnIndex, visibleItems }) => {
-                      const isLastTurn = turnIndex === turns.length - 1;
-                      const turnInProgress = isLastTurn && isGenerating;
-                      const items = turn.items ?? [];
-                      return (
-                        <motion.div layout={!suppressEntryAnimations} key={turn.turnId ?? turnIndex} className="space-y-5">
-                          <AnimatePresence initial={false}>
-                          {visibleItems.map(({ item, itemIndexInTurn, globalItemIndex }) => (
-                            <motion.div
-                              layout={!suppressEntryAnimations}
-                              key={item.id ?? `${turnIndex}-${itemIndexInTurn}`}
-                              initial={suppressEntryAnimations ? false : { opacity: 0, y: 12 }}
-                              animate={{ opacity: 1, y: 0 }}
-                              exit={{ opacity: 0, y: -8 }}
-                              transition={{ duration: 0.2, ease: "easeOut" }}
-                            >
-                              <ConversationItem
-                                item={item}
-                                isLast={globalItemIndex === conversationItemCount - 1}
-                                turnIsInProgress={turnInProgress}
-                                previousItemType={items[itemIndexInTurn - 1]?.type}
-                                nextItemType={items[itemIndexInTurn + 1]?.type}
-                              />
-                            </motion.div>
-                          ))}
-                          </AnimatePresence>
-                        </motion.div>
-                      );
-                    })}
-                  </motion.div>
-                )}
-              </div>
+              <AnimatePresence initial={false} mode="wait">
+                <motion.div
+                  key={selectedThreadId ?? "__no_thread__"}
+                  ref={chatContentRef}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.14, ease: "easeOut" }}
+                  className="max-w-3xl mx-auto px-4 py-8"
+                >
+                  {turns.length === 0 ? (
+                    <div className="text-center py-20 text-sm text-muted-foreground">
+                      {selectedThreadId ? "No messages yet" : "Select a thread from the sidebar"}
+                    </div>
+                  ) : (
+                    <motion.div layout={!suppressEntryAnimations} className="space-y-8">
+                      {hasHiddenChatItems && (
+                        <div className="flex justify-center">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="rounded-full"
+                            onClick={() => {
+                              setVisibleChatItemLimit((limit) =>
+                                Math.min(conversationItemCount, limit + VISIBLE_CHAT_ITEMS_STEP)
+                              );
+                            }}
+                          >
+                            Show older messages ({firstVisibleChatItemIndex})
+                          </Button>
+                        </div>
+                      )}
+                      {visibleTurns.map(({ turn, turnIndex, visibleItems }) => {
+                        const isLastTurn = turnIndex === turns.length - 1;
+                        const turnInProgress = isLastTurn && isGenerating;
+                        const items = turn.items ?? [];
+                        return (
+                          <motion.div layout={!suppressEntryAnimations} key={turn.turnId ?? turnIndex} className="space-y-5">
+                            <AnimatePresence initial={false}>
+                            {visibleItems.map(({ item, itemIndexInTurn, globalItemIndex }) => (
+                              <motion.div
+                                layout={!suppressEntryAnimations}
+                                key={item.id ?? `${turnIndex}-${itemIndexInTurn}`}
+                                initial={suppressEntryAnimations ? false : { opacity: 0, y: 12 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -8 }}
+                                transition={{ duration: 0.2, ease: "easeOut" }}
+                              >
+                                <ConversationItem
+                                  item={item}
+                                  isLast={globalItemIndex === conversationItemCount - 1}
+                                  turnIsInProgress={turnInProgress}
+                                  previousItemType={items[itemIndexInTurn - 1]?.type}
+                                  nextItemType={items[itemIndexInTurn + 1]?.type}
+                                />
+                              </motion.div>
+                            ))}
+                            </AnimatePresence>
+                          </motion.div>
+                        );
+                      })}
+                    </motion.div>
+                  )}
+                </motion.div>
+              </AnimatePresence>
             </div>
 
             <AnimatePresence initial={false}>
