@@ -31,17 +31,17 @@ Only mark items done when they are fully complete and verified.
 
 ## Stage 3: API Package (`packages/codex-api`)
 
-- [ ] Build typed app-server client with strict request and response validation.
-- [ ] Build typed desktop IPC client with strict frame validation.
-- [ ] Build a typed high-level service layer for:
-  - [ ] Send message
-  - [ ] Set collaboration mode
-  - [ ] Submit user input
-  - [ ] Interrupt turn
-  - [ ] Stream state reduction for live thread state
-- [ ] Keep behavior fail-fast (no retries, no fallback paths).
-- [ ] Add tests for API client and service layer behavior.
-- [ ] Write API package documentation in `packages/codex-api/README.md`.
+- [x] Build typed app-server client with strict request and response validation.
+- [x] Build typed desktop IPC client with strict frame validation.
+- [x] Build a typed high-level service layer for:
+  - [x] Send message
+  - [x] Set collaboration mode
+  - [x] Submit user input
+  - [x] Interrupt turn
+  - [x] Stream state reduction for live thread state
+- [x] Keep behavior fail-fast (no retries, no fallback paths).
+- [x] Add tests for API client and service layer behavior.
+- [x] Write API package documentation in `packages/codex-api/README.md`.
 
 ## Stage 4: Server App (`apps/server`)
 

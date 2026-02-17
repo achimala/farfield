@@ -16,6 +16,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@codex-monitor/codex-protocol": "workspace:*"
+    "@codex-monitor/codex-protocol": "workspace:*",
+    "zod": "^3.24.1"
   }
 }

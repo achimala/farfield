@@ -44,6 +44,9 @@ importers:
       '@codex-monitor/codex-protocol':
         specifier: workspace:*
         version: link:../codex-protocol
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
 
   packages/codex-protocol:
     dependencies:
