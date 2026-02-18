@@ -407,21 +407,35 @@ export class CodexAgentAdapter implements AgentAdapter {
       };
     }
 
-    const events = rawEvents.flatMap((event) => {
+    const events: ReturnType<typeof parseThreadStreamStateChangedBroadcast>[] = [];
+    const validRawEvents: IpcFrame[] = [];
+    let invalidEventCount = 0;
+    let firstInvalidEventError: string | null = null;
+
+    for (const event of rawEvents) {
       try {
-        return [parseThreadStreamStateChangedBroadcast(event)];
+        events.push(parseThreadStreamStateChangedBroadcast(event));
+        validRawEvents.push(event);
       } catch (error) {
-        logger.warn(
-          {
-            threadId,
-            error: toErrorMessage(error),
-            rawPayload: event
-          },
-          "codex-invalid-thread-stream-event"
-        );
-        return [];
+        invalidEventCount += 1;
+        if (!firstInvalidEventError) {
+          firstInvalidEventError = toErrorMessage(error);
+        }
       }
-    });
+    }
+
+    if (invalidEventCount > 0) {
+      logger.warn(
+        {
+          threadId,
+          invalidEventCount,
+          eventCount: rawEvents.length,
+          error: firstInvalidEventError
+        },
+        "codex-invalid-thread-stream-events-pruned"
+      );
+      this.streamEventsByThreadId.set(threadId, validRawEvents);
+    }
 
     if (events.length === 0) {
       return {
