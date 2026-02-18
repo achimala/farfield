@@ -946,36 +946,46 @@ export function App(): React.JSX.Element {
                   )}
                   <span className="min-w-0 truncate">{group.label}</span>
                 </Button>
-                {!isCollapsed && (
-                  <div className="space-y-1 pl-4">
-                    {group.threads.map((thread) => {
-                      const isSelected = thread.id === selectedThreadId;
-                      return (
-                        <Button
-                          key={thread.id}
-                          type="button"
-                          onClick={() => {
-                            setSelectedThreadId(thread.id);
-                            setMobileSidebarOpen(false);
-                          }}
-                          variant="ghost"
-                          className={`w-full min-w-0 h-auto flex items-center justify-between gap-2 rounded-xl px-2.5 py-1.5 text-left text-[13px] tracking-tight font-normal transition-colors ${
-                            isSelected
-                              ? "bg-muted/90 text-foreground shadow-sm"
-                              : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
-                          }`}
-                        >
-                          <span className="min-w-0 flex-1 truncate leading-5">{threadLabel(thread)}</span>
-                          {thread.updatedAt && (
-                            <span className="shrink-0 text-[10px] text-muted-foreground/50">
-                              {formatDate(thread.updatedAt)}
-                            </span>
-                          )}
-                        </Button>
-                      );
-                    })}
-                  </div>
-                )}
+                <AnimatePresence initial={false}>
+                  {!isCollapsed && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.16, ease: "easeInOut" }}
+                      className="overflow-hidden"
+                    >
+                      <div className="space-y-1 pl-4 pt-0.5">
+                        {group.threads.map((thread) => {
+                          const isSelected = thread.id === selectedThreadId;
+                          return (
+                            <Button
+                              key={thread.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedThreadId(thread.id);
+                                setMobileSidebarOpen(false);
+                              }}
+                              variant="ghost"
+                              className={`w-full min-w-0 h-auto flex items-center justify-between gap-2 rounded-xl px-2.5 py-1.5 text-left text-[13px] tracking-tight font-normal transition-colors ${
+                                isSelected
+                                  ? "bg-muted/90 text-foreground shadow-sm"
+                                  : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
+                              }`}
+                            >
+                              <span className="min-w-0 flex-1 truncate leading-5">{threadLabel(thread)}</span>
+                              {thread.updatedAt && (
+                                <span className="shrink-0 text-[10px] text-muted-foreground/50">
+                                  {formatDate(thread.updatedAt)}
+                                </span>
+                              )}
+                            </Button>
+                          );
+                        })}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             );
           })}
