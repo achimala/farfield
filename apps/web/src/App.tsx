@@ -631,15 +631,53 @@ export function App(): React.JSX.Element {
     const cs = conversationState;
     if (!cs) return;
     const lm = cs.latestCollaborationMode;
-    const nextModeKey = lm?.mode ?? selectedModeKey;
-    const nextModelId = lm?.settings.model ?? cs.latestModel ?? "";
-    const nextReasoningEffort = lm?.settings.reasoning_effort ?? cs.latestReasoningEffort ?? "";
-    if (nextModeKey) setSelectedModeKey(nextModeKey);
-    setSelectedModelId(nextModelId);
-    setSelectedReasoningEffort(nextReasoningEffort);
-    lastAppliedModeSignatureRef.current = `${nextModeKey}|${nextModelId}|${nextReasoningEffort}`;
-    setHasHydratedModeFromLiveState(true);
-  }, [conversationState]);
+    const explicitModeKey = lm?.mode;
+    const explicitModelId = lm?.settings.model;
+    const explicitReasoningEffort = lm?.settings.reasoning_effort;
+
+    if (!hasHydratedModeFromLiveState) {
+      const nextModeKey = explicitModeKey ?? selectedModeKey;
+      const nextModelId = explicitModelId ?? cs.latestModel ?? "";
+      const nextReasoningEffort = explicitReasoningEffort ?? cs.latestReasoningEffort ?? "";
+      if (nextModeKey) setSelectedModeKey(nextModeKey);
+      setSelectedModelId(nextModelId);
+      setSelectedReasoningEffort(nextReasoningEffort);
+      lastAppliedModeSignatureRef.current = `${nextModeKey}|${nextModelId}|${nextReasoningEffort}`;
+      setHasHydratedModeFromLiveState(true);
+      return;
+    }
+
+    let didApplyExplicitSync = false;
+    let resolvedModeKey = selectedModeKey;
+    let resolvedModelId = selectedModelId;
+    let resolvedReasoningEffort = selectedReasoningEffort;
+
+    if (explicitModeKey) {
+      setSelectedModeKey(explicitModeKey);
+      resolvedModeKey = explicitModeKey;
+      didApplyExplicitSync = true;
+    }
+    if (explicitModelId != null) {
+      setSelectedModelId(explicitModelId);
+      resolvedModelId = explicitModelId;
+      didApplyExplicitSync = true;
+    }
+    if (explicitReasoningEffort != null) {
+      setSelectedReasoningEffort(explicitReasoningEffort);
+      resolvedReasoningEffort = explicitReasoningEffort;
+      didApplyExplicitSync = true;
+    }
+
+    if (didApplyExplicitSync) {
+      lastAppliedModeSignatureRef.current = `${resolvedModeKey}|${resolvedModelId}|${resolvedReasoningEffort}`;
+    }
+  }, [
+    conversationState,
+    hasHydratedModeFromLiveState,
+    selectedModeKey,
+    selectedModelId,
+    selectedReasoningEffort
+  ]);
 
   useEffect(() => {
     lastAppliedModeSignatureRef.current = "";
