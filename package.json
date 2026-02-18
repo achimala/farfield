@@ -4,6 +4,7 @@
   "packageManager": "pnpm@10.29.3",
   "scripts": {
     "dev": "pnpm --filter @codex-monitor/codex-protocol build && pnpm --filter @codex-monitor/codex-api build && pnpm --parallel --filter @codex-monitor/server --filter @codex-monitor/web dev",
+    "dev:remote": "pnpm --filter @codex-monitor/codex-protocol build && pnpm --filter @codex-monitor/codex-api build && pnpm --parallel --filter @codex-monitor/server --filter @codex-monitor/web dev:remote",
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "lint": "pnpm -r lint",
