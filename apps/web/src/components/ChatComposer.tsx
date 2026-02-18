@@ -7,6 +7,7 @@ type ChatComposerProps = {
   canSend: boolean;
   isBusy: boolean;
   isGenerating: boolean;
+  placeholder?: string;
   onInterrupt: () => void | Promise<void>;
   onSend: (text: string) => void | Promise<void>;
 };
@@ -15,6 +16,7 @@ export function ChatComposer({
   canSend,
   isBusy,
   isGenerating,
+  placeholder = "Message Codex…",
   onInterrupt,
   onSend
 }: ChatComposerProps): React.JSX.Element {
@@ -104,7 +106,7 @@ export function ChatComposer({
             void sendDraft();
           }
         }}
-        placeholder="Message Codex…"
+        placeholder={placeholder}
         rows={1}
         className="flex-1 min-h-9 max-h-[200px] resize-none overflow-y-auto border-0 bg-transparent px-0 py-2 text-base leading-5 shadow-none transition-[height] duration-90 ease-out focus-visible:ring-0 md:text-sm"
       />

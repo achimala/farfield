@@ -34,6 +34,7 @@ import {
   readThread,
   getTraceStatus,
   interruptThread,
+  listAgents,
   listCollaborationModes,
   listModels,
   listDebugHistory,
@@ -44,7 +45,8 @@ import {
   setCollaborationMode,
   startTrace,
   stopTrace,
-  submitUserInput
+  submitUserInput,
+  type AgentKind
 } from "@/lib/api";
 import { useTheme } from "@/hooks/useTheme";
 import { ConversationItem } from "@/components/ConversationItem";
@@ -336,6 +338,9 @@ export function App(): React.JSX.Element {
   const [waitForReplayResponse, setWaitForReplayResponse] = useState(false);
   const [selectedRequestId, setSelectedRequestId] = useState<number | null>(null);
   const [answerDraft, setAnswerDraft] = useState<Record<string, { option: string; freeform: string }>>({});
+  const [availableAgents, setAvailableAgents] = useState<AgentKind[]>(["codex"]);
+  const [defaultAgent, setDefaultAgent] = useState<AgentKind>("codex");
+  const [selectedAgentKind, setSelectedAgentKind] = useState<AgentKind>("codex");
 
   /* UI state */
   const [activeTab, setActiveTab] = useState<"chat" | "debug">(initialUiState.tab);
@@ -422,6 +427,12 @@ export function App(): React.JSX.Element {
     return pendingRequests.find((r) => r.id === selectedRequestId) ?? pendingRequests[0];
   }, [pendingRequests, selectedRequestId]);
 
+  const activeThreadAgentKind: AgentKind = useMemo(() => {
+    const thread = selectedThread as (Thread & { agentKind?: AgentKind }) | null;
+    return thread?.agentKind ?? "codex";
+  }, [selectedThread]);
+  const isActiveThreadOpenCode = activeThreadAgentKind === "opencode";
+
   const planModeOption = useMemo(
     () => modes.find((mode) => isPlanModeOption(mode)) ?? null,
     [modes]
@@ -503,13 +514,14 @@ export function App(): React.JSX.Element {
 
   /* Data loading */
   const loadCoreData = useCallback(async () => {
-    const [nh, nt, nm, nmo, ntr, nhist] = await Promise.all([
+    const [nh, nt, nm, nmo, ntr, nhist, nag] = await Promise.all([
       getHealth(),
       listThreads({ limit: 80, archived: false, all: true, maxPages: 20 }),
       listCollaborationModes(),
       listModels(),
       getTraceStatus(),
-      listDebugHistory(120)
+      listDebugHistory(120),
+      listAgents().catch(() => null)
     ]);
     setHealth(nh);
     setThreads(nt.data);
@@ -517,6 +529,12 @@ export function App(): React.JSX.Element {
     setModels(nmo.data);
     setTraceStatus(ntr);
     setHistory(nhist.history);
+    if (nag) {
+      const enabledAgents = nag.agents.filter((a) => a.enabled).map((a) => a.kind);
+      if (enabledAgents.length > 0) setAvailableAgents(enabledAgents);
+      setDefaultAgent(nag.defaultAgent);
+      setSelectedAgentKind((cur) => (enabledAgents.includes(cur) ? cur : nag.defaultAgent));
+    }
     setSelectedThreadId((cur) => {
       if (cur) return cur;
       return nt.data[0]?.id ?? null;
@@ -768,19 +786,34 @@ export function App(): React.JSX.Element {
 
   /* Actions */
   const submitMessage = useCallback(async (draft: string) => {
-    if (!selectedThreadId || !draft.trim()) return;
+    if (!draft.trim()) return;
+
     setIsBusy(true);
     try {
       setError("");
-      await sendMessage({ threadId: selectedThreadId, text: draft });
-      pendingMaterializationThreadIdsRef.current.delete(selectedThreadId);
+
+      let threadId = selectedThreadId;
+
+      // Auto-create a thread if none is selected.
+      if (!threadId) {
+        const created = await createThread({
+          agentKind: selectedAgentKind
+        });
+        threadId = created.threadId;
+        pendingMaterializationThreadIdsRef.current.add(threadId);
+        setSelectedThreadId(threadId);
+        selectedThreadIdRef.current = threadId;
+      }
+
+      await sendMessage({ threadId, text: draft });
+      pendingMaterializationThreadIdsRef.current.delete(threadId);
       await refreshAll();
     } catch (e) {
       setError(toErrorMessage(e));
     } finally {
       setIsBusy(false);
     }
-  }, [refreshAll, selectedThreadId]);
+  }, [refreshAll, selectedAgentKind, selectedThreadId]);
 
   const applyModeDraft = useCallback(async (draft: {
     modeKey: string;
@@ -902,7 +935,7 @@ export function App(): React.JSX.Element {
     []
   );
 
-  const createNewThread = useCallback(async (projectPath: string) => {
+  const createNewThread = useCallback(async (projectPath: string, agentKind?: AgentKind) => {
     const trimmedProjectPath = projectPath.trim();
     if (!trimmedProjectPath) {
       setError("Cannot create thread: missing project path");
@@ -911,7 +944,10 @@ export function App(): React.JSX.Element {
     setIsBusy(true);
     try {
       setError("");
-      const created = await createThread({ cwd: trimmedProjectPath });
+      const created = await createThread({
+        cwd: trimmedProjectPath,
+        ...(agentKind ? { agentKind } : {})
+      });
       pendingMaterializationThreadIdsRef.current.add(created.threadId);
       setSelectedThreadId(created.threadId);
       selectedThreadIdRef.current = created.threadId;
@@ -1179,8 +1215,13 @@ export function App(): React.JSX.Element {
               </div>
             )}
             <div className="min-w-0">
-              <div className="text-sm font-medium truncate leading-5">
+              <div className="text-sm font-medium truncate leading-5 flex items-center gap-1.5">
                 {selectedThread ? threadLabel(selectedThread) : "No thread selected"}
+                {selectedThread && isActiveThreadOpenCode && (
+                  <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-medium leading-3">
+                    OpenCode
+                  </span>
+                )}
               </div>
               {isGenerating && (
                 <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
@@ -1259,7 +1300,11 @@ export function App(): React.JSX.Element {
                 >
                   {turns.length === 0 ? (
                     <div className="text-center py-20 text-sm text-muted-foreground">
-                      {selectedThreadId ? "No messages yet" : "Select a thread from the sidebar"}
+                      {selectedThreadId
+                        ? "No messages yet"
+                        : availableAgents.length > 0
+                          ? "Start typing to create a new thread"
+                          : "Select a thread from the sidebar"}
                     </div>
                   ) : (
                     <motion.div layout={allowEntryLayoutAnimations} className="space-y-8">
@@ -1348,9 +1393,9 @@ export function App(): React.JSX.Element {
               />
               <div className="relative max-w-3xl mx-auto space-y-2">
 
-                {/* Pending user input */}
+                {/* Pending user input (Codex only) */}
                 <AnimatePresence>
-                  {activeRequest && (
+                  {activeRequest && !isActiveThreadOpenCode && (
                     <PendingRequestCard
                       request={activeRequest}
                       answerDraft={answerDraft}
@@ -1365,99 +1410,129 @@ export function App(): React.JSX.Element {
                 {/* Composer */}
                 <div className="flex flex-col gap-2">
                   <ChatComposer
-                    canSend={Boolean(selectedThreadId)}
+                    canSend={Boolean(selectedThreadId) || availableAgents.length > 0}
                     isBusy={isBusy}
                     isGenerating={isGenerating}
+                    placeholder={
+                      selectedThreadId
+                        ? (isActiveThreadOpenCode ? "Message OpenCode…" : "Message Codex…")
+                        : (availableAgents.includes("opencode") ? "Message OpenCode…" : "Message Codex…")
+                    }
                     onInterrupt={runInterrupt}
                     onSend={submitMessage}
                   />
 
                   {/* Toolbar */}
                   <div className="flex items-center gap-1 min-w-0 overflow-x-auto overflow-y-hidden whitespace-nowrap">
-                    <Button
-                      type="button"
-                      onClick={() => {
-                        if (!planModeOption) return;
-                        const nextModeKey = isPlanModeEnabled
-                          ? (defaultModeOption?.mode ?? selectedModeKey)
-                          : planModeOption.mode;
-                        if (!nextModeKey) return;
-                        setSelectedModeKey(nextModeKey);
-                        void applyModeDraft({
-                          modeKey: nextModeKey,
-                          modelId: selectedModelId,
-                          reasoningEffort: selectedReasoningEffort
-                        });
-                      }}
-                      variant="ghost"
-                      size="sm"
-                      className={`h-8 shrink-0 rounded-full px-2 text-xs ${
-                        isPlanModeEnabled
-                          ? "bg-blue-500/15 text-blue-600 hover:bg-blue-500/20 dark:text-blue-300"
-                          : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
-                      }`}
-                      disabled={!selectedThreadId || !planModeOption}
-                    >
-                      {isPlanModeEnabled ? <CircleDot size={10} /> : <Circle size={10} />}
-                      Plan
-                    </Button>
-                    <Select
-                      value={selectedModelId || APP_DEFAULT_VALUE}
-                      onValueChange={(value) => {
-                        const nextModelId = value === APP_DEFAULT_VALUE ? "" : value;
-                        setSelectedModelId(nextModelId);
-                        void applyModeDraft({
-                          modeKey: selectedModeKey,
-                          modelId: nextModelId,
-                          reasoningEffort: selectedReasoningEffort
-                        });
-                      }}
-                      disabled={!selectedThreadId || !selectedModeKey}
-                    >
-                      <SelectTrigger className="h-8 w-[132px] sm:w-[176px] shrink-0 rounded-full border-0 bg-transparent dark:bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:text-foreground focus-visible:ring-0">
-                        <SelectValue placeholder="Model" />
-                      </SelectTrigger>
-                      <SelectContent position="popper">
-                        <SelectItem value={APP_DEFAULT_VALUE}>{ASSUMED_APP_DEFAULT_MODEL}</SelectItem>
-                        {modelOptionsWithoutAssumedDefault.map((option) => (
-                          <SelectItem key={option.id} value={option.id}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Select
-                      value={selectedReasoningEffort || APP_DEFAULT_VALUE}
-                      onValueChange={(value) => {
-                        const nextReasoningEffort = value === APP_DEFAULT_VALUE ? "" : value;
-                        setSelectedReasoningEffort(nextReasoningEffort);
-                        void applyModeDraft({
-                          modeKey: selectedModeKey,
-                          modelId: selectedModelId,
-                          reasoningEffort: nextReasoningEffort
-                        });
-                      }}
-                      disabled={!selectedThreadId || !selectedModeKey}
-                    >
-                      <SelectTrigger className="h-8 w-[104px] sm:w-[148px] shrink-0 rounded-full border-0 bg-transparent dark:bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:text-foreground focus-visible:ring-0">
-                        <SelectValue placeholder="Effort" />
-                      </SelectTrigger>
-                      <SelectContent position="popper">
-                        <SelectItem value={APP_DEFAULT_VALUE}>{ASSUMED_APP_DEFAULT_EFFORT}</SelectItem>
-                        {effortOptionsWithoutAssumedDefault.map((option) => (
-                          <SelectItem key={option} value={option}>
-                            {option}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <span
-                      className={`inline-flex w-3 items-center justify-center text-xs text-muted-foreground transition-opacity ${
-                        isModeSyncing ? "opacity-100" : "opacity-0"
-                      }`}
-                    >
-                      <Loader2 size={10} className={isModeSyncing ? "animate-spin" : ""} />
-                    </span>
+                    {availableAgents.length > 1 && (
+                      <Select
+                        value={selectedAgentKind}
+                        onValueChange={(value) => setSelectedAgentKind(value as AgentKind)}
+                      >
+                        <SelectTrigger className="h-8 w-[100px] shrink-0 rounded-full border-0 bg-transparent dark:bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:text-foreground focus-visible:ring-0">
+                          <SelectValue placeholder="Agent" />
+                        </SelectTrigger>
+                        <SelectContent position="popper">
+                          {availableAgents.map((kind) => (
+                            <SelectItem key={kind} value={kind}>
+                              {kind === "codex" ? "Codex" : "OpenCode"}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    {!isActiveThreadOpenCode && (
+                      <Button
+                        type="button"
+                        onClick={() => {
+                          if (!planModeOption) return;
+                          const nextModeKey = isPlanModeEnabled
+                            ? (defaultModeOption?.mode ?? selectedModeKey)
+                            : planModeOption.mode;
+                          if (!nextModeKey) return;
+                          setSelectedModeKey(nextModeKey);
+                          void applyModeDraft({
+                            modeKey: nextModeKey,
+                            modelId: selectedModelId,
+                            reasoningEffort: selectedReasoningEffort
+                          });
+                        }}
+                        variant="ghost"
+                        size="sm"
+                        className={`h-8 shrink-0 rounded-full px-2 text-xs ${
+                          isPlanModeEnabled
+                            ? "bg-blue-500/15 text-blue-600 hover:bg-blue-500/20 dark:text-blue-300"
+                            : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
+                        }`}
+                        disabled={!selectedThreadId || !planModeOption}
+                      >
+                        {isPlanModeEnabled ? <CircleDot size={10} /> : <Circle size={10} />}
+                        Plan
+                      </Button>
+                    )}
+                    {!isActiveThreadOpenCode && (
+                      <Select
+                        value={selectedModelId || APP_DEFAULT_VALUE}
+                        onValueChange={(value) => {
+                          const nextModelId = value === APP_DEFAULT_VALUE ? "" : value;
+                          setSelectedModelId(nextModelId);
+                          void applyModeDraft({
+                            modeKey: selectedModeKey,
+                            modelId: nextModelId,
+                            reasoningEffort: selectedReasoningEffort
+                          });
+                        }}
+                        disabled={!selectedThreadId || !selectedModeKey}
+                      >
+                        <SelectTrigger className="h-8 w-[132px] sm:w-[176px] shrink-0 rounded-full border-0 bg-transparent dark:bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:text-foreground focus-visible:ring-0">
+                          <SelectValue placeholder="Model" />
+                        </SelectTrigger>
+                        <SelectContent position="popper">
+                          <SelectItem value={APP_DEFAULT_VALUE}>{ASSUMED_APP_DEFAULT_MODEL}</SelectItem>
+                          {modelOptionsWithoutAssumedDefault.map((option) => (
+                            <SelectItem key={option.id} value={option.id}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    {!isActiveThreadOpenCode && (
+                      <Select
+                        value={selectedReasoningEffort || APP_DEFAULT_VALUE}
+                        onValueChange={(value) => {
+                          const nextReasoningEffort = value === APP_DEFAULT_VALUE ? "" : value;
+                          setSelectedReasoningEffort(nextReasoningEffort);
+                          void applyModeDraft({
+                            modeKey: selectedModeKey,
+                            modelId: selectedModelId,
+                            reasoningEffort: nextReasoningEffort
+                          });
+                        }}
+                        disabled={!selectedThreadId || !selectedModeKey}
+                      >
+                        <SelectTrigger className="h-8 w-[104px] sm:w-[148px] shrink-0 rounded-full border-0 bg-transparent dark:bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:text-foreground focus-visible:ring-0">
+                          <SelectValue placeholder="Effort" />
+                        </SelectTrigger>
+                        <SelectContent position="popper">
+                          <SelectItem value={APP_DEFAULT_VALUE}>{ASSUMED_APP_DEFAULT_EFFORT}</SelectItem>
+                          {effortOptionsWithoutAssumedDefault.map((option) => (
+                            <SelectItem key={option} value={option}>
+                              {option}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    {!isActiveThreadOpenCode && (
+                      <span
+                        className={`inline-flex w-3 items-center justify-center text-xs text-muted-foreground transition-opacity ${
+                          isModeSyncing ? "opacity-100" : "opacity-0"
+                        }`}
+                      >
+                        <Loader2 size={10} className={isModeSyncing ? "animate-spin" : ""} />
+                      </span>
+                    )}
                     {pendingRequests.length > 0 && (
                       <span className="shrink-0 text-xs text-amber-500 dark:text-amber-400">
                         {pendingRequests.length} pending
