@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  parseAppServerListThreadsResponse,
   parseAppServerReadThreadResponse,
   parseAppServerListModelsResponse,
   parseAppServerCollaborationModeListResponse,
@@ -620,6 +621,24 @@ describe("codex-protocol schemas", () => {
     expect(parsed["hidden"]).toBe(true);
   });
 
+  it("parses app-server thread/list response from opencode agent", () => {
+    const parsed = parseAppServerListThreadsResponse({
+      data: [
+        {
+          id: "sess-1",
+          preview: "Test Session",
+          createdAt: 1700000000,
+          updatedAt: 1700000100,
+          cwd: "/tmp/project",
+          source: "opencode"
+        }
+      ],
+      nextCursor: null
+    });
+
+    expect(parsed.data[0]?.id).toBe("sess-1");
+  });
+
   it("parses app-server thread/read response with subset validation", () => {
     const parsed = parseAppServerReadThreadResponse({
       thread: {
@@ -680,5 +699,21 @@ describe("codex-protocol schemas", () => {
 
     expect(parsed.thread.id).toBe("thread-456");
     expect(parsed.model).toBe("gpt-5.3-codex");
+  });
+
+  it("parses app-server thread/start response from opencode agent", () => {
+    const parsed = parseAppServerStartThreadResponse({
+      thread: {
+        id: "sess-2",
+        preview: "(untitled)",
+        createdAt: 1700000000,
+        updatedAt: 1700000000,
+        cwd: "/tmp/project",
+        source: "opencode"
+      },
+      cwd: "/tmp/project"
+    });
+
+    expect(parsed.thread.id).toBe("sess-2");
   });
 });

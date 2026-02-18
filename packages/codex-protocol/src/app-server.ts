@@ -8,8 +8,7 @@ import {
   SendUserMessageResponseSchema as GeneratedSendUserMessageResponseSchema,
   ThreadListResponseSchema as GeneratedThreadListResponseSchema,
   ThreadReadResponseSchema as GeneratedThreadReadResponseSchema,
-  ThreadStartParamsSchema as GeneratedThreadStartParamsSchema,
-  ThreadStartResponseSchema as GeneratedThreadStartResponseSchema
+  ThreadStartParamsSchema as GeneratedThreadStartParamsSchema
 } from "./generated/app-server/index.js";
 
 const AppServerThreadListResponseBaseSchema = GeneratedThreadListResponseSchema.passthrough();
@@ -18,14 +17,31 @@ const AppServerModelListResponseBaseSchema = GeneratedModelListResponseSchema.pa
 const AppServerCollaborationModeListResponseBaseSchema =
   GeneratedCollaborationModeListResponseSchema.passthrough();
 const AppServerStartThreadRequestBaseSchema = GeneratedThreadStartParamsSchema.passthrough();
-const AppServerStartThreadResponseBaseSchema = GeneratedThreadStartResponseSchema.passthrough();
 const AppServerSendUserMessageRequestBaseSchema = GeneratedSendUserMessageParamsSchema.passthrough();
 const AppServerSendUserMessageResponseBaseSchema = GeneratedSendUserMessageResponseSchema;
 
-export const AppServerThreadListItemSchema = AppServerThreadListResponseBaseSchema.shape.data.element;
+const AppServerGeneratedThreadListItemSchema = AppServerThreadListResponseBaseSchema.shape.data.element;
 
-export const AppServerListThreadsResponseSchema = AppServerThreadListResponseBaseSchema
-  .extend({
+const OpenCodeThreadListItemSchema = z
+  .object({
+    id: z.string().min(1),
+    preview: z.string(),
+    createdAt: z.number().int().nonnegative(),
+    updatedAt: z.number().int().nonnegative(),
+    cwd: z.string().optional(),
+    source: z.literal("opencode")
+  })
+  .passthrough();
+
+export const AppServerThreadListItemSchema = z.union([
+  AppServerGeneratedThreadListItemSchema,
+  OpenCodeThreadListItemSchema
+]);
+
+export const AppServerListThreadsResponseSchema = z
+  .object({
+    data: z.array(AppServerThreadListItemSchema),
+    nextCursor: z.union([z.string(), z.null()]).optional(),
     pages: z.number().int().nonnegative().optional(),
     truncated: z.boolean().optional()
   })
@@ -57,7 +73,17 @@ export const AppServerCollaborationModeListResponseSchema =
 
 export const AppServerStartThreadRequestSchema = AppServerStartThreadRequestBaseSchema;
 
-export const AppServerStartThreadResponseSchema = AppServerStartThreadResponseBaseSchema;
+export const AppServerStartThreadResponseSchema = z
+  .object({
+    thread: AppServerThreadListItemSchema,
+    model: z.string().optional(),
+    modelProvider: z.string().optional(),
+    cwd: z.string().optional(),
+    approvalPolicy: z.string().optional(),
+    sandbox: z.any().optional(),
+    reasoningEffort: z.union([z.string(), z.null()]).optional()
+  })
+  .passthrough();
 
 export const AppServerSendUserMessageRequestSchema = AppServerSendUserMessageRequestBaseSchema;
 

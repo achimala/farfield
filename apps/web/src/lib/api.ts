@@ -180,12 +180,14 @@ export async function listAgents(): Promise<z.infer<typeof AgentsResponseSchema>
   return AgentsResponseSchema.parse(await request("/api/agents"));
 }
 
-const ThreadListItemWithAgentSchema = AppServerListThreadsResponseSchema.shape.data.element
-  .passthrough()
-  .extend({
-    agentId: z.enum(["codex", "opencode"]),
-    source: z.string().optional()
-  });
+const ThreadListItemWithAgentSchema = AppServerListThreadsResponseSchema.shape.data.element.and(
+  z
+    .object({
+      agentId: z.enum(["codex", "opencode"]),
+      source: z.string().optional()
+    })
+    .passthrough()
+);
 
 const ThreadListResponseSchema = z
   .object({
