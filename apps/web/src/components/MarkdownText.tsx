@@ -1,3 +1,4 @@
+import { memo } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CodeSnippet } from "./CodeSnippet";
@@ -37,7 +38,7 @@ const components: Components = {
   }
 };
 
-export function MarkdownText({ text }: MarkdownTextProps) {
+function MarkdownTextComponent({ text }: MarkdownTextProps) {
   return (
     <div className="markdown-content text-sm leading-relaxed text-foreground break-words">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
@@ -46,3 +47,5 @@ export function MarkdownText({ text }: MarkdownTextProps) {
     </div>
   );
 }
+
+export const MarkdownText = memo(MarkdownTextComponent);

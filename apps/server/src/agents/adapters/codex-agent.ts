@@ -123,12 +123,11 @@ export class CodexAgentAdapter implements AgentAdapter {
     this.service = new CodexMonitorService(this.ipcClient);
 
     this.ipcClient.onConnectionState((state) => {
-      this.runtimeState = {
-        ...this.runtimeState,
+      this.patchRuntimeState({
         ipcConnected: state.connected,
         ipcInitialized: state.connected ? this.runtimeState.ipcInitialized : false,
         ...(state.reason ? { lastError: state.reason } : {})
-      };
+      });
 
       if (!state.connected) {
         this.scheduleIpcReconnect();
@@ -136,8 +135,6 @@ export class CodexAgentAdapter implements AgentAdapter {
         clearTimeout(this.reconnectTimer);
         this.reconnectTimer = null;
       }
-
-      this.notifyStateChanged();
     });
 
     this.ipcClient.onFrame((frame) => {
@@ -571,6 +568,28 @@ export class CodexAgentAdapter implements AgentAdapter {
     }
   }
 
+  private setRuntimeState(next: CodexAgentRuntimeState): void {
+    const isSameState = this.runtimeState.appReady === next.appReady
+      && this.runtimeState.ipcConnected === next.ipcConnected
+      && this.runtimeState.ipcInitialized === next.ipcInitialized
+      && this.runtimeState.codexAvailable === next.codexAvailable
+      && this.runtimeState.lastError === next.lastError;
+
+    if (isSameState) {
+      return;
+    }
+
+    this.runtimeState = next;
+    this.notifyStateChanged();
+  }
+
+  private patchRuntimeState(patch: Partial<CodexAgentRuntimeState>): void {
+    this.setRuntimeState({
+      ...this.runtimeState,
+      ...patch
+    });
+  }
+
   private ensureCodexAvailable(): void {
     if (!this.runtimeState.codexAvailable) {
       throw new Error("Codex backend is not available");
@@ -597,28 +616,18 @@ export class CodexAgentAdapter implements AgentAdapter {
   private async runAppServerCall<T>(operation: () => Promise<T>): Promise<T> {
     try {
       const result = await operation();
-      this.runtimeState = {
-        ...this.runtimeState,
-        appReady: true
-      };
-      this.notifyStateChanged();
+      this.patchRuntimeState({
+        appReady: true,
+        lastError: null
+      });
       return result;
     } catch (error) {
-      this.runtimeState = {
-        ...this.runtimeState,
-        appReady: !(error instanceof AppServerTransportError)
-      };
-      this.setRuntimeError(error);
-      this.notifyStateChanged();
+      this.patchRuntimeState({
+        appReady: !(error instanceof AppServerTransportError),
+        lastError: toErrorMessage(error)
+      });
       throw error;
     }
-  }
-
-  private setRuntimeError(error: Error | string | unknown): void {
-    this.runtimeState = {
-      ...this.runtimeState,
-      lastError: toErrorMessage(error)
-    };
   }
 
   private async bootstrapConnections(): Promise<void> {
@@ -639,17 +648,15 @@ export class CodexAgentAdapter implements AgentAdapter {
             (error as NodeJS.ErrnoException).code === "ENOENT");
 
         if (isSpawnError) {
-          this.runtimeState = {
-            ...this.runtimeState,
+          this.patchRuntimeState({
             codexAvailable: false,
             lastError: message
-          };
+          });
           logger.warn({ error: message }, "codex-not-found");
         }
       }
 
       if (!this.runtimeState.codexAvailable) {
-        this.notifyStateChanged();
         this.bootstrapInFlight = null;
         return;
       }
@@ -658,25 +665,21 @@ export class CodexAgentAdapter implements AgentAdapter {
         if (!this.ipcClient.isConnected()) {
           await this.ipcClient.connect();
         }
-        this.runtimeState = {
-          ...this.runtimeState,
+        this.patchRuntimeState({
           ipcConnected: true
-        };
+        });
 
         await this.ipcClient.initialize(this.label);
-        this.runtimeState = {
-          ...this.runtimeState,
+        this.patchRuntimeState({
           ipcInitialized: true
-        };
+        });
       } catch (error) {
-        this.runtimeState = {
-          ...this.runtimeState,
+        this.patchRuntimeState({
           ipcInitialized: false,
           ipcConnected: this.ipcClient.isConnected(),
           lastError: toErrorMessage(error)
-        };
+        });
       } finally {
-        this.notifyStateChanged();
         this.bootstrapInFlight = null;
       }
     })();

@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { z } from "zod";
 import type { TurnItemSchema } from "@farfield/protocol";
 import { ReasoningBlock } from "./ReasoningBlock";
@@ -49,7 +50,7 @@ function assertNever(value: never): never {
   throw new Error(`Unhandled turn item type: ${String(value)}`);
 }
 
-export function ConversationItem({
+function ConversationItemComponent({
   item,
   isLast,
   turnIsInProgress,
@@ -201,3 +202,15 @@ export function ConversationItem({
       return assertNever(item);
   }
 }
+
+function areConversationItemPropsEqual(prev: Props, next: Props): boolean {
+  return (
+    prev.item === next.item &&
+    prev.isLast === next.isLast &&
+    prev.turnIsInProgress === next.turnIsInProgress &&
+    prev.previousItemType === next.previousItemType &&
+    prev.nextItemType === next.nextItemType
+  );
+}
+
+export const ConversationItem = memo(ConversationItemComponent, areConversationItemPropsEqual);

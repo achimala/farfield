@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark, oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { useTheme } from "@/hooks/useTheme";
@@ -9,7 +10,12 @@ interface CodeSnippetProps {
   className?: string;
 }
 
-export function CodeSnippet({ code, language, wrapLongLines = true, className }: CodeSnippetProps) {
+function CodeSnippetComponent({
+  code,
+  language,
+  wrapLongLines = true,
+  className
+}: CodeSnippetProps) {
   const { theme } = useTheme();
 
   return (
@@ -31,3 +37,5 @@ export function CodeSnippet({ code, language, wrapLongLines = true, className }:
     </div>
   );
 }
+
+export const CodeSnippet = memo(CodeSnippetComponent);

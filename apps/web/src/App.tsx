@@ -1,5 +1,7 @@
 import {
+  startTransition,
   useCallback,
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -70,6 +72,7 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
+import { z } from "zod";
 
 /* ── Types ─────────────────────────────────────────────────── */
 type Health = Awaited<ReturnType<typeof getHealth>>;
@@ -86,6 +89,51 @@ type HistoryDetail = Awaited<ReturnType<typeof getHistoryEntry>>;
 type PendingRequest = ReturnType<typeof getPendingUserInputRequests>[number];
 type Thread = ThreadsResponse["data"][number];
 type AgentDescriptor = AgentsResponse["agents"][number];
+type ConversationTurn = NonNullable<ReadThreadResponse["thread"]>["turns"][number];
+type ConversationTurnItem = NonNullable<ConversationTurn["items"]>[number];
+type ConversationItemType = ConversationTurnItem["type"];
+
+interface FlatConversationItem {
+  key: string;
+  item: ConversationTurnItem;
+  isLast: boolean;
+  turnIsInProgress: boolean;
+  previousItemType: ConversationItemType | undefined;
+  nextItemType: ConversationItemType | undefined;
+  spacingTop: number;
+}
+
+const SseStateEventSchema = z
+  .object({
+    type: z.literal("state"),
+    state: z.object({}).passthrough()
+  })
+  .passthrough();
+
+const SseHistoryEventSchema = z
+  .object({
+    type: z.literal("history"),
+    entry: z
+      .object({
+        source: z.enum(["ipc", "app", "system"]),
+        meta: z
+          .object({
+            method: z.string().optional(),
+            threadId: z.string().optional()
+          })
+          .passthrough()
+      })
+      .passthrough()
+  })
+  .passthrough();
+
+const SseEventSchema = z.union([SseStateEventSchema, SseHistoryEventSchema]);
+
+interface RefreshFlags {
+  refreshCore: boolean;
+  refreshHistory: boolean;
+  refreshSelectedThread: boolean;
+}
 
 /* ── Helpers ────────────────────────────────────────────────── */
 function formatDate(value: number | string | null | undefined): string {
@@ -108,9 +156,35 @@ function toErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+function shouldRenderConversationItem(item: ConversationTurnItem): boolean {
+  switch (item.type) {
+    case "userMessage":
+    case "steeringUserMessage":
+      return item.content.some((part) => part.type === "text" && part.text.length > 0);
+    case "agentMessage":
+      return item.text.length > 0;
+    case "reasoning": {
+      const hasSummary = Array.isArray(item.summary)
+        && item.summary.some((line) => typeof line === "string");
+      return hasSummary || Boolean(item.text);
+    }
+    case "userInputResponse":
+      return Object.values(item.answers).some((answers) => answers.length > 0);
+    default:
+      return true;
+  }
+}
+
+function signaturesMatch(prev: string[], next: string[]): boolean {
+  if (prev.length !== next.length) {
+    return false;
+  }
+  return prev.every((value, index) => value === next[index]);
+}
+
 const DEFAULT_EFFORT_OPTIONS = ["minimal", "low", "medium", "high", "xhigh"] as const;
-const INITIAL_VISIBLE_CHAT_ITEMS = 180;
-const VISIBLE_CHAT_ITEMS_STEP = 120;
+const INITIAL_VISIBLE_CHAT_ITEMS = 90;
+const VISIBLE_CHAT_ITEMS_STEP = 80;
 const APP_DEFAULT_VALUE = "__app_default__";
 const ASSUMED_APP_DEFAULT_MODEL = "gpt-5.3-codex";
 const ASSUMED_APP_DEFAULT_EFFORT = "medium";
@@ -386,7 +460,6 @@ export function App(): React.JSX.Element {
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true);
   const [isChatAtBottom, setIsChatAtBottom] = useState(true);
   const [visibleChatItemLimit, setVisibleChatItemLimit] = useState(INITIAL_VISIBLE_CHAT_ITEMS);
-  const [suppressEntryAnimations, setSuppressEntryAnimations] = useState(false);
   const [hasHydratedModeFromLiveState, setHasHydratedModeFromLiveState] = useState(false);
   const [isModeSyncing, setIsModeSyncing] = useState(false);
   const [sidebarCollapsedGroups, setSidebarCollapsedGroups] = useState<Record<string, boolean>>(
@@ -395,13 +468,23 @@ export function App(): React.JSX.Element {
 
   /* Refs */
   const selectedThreadIdRef = useRef<string | null>(null);
+  const activeTabRef = useRef<"chat" | "debug">(initialUiState.tab);
   const refreshTimerRef = useRef<number | null>(null);
+  const pendingRefreshFlagsRef = useRef<RefreshFlags>({
+    refreshCore: false,
+    refreshHistory: false,
+    refreshSelectedThread: false
+  });
   const coreRefreshIntervalRef = useRef<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const chatContentRef = useRef<HTMLDivElement>(null);
+  const isChatAtBottomRef = useRef(true);
   const lastAppliedModeSignatureRef = useRef("");
   const hasHydratedAgentSelectionRef = useRef(false);
   const pendingMaterializationThreadIdsRef = useRef<Set<string>>(new Set());
+  const threadsSignatureRef = useRef<string[]>([]);
+  const modesSignatureRef = useRef<string[]>([]);
+  const modelsSignatureRef = useRef<string[]>([]);
 
   /* Derived */
   const selectedThread = useMemo(
@@ -488,7 +571,7 @@ export function App(): React.JSX.Element {
     }
 
     return Array.from(groups.values()).sort((left, right) => right.latestUpdatedAt - left.latestUpdatedAt);
-  }, [agentDescriptors, selectedAgentId, threads]);
+  }, [agentDescriptors, threads]);
   const conversationState = useMemo(() => {
     const liveConversationState = liveState?.conversationState ?? null;
     const readConversationState = readThreadState?.thread ?? null;
@@ -567,32 +650,52 @@ export function App(): React.JSX.Element {
     [modelOptions]
   );
 
-  const turns = conversationState?.turns ?? [];
-  const conversationItemCount = useMemo(
-    () => turns.reduce((count, turn) => count + (turn.items?.length ?? 0), 0),
-    [turns]
-  );
-  const firstVisibleChatItemIndex = Math.max(0, conversationItemCount - visibleChatItemLimit);
-  const hasHiddenChatItems = firstVisibleChatItemIndex > 0;
-  const visibleTurns = useMemo(() => {
-    let globalItemIndex = 0;
-    return turns
-      .map((turn, ti) => {
-        const items = turn.items ?? [];
-        const visibleItems: Array<{ item: (typeof items)[number]; itemIndexInTurn: number; globalItemIndex: number }> = [];
-        items.forEach((item, itemIndexInTurn) => {
-          const itemGlobalIndex = globalItemIndex;
-          globalItemIndex += 1;
-          if (itemGlobalIndex >= firstVisibleChatItemIndex) {
-            visibleItems.push({ item, itemIndexInTurn, globalItemIndex: itemGlobalIndex });
-          }
-        });
-        return { turn, turnIndex: ti, visibleItems };
-      })
-      .filter((entry) => entry.visibleItems.length > 0);
-  }, [firstVisibleChatItemIndex, turns]);
+  const deferredConversationState = useDeferredValue(conversationState);
+  const turns = deferredConversationState?.turns ?? [];
   const lastTurn = turns[turns.length - 1];
   const isGenerating = lastTurn?.status === "in-progress";
+  const flatConversationItems = useMemo(() => {
+    const flattened: FlatConversationItem[] = [];
+    let previousRenderedTurnIndex = -1;
+
+    turns.forEach((turn, turnIndex) => {
+      const items = turn.items ?? [];
+      const isLastTurn = turnIndex === turns.length - 1;
+      const turnInProgress = isLastTurn && isGenerating;
+
+      items.forEach((item, itemIndexInTurn) => {
+        if (!shouldRenderConversationItem(item)) {
+          return;
+        }
+        const isFirstRenderedItem = flattened.length === 0;
+        const startsNewTurn = previousRenderedTurnIndex !== turnIndex;
+        const spacingTop = isFirstRenderedItem ? 0 : startsNewTurn ? 32 : 20;
+        flattened.push({
+          key: item.id ?? `${turnIndex}-${itemIndexInTurn}`,
+          item,
+          isLast: false,
+          turnIsInProgress: turnInProgress,
+          previousItemType: items[itemIndexInTurn - 1]?.type,
+          nextItemType: items[itemIndexInTurn + 1]?.type,
+          spacingTop
+        });
+        previousRenderedTurnIndex = turnIndex;
+      });
+    });
+
+    if (flattened.length > 0) {
+      flattened[flattened.length - 1]!.isLast = true;
+    }
+
+    return flattened;
+  }, [isGenerating, turns]);
+  const conversationItemCount = flatConversationItems.length;
+  const firstVisibleChatItemIndex = Math.max(0, conversationItemCount - visibleChatItemLimit);
+  const hasHiddenChatItems = firstVisibleChatItemIndex > 0;
+  const visibleConversationItems = useMemo(
+    () => flatConversationItems.slice(firstVisibleChatItemIndex),
+    [flatConversationItems, firstVisibleChatItemIndex]
+  );
   const commitLabel = health?.state.gitCommit ?? "unknown";
   const codexConfigured = agentsById.codex?.enabled === true;
   const openCodeConnected = agentsById.opencode?.connected === true;
@@ -610,8 +713,6 @@ export function App(): React.JSX.Element {
       health?.state.ipcInitialized === false
     )
     : !openCodeConnected;
-  const allowEntryLayoutAnimations = !suppressEntryAnimations;
-
   /* Data loading */
   const loadCoreData = useCallback(async () => {
     const [nh, nt, nm, nmo, ntr, nhist, nag] = await Promise.all([
@@ -623,42 +724,122 @@ export function App(): React.JSX.Element {
       listDebugHistory(120),
       listAgents().catch(() => null)
     ]);
-    setHealth(nh);
-    setThreads(nt.data);
-    setModes(nm.data);
-    setModels(nmo.data);
-    setTraceStatus(ntr);
-    setHistory(nhist.history);
     let preferredAgentId: AgentId | null = null;
-    if (nag) {
-      setAgentDescriptors(nag.agents);
-      const enabledAgents = nag.agents.filter((agent) => agent.enabled).map((agent) => agent.id);
-      const nextDefaultAgent = enabledAgents.includes(nag.defaultAgentId)
-        ? nag.defaultAgentId
-        : (enabledAgents[0] ?? nag.defaultAgentId);
-      preferredAgentId = nextDefaultAgent;
-      setSelectedAgentId((cur) => {
-        if (!hasHydratedAgentSelectionRef.current) {
-          hasHydratedAgentSelectionRef.current = true;
-          return nextDefaultAgent;
+    const nextThreadsSignature = nt.data.map((thread) =>
+      [
+        thread.id,
+        String(thread.updatedAt ?? 0),
+        thread.preview,
+        thread.agentId,
+        thread.cwd ?? "",
+        thread.path ?? ""
+      ].join("|")
+    );
+    const nextModesSignature = nm.data.map((mode) =>
+      [mode.mode, mode.name, mode.reasoning_effort ?? ""].join("|")
+    );
+    const nextModelsSignature = nmo.data.map((model) =>
+      [model.id, model.displayName ?? ""].join("|")
+    );
+
+    startTransition(() => {
+      setHealth((prev) => {
+        if (
+          prev &&
+          prev.state.appReady === nh.state.appReady &&
+          prev.state.ipcConnected === nh.state.ipcConnected &&
+          prev.state.ipcInitialized === nh.state.ipcInitialized &&
+          prev.state.gitCommit === nh.state.gitCommit &&
+          prev.state.lastError === nh.state.lastError &&
+          prev.state.historyCount === nh.state.historyCount &&
+          prev.state.threadOwnerCount === nh.state.threadOwnerCount
+        ) {
+          return prev;
         }
-        return enabledAgents.includes(cur) ? cur : nextDefaultAgent;
+        return nh;
       });
-    }
-    setSelectedThreadId((cur) => {
-      if (cur) return cur;
-      if (preferredAgentId) {
-        const preferredThread = nt.data.find((thread) => thread.agentId === preferredAgentId);
-        if (preferredThread) {
-          return preferredThread.id;
-        }
+      if (!signaturesMatch(threadsSignatureRef.current, nextThreadsSignature)) {
+        threadsSignatureRef.current = nextThreadsSignature;
+        setThreads(nt.data);
       }
-      return nt.data[0]?.id ?? null;
-    });
-    setSelectedModeKey((cur) => {
-      if (cur) return cur;
-      const nonPlanDefault = nm.data.find((mode) => !isPlanModeOption(mode));
-      return nonPlanDefault?.mode ?? nm.data[0]?.mode ?? "";
+      if (!signaturesMatch(modesSignatureRef.current, nextModesSignature)) {
+        modesSignatureRef.current = nextModesSignature;
+        setModes(nm.data);
+      }
+      if (!signaturesMatch(modelsSignatureRef.current, nextModelsSignature)) {
+        modelsSignatureRef.current = nextModelsSignature;
+        setModels(nmo.data);
+      }
+      setTraceStatus((prev) => {
+        if (
+          prev &&
+          prev.active?.id === ntr.active?.id &&
+          prev.active?.eventCount === ntr.active?.eventCount &&
+          prev.recent.length === ntr.recent.length &&
+          prev.recent[0]?.id === ntr.recent[0]?.id &&
+          prev.recent[0]?.eventCount === ntr.recent[0]?.eventCount
+        ) {
+          return prev;
+        }
+        return ntr;
+      });
+      setHistory((prev) => {
+        if (
+          prev.length === nhist.history.length &&
+          prev[prev.length - 1]?.id === nhist.history[nhist.history.length - 1]?.id
+        ) {
+          return prev;
+        }
+        return nhist.history;
+      });
+      if (nag) {
+        setAgentDescriptors((prev) => {
+          if (
+            prev.length === nag.agents.length &&
+            prev.every((agent, index) => {
+              const nextAgent = nag.agents[index];
+              if (!nextAgent) {
+                return false;
+              }
+              return (
+                agent.id === nextAgent.id &&
+                agent.enabled === nextAgent.enabled &&
+                agent.connected === nextAgent.connected
+              );
+            })
+          ) {
+            return prev;
+          }
+          return nag.agents;
+        });
+        const enabledAgents = nag.agents.filter((agent) => agent.enabled).map((agent) => agent.id);
+        const nextDefaultAgent = enabledAgents.includes(nag.defaultAgentId)
+          ? nag.defaultAgentId
+          : (enabledAgents[0] ?? nag.defaultAgentId);
+        preferredAgentId = nextDefaultAgent;
+        setSelectedAgentId((cur) => {
+          if (!hasHydratedAgentSelectionRef.current) {
+            hasHydratedAgentSelectionRef.current = true;
+            return nextDefaultAgent;
+          }
+          return enabledAgents.includes(cur) ? cur : nextDefaultAgent;
+        });
+      }
+      setSelectedThreadId((cur) => {
+        if (cur) return cur;
+        if (preferredAgentId) {
+          const preferredThread = nt.data.find((thread) => thread.agentId === preferredAgentId);
+          if (preferredThread) {
+            return preferredThread.id;
+          }
+        }
+        return nt.data[0]?.id ?? null;
+      });
+      setSelectedModeKey((cur) => {
+        if (cur) return cur;
+        const nonPlanDefault = nm.data.find((mode) => !isPlanModeOption(mode));
+        return nonPlanDefault?.mode ?? nm.data[0]?.mode ?? "";
+      });
     });
   }, []);
 
@@ -692,19 +873,42 @@ export function App(): React.JSX.Element {
     if ((live.conversationState?.turns.length ?? 0) > 0 || read.thread.turns.length > 0) {
       pendingMaterializationThreadIdsRef.current.delete(threadId);
     }
-    setLiveState(live);
-    setReadThreadState(read);
-    setStreamEvents(stream.events);
+    startTransition(() => {
+      setLiveState((prev) => {
+        if (
+          prev &&
+          prev.threadId === live.threadId &&
+          prev.ownerClientId === live.ownerClientId &&
+          getConversationStateUpdatedAt(prev.conversationState) ===
+            getConversationStateUpdatedAt(live.conversationState)
+        ) {
+          return prev;
+        }
+        return live;
+      });
+      setReadThreadState((prev) => {
+        if (
+          prev &&
+          prev.thread.id === read.thread.id &&
+          prev.thread.updatedAt === read.thread.updatedAt &&
+          prev.thread.turns.length === read.thread.turns.length
+        ) {
+          return prev;
+        }
+        return read;
+      });
+      setStreamEvents((prev) => {
+        const prevLast = prev[prev.length - 1];
+        const nextLast = stream.events[stream.events.length - 1];
+        const prevLastSignature = prevLast ? JSON.stringify(prevLast) : "";
+        const nextLastSignature = nextLast ? JSON.stringify(nextLast) : "";
+        if (prev.length === stream.events.length && prevLastSignature === nextLastSignature) {
+          return prev;
+        }
+        return stream.events;
+      });
+    });
   }, [agentsById, selectedAgentId, threads]);
-
-  const loadLiveData = useCallback(async () => {
-    const [nh, nhist] = await Promise.all([getHealth(), listDebugHistory(120)]);
-    setHealth(nh);
-    setHistory(nhist.history);
-    if (selectedThreadIdRef.current) {
-      await loadSelectedThread(selectedThreadIdRef.current);
-    }
-  }, [loadSelectedThread]);
 
   const refreshAll = useCallback(async () => {
     try {
@@ -719,6 +923,10 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     selectedThreadIdRef.current = selectedThreadId;
   }, [selectedThreadId]);
+
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
 
   useEffect(() => {
     const onPopState = () => {
@@ -763,19 +971,93 @@ export function App(): React.JSX.Element {
 
   useEffect(() => {
     const source = new EventSource("/events");
-    source.onmessage = () => {
-      if (refreshTimerRef.current) window.clearTimeout(refreshTimerRef.current);
+    source.onmessage = (event: MessageEvent<string>) => {
+      let refreshCore = false;
+      const refreshHistory = activeTabRef.current === "debug";
+      let refreshSelectedThread = false;
+
+      try {
+        const parsedEventResult = SseEventSchema.safeParse(JSON.parse(event.data));
+        if (!parsedEventResult.success) {
+          refreshCore = true;
+        } else {
+          const parsedEvent = parsedEventResult.data;
+          if (parsedEvent.type === "state") {
+            refreshCore = true;
+          } else if (parsedEvent.type === "history") {
+            if (parsedEvent.entry.source === "app" || parsedEvent.entry.source === "system") {
+              refreshCore = true;
+            }
+            const eventThreadId = parsedEvent.entry.meta.threadId;
+            if (
+              eventThreadId &&
+              selectedThreadIdRef.current &&
+              eventThreadId === selectedThreadIdRef.current
+            ) {
+              refreshSelectedThread = true;
+            }
+          }
+        }
+      } catch {
+        refreshCore = true;
+      }
+
+      const previousFlags = pendingRefreshFlagsRef.current;
+      pendingRefreshFlagsRef.current = {
+        refreshCore: previousFlags.refreshCore || refreshCore,
+        refreshHistory: previousFlags.refreshHistory || refreshHistory,
+        refreshSelectedThread: previousFlags.refreshSelectedThread || refreshSelectedThread
+      };
+
+      if (refreshTimerRef.current) {
+        window.clearTimeout(refreshTimerRef.current);
+      }
       refreshTimerRef.current = window.setTimeout(() => {
         refreshTimerRef.current = null;
-        void loadLiveData().catch((e) => setError(toErrorMessage(e)));
-      }, 800);
+        const flags = pendingRefreshFlagsRef.current;
+        pendingRefreshFlagsRef.current = {
+          refreshCore: false,
+          refreshHistory: false,
+          refreshSelectedThread: false
+        };
+        void (async () => {
+          try {
+            if (flags.refreshCore) {
+              await loadCoreData();
+            } else if (flags.refreshHistory && activeTabRef.current === "debug") {
+              const nextHistory = await listDebugHistory(120);
+              startTransition(() => {
+                setHistory((prev) => {
+                  if (
+                    prev.length === nextHistory.history.length &&
+                    prev[prev.length - 1]?.id === nextHistory.history[nextHistory.history.length - 1]?.id
+                  ) {
+                    return prev;
+                  }
+                  return nextHistory.history;
+                });
+              });
+            }
+            if (flags.refreshSelectedThread && selectedThreadIdRef.current) {
+              await loadSelectedThread(selectedThreadIdRef.current);
+            }
+          } catch (e) {
+            setError(toErrorMessage(e));
+          }
+        })();
+      }, 200);
     };
     source.onerror = () => source.close();
     return () => {
       if (refreshTimerRef.current) window.clearTimeout(refreshTimerRef.current);
+      pendingRefreshFlagsRef.current = {
+        refreshCore: false,
+        refreshHistory: false,
+        refreshSelectedThread: false
+      };
       source.close();
     };
-  }, [loadLiveData]);
+  }, [loadCoreData, loadSelectedThread]);
 
   useEffect(() => {
     if (!activeRequest) {
@@ -853,6 +1135,10 @@ export function App(): React.JSX.Element {
     writeSidebarCollapsedGroupsToStorage(sidebarCollapsedGroups);
   }, [sidebarCollapsedGroups]);
 
+  useEffect(() => {
+    isChatAtBottomRef.current = isChatAtBottom;
+  }, [isChatAtBottom]);
+
   // Track whether chat view is at the bottom.
   useEffect(() => {
     if (activeTab !== "chat" || !scrollRef.current) {
@@ -860,65 +1146,78 @@ export function App(): React.JSX.Element {
     }
 
     const scroller = scrollRef.current;
-    const updateBottomState = () => {
+    let rafId: number | null = null;
+
+    const syncBottomState = () => {
       const distanceFromBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
-      setIsChatAtBottom(distanceFromBottom <= 48);
+      const nextIsBottom = distanceFromBottom <= 48;
+      if (nextIsBottom !== isChatAtBottomRef.current) {
+        isChatAtBottomRef.current = nextIsBottom;
+        setIsChatAtBottom(nextIsBottom);
+      }
+      rafId = null;
     };
 
-    updateBottomState();
-    scroller.addEventListener("scroll", updateBottomState, { passive: true });
+    const handleScroll = () => {
+      if (rafId !== null) {
+        return;
+      }
+      rafId = window.requestAnimationFrame(syncBottomState);
+    };
+
+    syncBottomState();
+    scroller.addEventListener("scroll", handleScroll, { passive: true });
     return () => {
-      scroller.removeEventListener("scroll", updateBottomState);
+      scroller.removeEventListener("scroll", handleScroll);
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId);
+      }
     };
   }, [activeTab, selectedThreadId]);
 
   // Keep chat pinned to bottom only if user is already at the bottom.
   useEffect(() => {
-    if (activeTab === "chat" && isChatAtBottom && scrollRef.current) {
-      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    if (activeTab === "chat" && isChatAtBottomRef.current && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [activeTab, conversationItemCount, isChatAtBottom]);
+  }, [activeTab, conversationItemCount]);
 
   // Keep bottom pinned when expanded/collapsed blocks change chat height.
   useEffect(() => {
     if (activeTab !== "chat" || !scrollRef.current || !chatContentRef.current) return;
     const scroller = scrollRef.current;
     const content = chatContentRef.current;
+    let rafId: number | null = null;
+
     const observer = new ResizeObserver(() => {
-      if (!isChatAtBottom) return;
-      scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" });
+      if (!isChatAtBottomRef.current) {
+        return;
+      }
+      if (rafId !== null) {
+        return;
+      }
+      rafId = window.requestAnimationFrame(() => {
+        scroller.scrollTop = scroller.scrollHeight;
+        rafId = null;
+      });
     });
     observer.observe(content);
     return () => {
       observer.disconnect();
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId);
+      }
     };
-  }, [activeTab, isChatAtBottom, selectedThreadId]);
+  }, [activeTab, selectedThreadId]);
 
   // New thread selection starts at the bottom.
   useEffect(() => {
     if (activeTab !== "chat" || !scrollRef.current) return;
     scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    isChatAtBottomRef.current = true;
     setIsChatAtBottom(true);
     setVisibleChatItemLimit(INITIAL_VISIBLE_CHAT_ITEMS);
   }, [activeTab, selectedThreadId]);
-
-  // Prevent sliding animations when switching chats.
-  useEffect(() => {
-    setSuppressEntryAnimations(true);
-  }, [selectedThreadId]);
-
-  useEffect(() => {
-    if (!suppressEntryAnimations) return;
-    if (!selectedThreadId) {
-      setSuppressEntryAnimations(false);
-      return;
-    }
-    if (!conversationState) return;
-    const timer = window.setTimeout(() => setSuppressEntryAnimations(false), 0);
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [conversationState, selectedThreadId, suppressEntryAnimations]);
 
   /* Actions */
   const submitMessage = useCallback(async (draft: string) => {
@@ -1193,62 +1492,52 @@ export function App(): React.JSX.Element {
                       <Plus size={14} />
                     </IconBtn>
                   </div>
-                  <AnimatePresence initial={false}>
-                    {!isCollapsed && (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: "auto", opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.16, ease: "easeInOut" }}
-                        className="overflow-hidden"
-                      >
-                        <div className="space-y-1 pl-4 pt-0.5">
-                          {group.threads.length === 0 && (
-                            <div className="px-2.5 py-1 text-[11px] text-muted-foreground/70">
-                              No threads yet
-                            </div>
-                          )}
-                          {group.threads.map((thread) => {
-                            const isSelected = thread.id === selectedThreadId;
-                            return (
-                              <Button
-                                key={thread.id}
-                                type="button"
-                                onClick={() => {
-                                  setSelectedThreadId(thread.id);
-                                  setMobileSidebarOpen(false);
-                                }}
-                                variant="ghost"
-                                className={`w-full min-w-0 h-auto flex items-center justify-between gap-2 rounded-xl px-2.5 py-1.5 text-left text-[13px] tracking-tight font-normal transition-colors ${
-                                  isSelected
-                                    ? "bg-muted/90 text-foreground shadow-sm"
-                                    : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
-                                }`}
-                              >
-                                <span className="min-w-0 flex-1 flex items-center gap-1.5 truncate leading-5">
-                                  {thread.agentId && (
-                                    <span className="shrink-0 h-4 w-4 rounded-sm bg-muted/30 ring-1 ring-border/60 flex items-center justify-center overflow-hidden">
-                                      <AgentFavicon
-                                        agentId={thread.agentId}
-                                        label={agentsById[thread.agentId]?.label ?? "Agent"}
-                                        className="h-3.5 w-3.5"
-                                      />
-                                    </span>
-                                  )}
-                                  <span className="truncate">{threadLabel(thread)}</span>
-                                </span>
-                                {thread.updatedAt && (
-                                  <span className="shrink-0 text-[10px] text-muted-foreground/50">
-                                    {formatDate(thread.updatedAt)}
-                                  </span>
-                                )}
-                              </Button>
-                            );
-                          })}
+                  {!isCollapsed && (
+                    <div className="space-y-1 pl-4 pt-0.5">
+                      {group.threads.length === 0 && (
+                        <div className="px-2.5 py-1 text-[11px] text-muted-foreground/70">
+                          No threads yet
                         </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
+                      )}
+                      {group.threads.map((thread) => {
+                        const isSelected = thread.id === selectedThreadId;
+                        return (
+                          <Button
+                            key={thread.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedThreadId(thread.id);
+                              setMobileSidebarOpen(false);
+                            }}
+                            variant="ghost"
+                            className={`w-full min-w-0 h-auto flex items-center justify-between gap-2 rounded-xl px-2.5 py-1.5 text-left text-[13px] tracking-tight font-normal transition-colors ${
+                              isSelected
+                                ? "bg-muted/90 text-foreground shadow-sm"
+                                : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
+                            }`}
+                          >
+                            <span className="min-w-0 flex-1 flex items-center gap-1.5 truncate leading-5">
+                              {thread.agentId && (
+                                <span className="shrink-0 h-4 w-4 rounded-sm bg-muted/30 ring-1 ring-border/60 flex items-center justify-center overflow-hidden">
+                                  <AgentFavicon
+                                    agentId={thread.agentId}
+                                    label={agentsById[thread.agentId]?.label ?? "Agent"}
+                                    className="h-3.5 w-3.5"
+                                  />
+                                </span>
+                              )}
+                              <span className="truncate">{threadLabel(thread)}</span>
+                            </span>
+                            {thread.updatedAt && (
+                              <span className="shrink-0 text-[10px] text-muted-foreground/50">
+                                {formatDate(thread.updatedAt)}
+                              </span>
+                            )}
+                          </Button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -1478,7 +1767,6 @@ export function App(): React.JSX.Element {
               <AnimatePresence initial={false} mode="wait">
                 <motion.div
                   key={selectedThreadId ?? "__no_thread__"}
-                  ref={chatContentRef}
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
@@ -1494,9 +1782,9 @@ export function App(): React.JSX.Element {
                           : "Select a thread from the sidebar"}
                     </div>
                   ) : (
-                    <motion.div layout={allowEntryLayoutAnimations} className="space-y-8">
+                    <div ref={chatContentRef} className="space-y-0">
                       {hasHiddenChatItems && (
-                        <div className="flex justify-center">
+                        <div className="flex justify-center pb-6">
                           <Button
                             type="button"
                             variant="outline"
@@ -1512,36 +1800,18 @@ export function App(): React.JSX.Element {
                           </Button>
                         </div>
                       )}
-                      {visibleTurns.map(({ turn, turnIndex, visibleItems }) => {
-                        const isLastTurn = turnIndex === turns.length - 1;
-                        const turnInProgress = isLastTurn && isGenerating;
-                        const items = turn.items ?? [];
-                        return (
-                          <motion.div layout={allowEntryLayoutAnimations} key={turn.turnId ?? turnIndex} className="space-y-5">
-                            <AnimatePresence initial={false}>
-                            {visibleItems.map(({ item, itemIndexInTurn, globalItemIndex }) => (
-                              <motion.div
-                                layout={allowEntryLayoutAnimations}
-                                key={item.id ?? `${turnIndex}-${itemIndexInTurn}`}
-                                initial={suppressEntryAnimations ? false : { opacity: 0, y: 12 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0, y: -8 }}
-                                transition={{ duration: 0.2, ease: "easeOut" }}
-                              >
-                                <ConversationItem
-                                  item={item}
-                                  isLast={globalItemIndex === conversationItemCount - 1}
-                                  turnIsInProgress={turnInProgress}
-                                  previousItemType={items[itemIndexInTurn - 1]?.type}
-                                  nextItemType={items[itemIndexInTurn + 1]?.type}
-                                />
-                              </motion.div>
-                            ))}
-                            </AnimatePresence>
-                          </motion.div>
-                        );
-                      })}
-                    </motion.div>
+                      {visibleConversationItems.map((entry) => (
+                        <div key={entry.key} style={{ paddingTop: `${entry.spacingTop}px` }}>
+                          <ConversationItem
+                            item={entry.item}
+                            isLast={entry.isLast}
+                            turnIsInProgress={entry.turnIsInProgress}
+                            previousItemType={entry.previousItemType}
+                            nextItemType={entry.nextItemType}
+                          />
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </motion.div>
               </AnimatePresence>
@@ -1560,7 +1830,7 @@ export function App(): React.JSX.Element {
                     type="button"
                     onClick={() => {
                       if (!scrollRef.current) return;
-                      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+                      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
                       setIsChatAtBottom(true);
                     }}
                     size="icon"

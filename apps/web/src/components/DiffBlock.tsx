@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ChevronRight, FilePlus, FileMinus, FileEdit } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -63,7 +63,7 @@ const GUTTER_STYLES: Record<LineType, string> = {
 };
 const GUTTER_CHAR: Record<LineType, string> = { add: "+", remove: "−", header: "", context: " " };
 
-export function DiffBlock({ changes }: DiffBlockProps) {
+function DiffBlockComponent({ changes }: DiffBlockProps) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
 
   return (
@@ -149,3 +149,9 @@ export function DiffBlock({ changes }: DiffBlockProps) {
     </div>
   );
 }
+
+function areDiffBlockPropsEqual(prev: DiffBlockProps, next: DiffBlockProps): boolean {
+  return prev.changes === next.changes;
+}
+
+export const DiffBlock = memo(DiffBlockComponent, areDiffBlockPropsEqual);

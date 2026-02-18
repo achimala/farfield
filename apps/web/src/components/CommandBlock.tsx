@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ChevronRight,
@@ -31,7 +31,12 @@ function simplifyCommand(cmd: string): string {
   return cmd.length > 140 ? cmd.slice(0, 140) + "…" : cmd;
 }
 
-export function CommandBlock({ item, isActive }: { item: CommandItem; isActive: boolean }) {
+interface CommandBlockProps {
+  item: CommandItem;
+  isActive: boolean;
+}
+
+function CommandBlockComponent({ item, isActive }: CommandBlockProps) {
   const [expanded, setExpanded] = useState(false);
   const isCompleted = item.status === "completed";
   const isSuccess = item.exitCode === 0 || item.exitCode == null;
@@ -134,3 +139,9 @@ export function CommandBlock({ item, isActive }: { item: CommandItem; isActive: 
     </div>
   );
 }
+
+function areCommandBlockPropsEqual(prev: CommandBlockProps, next: CommandBlockProps): boolean {
+  return prev.item === next.item && prev.isActive === next.isActive;
+}
+
+export const CommandBlock = memo(CommandBlockComponent, areCommandBlockPropsEqual);
