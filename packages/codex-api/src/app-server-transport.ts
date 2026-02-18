@@ -5,7 +5,7 @@ import {
   AppServerRpcError,
   AppServerTransportError
 } from "./errors.js";
-import { JsonRpcRequestSchema, parseJsonRpcResponse } from "./json-rpc.js";
+import { JsonRpcRequestSchema, parseJsonRpcIncomingMessage } from "./json-rpc.js";
 
 export interface AppServerTransport {
   request(method: string, params: unknown, timeoutMs?: number): Promise<unknown>;
@@ -97,7 +97,7 @@ export class ChildProcessAppServerTransport implements AppServerTransport {
 
       let message;
       try {
-        message = parseJsonRpcResponse(raw);
+        message = parseJsonRpcIncomingMessage(raw);
       } catch (error) {
         this.rejectAll(
           new AppServerTransportError(
@@ -107,20 +107,30 @@ export class ChildProcessAppServerTransport implements AppServerTransport {
         return;
       }
 
-      const pending = this.pending.get(message.id);
+      if (message.kind === "notification") {
+        return;
+      }
+
+      const pending = this.pending.get(message.value.id);
       if (!pending) {
         return;
       }
 
-      this.pending.delete(message.id);
+      this.pending.delete(message.value.id);
       clearTimeout(pending.timer);
 
-      if (message.error) {
-        pending.reject(new AppServerRpcError(message.error.code, message.error.message, message.error.data));
+      if (message.value.error) {
+        pending.reject(
+          new AppServerRpcError(
+            message.value.error.code,
+            message.value.error.message,
+            message.value.error.data
+          )
+        );
         return;
       }
 
-      pending.resolve(message.result);
+      pending.resolve(message.value.result);
     });
 
     const stderrReader = readline.createInterface({ input: child.stderr });

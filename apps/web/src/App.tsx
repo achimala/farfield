@@ -17,12 +17,14 @@ import {
   Menu,
   Moon,
   PanelLeft,
+  Plus,
   RefreshCcw,
   Sun,
   X
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  createThread,
   getHealth,
   getHistoryEntry,
   getLiveState,
@@ -354,6 +356,7 @@ export function App(): React.JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null);
   const chatContentRef = useRef<HTMLDivElement>(null);
   const lastAppliedModeSignatureRef = useRef("");
+  const pendingMaterializationThreadIdsRef = useRef<Set<string>>(new Set());
 
   /* Derived */
   const selectedThread = useMemo(
@@ -364,6 +367,7 @@ export function App(): React.JSX.Element {
     type Group = {
       key: string;
       label: string;
+      projectPath: string | null;
       latestUpdatedAt: number;
       threads: Thread[];
     };
@@ -387,6 +391,7 @@ export function App(): React.JSX.Element {
         groups.set(key, {
           key,
           label,
+          projectPath,
           latestUpdatedAt: updatedAt,
           threads: [thread]
         });
@@ -512,7 +517,7 @@ export function App(): React.JSX.Element {
     setTraceStatus(ntr);
     setHistory(nhist.history);
     setSelectedThreadId((cur) => {
-      if (cur && nt.data.some((t) => t.id === cur)) return cur;
+      if (cur) return cur;
       return nt.data[0]?.id ?? null;
     });
     setSelectedModeKey((cur) => {
@@ -523,11 +528,15 @@ export function App(): React.JSX.Element {
   }, []);
 
   const loadSelectedThread = useCallback(async (threadId: string) => {
+    const includeTurns = !pendingMaterializationThreadIdsRef.current.has(threadId);
     const [live, stream, read] = await Promise.all([
       getLiveState(threadId),
       getStreamEvents(threadId),
-      readThread(threadId)
+      readThread(threadId, { includeTurns })
     ]);
+    if ((live.conversationState?.turns.length ?? 0) > 0 || read.thread.turns.length > 0) {
+      pendingMaterializationThreadIdsRef.current.delete(threadId);
+    }
     setLiveState(live);
     setReadThreadState(read);
     setStreamEvents(stream.events);
@@ -763,6 +772,7 @@ export function App(): React.JSX.Element {
     try {
       setError("");
       await sendMessage({ threadId: selectedThreadId, text: draft });
+      pendingMaterializationThreadIdsRef.current.delete(selectedThreadId);
       await refreshAll();
     } catch (e) {
       setError(toErrorMessage(e));
@@ -891,6 +901,28 @@ export function App(): React.JSX.Element {
     []
   );
 
+  const createNewThread = useCallback(async (projectPath: string) => {
+    const trimmedProjectPath = projectPath.trim();
+    if (!trimmedProjectPath) {
+      setError("Cannot create thread: missing project path");
+      return;
+    }
+    setIsBusy(true);
+    try {
+      setError("");
+      const created = await createThread({ cwd: trimmedProjectPath });
+      pendingMaterializationThreadIdsRef.current.add(created.threadId);
+      setSelectedThreadId(created.threadId);
+      selectedThreadIdRef.current = created.threadId;
+      setMobileSidebarOpen(false);
+      await refreshAll();
+    } catch (e) {
+      setError(toErrorMessage(e));
+    } finally {
+      setIsBusy(false);
+    }
+  }, [refreshAll]);
+
   const renderSidebarContent = (viewport: "desktop" | "mobile"): React.JSX.Element => (
     <>
       <div className="flex items-center justify-between px-4 h-14 border-b border-sidebar-border shrink-0">
@@ -928,24 +960,42 @@ export function App(): React.JSX.Element {
             const isCollapsed = hasSelectedThread ? false : Boolean(sidebarCollapsedGroups[group.key]);
             return (
               <div key={group.key} className="space-y-1">
-                <Button
-                  type="button"
-                  onClick={() =>
-                    setSidebarCollapsedGroups((prev) => ({
-                      ...prev,
-                      [group.key]: !isCollapsed
-                    }))
-                  }
-                  variant="ghost"
-                  className="h-6 w-full justify-start gap-2 rounded-lg px-2 py-1 text-left text-[13px] tracking-tight font-normal text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-                >
-                  {isCollapsed ? (
-                    <Folder size={13} className="shrink-0" />
-                  ) : (
-                    <FolderOpen size={13} className="shrink-0" />
-                  )}
-                  <span className="min-w-0 truncate">{group.label}</span>
-                </Button>
+                <div className="flex items-center gap-1">
+                  <Button
+                    type="button"
+                    onClick={() =>
+                      setSidebarCollapsedGroups((prev) => ({
+                        ...prev,
+                        [group.key]: !isCollapsed
+                      }))
+                    }
+                    variant="ghost"
+                    className="h-6 flex-1 justify-start gap-2 rounded-lg px-2 py-1 text-left text-[13px] tracking-tight font-normal text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                  >
+                    {isCollapsed ? (
+                      <Folder size={13} className="shrink-0" />
+                    ) : (
+                      <FolderOpen size={13} className="shrink-0" />
+                    )}
+                    <span className="min-w-0 truncate">{group.label}</span>
+                  </Button>
+                  <IconBtn
+                    onClick={() => {
+                      if (!group.projectPath) {
+                        return;
+                      }
+                      void createNewThread(group.projectPath);
+                    }}
+                    title={
+                      group.projectPath
+                        ? `New thread in ${group.label}`
+                        : "Cannot create thread: missing project path"
+                    }
+                    disabled={isBusy || !group.projectPath}
+                  >
+                    <Plus size={14} />
+                  </IconBtn>
+                </div>
                 <AnimatePresence initial={false}>
                   {!isCollapsed && (
                     <motion.div
@@ -1076,7 +1126,11 @@ export function App(): React.JSX.Element {
       </AnimatePresence>
 
       {/* ── Main area ───────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div
+        className={`flex-1 flex flex-col min-w-0 transition-[margin] duration-200 ${
+          desktopSidebarOpen ? "md:ml-64" : "md:ml-0"
+        }`}
+      >
 
         {/* Header */}
         <header className="flex items-center justify-between px-3 h-14 border-b border-border shrink-0 gap-2">

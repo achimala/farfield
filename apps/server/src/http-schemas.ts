@@ -8,6 +8,18 @@ export const SetModeBodySchema = z
   })
   .strict();
 
+export const StartThreadBodySchema = z
+  .object({
+    cwd: z.string().optional(),
+    model: z.string().optional(),
+    modelProvider: z.string().optional(),
+    personality: z.string().optional(),
+    sandbox: z.string().optional(),
+    approvalPolicy: z.string().optional(),
+    ephemeral: z.boolean().optional()
+  })
+  .strict();
+
 export const SendMessageBodySchema = z
   .object({
     ownerClientId: z.string().optional(),

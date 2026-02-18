@@ -13,6 +13,6 @@ export function resolveOwnerClientId(
   }
 
   throw new Error(
-    "No owner client id is known for this thread yet. Open the thread in the desktop app first."
+    "No owner client id is known for this thread yet. Wait for the desktop app to publish a thread event."
   );
 }

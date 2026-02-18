@@ -43,3 +43,36 @@ export function parseJsonRpcResponse(value: unknown): JsonRpcResponse {
   }
   return parsed.data;
 }
+
+export const JsonRpcNotificationSchema = z
+  .object({
+    jsonrpc: z.literal("2.0").optional(),
+    method: z.string().min(1),
+    params: z.unknown().optional()
+  })
+  .strict();
+
+export type JsonRpcNotification = z.infer<typeof JsonRpcNotificationSchema>;
+
+export type JsonRpcIncomingMessage =
+  | { kind: "response"; value: JsonRpcResponse }
+  | { kind: "notification"; value: JsonRpcNotification };
+
+export function parseJsonRpcIncomingMessage(value: unknown): JsonRpcIncomingMessage {
+  const parsed = z.union([JsonRpcResponseSchema, JsonRpcNotificationSchema]).safeParse(value);
+  if (!parsed.success) {
+    throw ProtocolValidationError.fromZod("JsonRpcIncomingMessage", parsed.error);
+  }
+
+  if ("id" in parsed.data) {
+    return {
+      kind: "response",
+      value: parsed.data
+    };
+  }
+
+  return {
+    kind: "notification",
+    value: parsed.data
+  };
+}

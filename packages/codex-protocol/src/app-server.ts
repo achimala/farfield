@@ -91,6 +91,38 @@ export const AppServerStartThreadRequestSchema = z
   })
   .strict();
 
+export const AppServerStartThreadResponseSchema = z
+  .object({
+    thread: AppServerThreadListItemSchema,
+    model: z.string().optional(),
+    modelProvider: z.string().optional(),
+    cwd: z.string().optional(),
+    approvalPolicy: z.string().optional(),
+    sandbox: z.unknown().optional(),
+    reasoningEffort: z.string().optional()
+  })
+  .strict();
+
+export const AppServerSendUserMessageItemSchema = z
+  .object({
+    type: z.literal("text"),
+    data: z
+      .object({
+        text: z.string()
+      })
+      .strict()
+  })
+  .strict();
+
+export const AppServerSendUserMessageRequestSchema = z
+  .object({
+    conversationId: NonEmptyStringSchema,
+    items: z.array(AppServerSendUserMessageItemSchema).min(1)
+  })
+  .strict();
+
+export const AppServerSendUserMessageResponseSchema = z.object({}).strict();
+
 export const AppServerSetModeRequestSchema = z
   .object({
     conversationId: NonEmptyStringSchema,
@@ -104,6 +136,7 @@ export type AppServerListModelsResponse = z.infer<typeof AppServerListModelsResp
 export type AppServerCollaborationModeListResponse = z.infer<
   typeof AppServerCollaborationModeListResponseSchema
 >;
+export type AppServerStartThreadResponse = z.infer<typeof AppServerStartThreadResponseSchema>;
 
 export function parseAppServerListThreadsResponse(
   value: unknown
@@ -140,6 +173,14 @@ export function parseAppServerCollaborationModeListResponse(
       "AppServerCollaborationModeListResponse",
       result.error
     );
+  }
+  return result.data;
+}
+
+export function parseAppServerStartThreadResponse(value: unknown): AppServerStartThreadResponse {
+  const result = AppServerStartThreadResponseSchema.safeParse(value);
+  if (!result.success) {
+    throw ProtocolValidationError.fromZod("AppServerStartThreadResponse", result.error);
   }
   return result.data;
 }

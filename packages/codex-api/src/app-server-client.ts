@@ -6,7 +6,12 @@ import {
   type AppServerListThreadsResponse,
   AppServerListThreadsResponseSchema,
   type AppServerReadThreadResponse,
-  AppServerReadThreadResponseSchema
+  AppServerReadThreadResponseSchema,
+  AppServerSendUserMessageRequestSchema,
+  AppServerSendUserMessageResponseSchema,
+  type AppServerStartThreadResponse,
+  AppServerStartThreadRequestSchema,
+  AppServerStartThreadResponseSchema
 } from "@codex-monitor/codex-protocol";
 import { ProtocolValidationError } from "@codex-monitor/codex-protocol";
 import { z } from "zod";
@@ -39,6 +44,16 @@ export interface ListThreadsAllOptions {
   archived: boolean;
   cursor?: string;
   maxPages: number;
+}
+
+export interface StartThreadOptions {
+  cwd: string;
+  model?: string;
+  modelProvider?: string;
+  personality?: string;
+  sandbox?: string;
+  approvalPolicy?: string;
+  ephemeral?: boolean;
 }
 
 export class AppServerClient {
@@ -132,5 +147,27 @@ export class AppServerClient {
       result,
       "AppServerCollaborationModeListResponse"
     );
+  }
+
+  public async startThread(options: StartThreadOptions): Promise<AppServerStartThreadResponse> {
+    const request = AppServerStartThreadRequestSchema.parse(options);
+    const result = await this.transport.request("thread/start", request);
+    return parseWithSchema(AppServerStartThreadResponseSchema, result, "AppServerStartThreadResponse");
+  }
+
+  public async sendUserMessage(threadId: string, text: string): Promise<void> {
+    const request = AppServerSendUserMessageRequestSchema.parse({
+      conversationId: threadId,
+      items: [
+        {
+          type: "text",
+          data: {
+            text
+          }
+        }
+      ]
+    });
+    const result = await this.transport.request("sendUserMessage", request);
+    parseWithSchema(AppServerSendUserMessageResponseSchema, result, "AppServerSendUserMessageResponse");
   }
 }

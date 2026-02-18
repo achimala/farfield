@@ -3,6 +3,7 @@ import {
   AppServerListModelsResponseSchema,
   AppServerListThreadsResponseSchema,
   AppServerReadThreadResponseSchema,
+  AppServerStartThreadResponseSchema,
   type CollaborationMode,
   ThreadConversationStateSchema,
   UserInputRequestSchema,
@@ -50,6 +51,14 @@ const StreamEventsResponseSchema = z
     ownerClientId: z.string().nullable(),
     events: z.array(z.unknown())
   })
+  .strict();
+
+const CreateThreadResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    threadId: z.string()
+  })
+  .merge(AppServerStartThreadResponseSchema)
   .strict();
 
 const TraceStatusSchema = z
@@ -143,9 +152,34 @@ export async function listThreads(options: {
   return AppServerListThreadsResponseSchema.parse(stripOk(data));
 }
 
-export async function readThread(threadId: string): Promise<z.infer<typeof AppServerReadThreadResponseSchema>> {
-  const data = await request(`/api/threads/${encodeURIComponent(threadId)}?includeTurns=true`);
+export async function readThread(
+  threadId: string,
+  options?: { includeTurns?: boolean }
+): Promise<z.infer<typeof AppServerReadThreadResponseSchema>> {
+  const includeTurns = options?.includeTurns ?? true;
+  const data = await request(
+    `/api/threads/${encodeURIComponent(threadId)}?includeTurns=${includeTurns ? "true" : "false"}`
+  );
   return AppServerReadThreadResponseSchema.parse(stripOk(data));
+}
+
+export async function createThread(input?: {
+  cwd?: string;
+  model?: string;
+  modelProvider?: string;
+  personality?: string;
+  sandbox?: string;
+  approvalPolicy?: string;
+  ephemeral?: boolean;
+}): Promise<z.infer<typeof CreateThreadResponseSchema>> {
+  const data = await request("/api/threads", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(input ?? {})
+  });
+  return CreateThreadResponseSchema.parse(data);
 }
 
 export async function listCollaborationModes(): Promise<

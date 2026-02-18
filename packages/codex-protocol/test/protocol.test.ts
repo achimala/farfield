@@ -3,6 +3,7 @@ import {
   parseAppServerReadThreadResponse,
   parseAppServerListModelsResponse,
   parseAppServerCollaborationModeListResponse,
+  parseAppServerStartThreadResponse,
   parseIpcFrame,
   parseThreadConversationState,
   parseThreadStreamStateChangedBroadcast,
@@ -510,5 +511,34 @@ describe("codex-protocol schemas", () => {
     expect(parsed.thread.id).toBe("thread-123");
     expect(parsed.thread.requests).toEqual([]);
     expect(parsed.thread.turns[0]?.status).toBe("completed");
+  });
+
+  it("parses app-server thread/start response", () => {
+    const parsed = parseAppServerStartThreadResponse({
+      thread: {
+        id: "thread-456",
+        preview: "",
+        modelProvider: "openai",
+        createdAt: 1700000000,
+        updatedAt: 1700000000,
+        cwd: "/tmp/workspace",
+        path: "/tmp/rollout.jsonl",
+        cliVersion: "0.1.0",
+        source: "vscode",
+        gitInfo: null,
+        turns: []
+      },
+      model: "gpt-5.3-codex",
+      modelProvider: "openai",
+      cwd: "/tmp/workspace",
+      approvalPolicy: "never",
+      sandbox: {
+        type: "dangerFullAccess"
+      },
+      reasoningEffort: "medium"
+    });
+
+    expect(parsed.thread.id).toBe("thread-456");
+    expect(parsed.model).toBe("gpt-5.3-codex");
   });
 });

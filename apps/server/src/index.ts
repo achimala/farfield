@@ -10,7 +10,6 @@ import {
   AppServerTransportError,
   CodexMonitorService,
   DesktopIpcClient,
-  findLatestTurnParamsTemplate,
   reduceThreadStreamEvents,
   ThreadStreamReductionError,
   type SendRequestOptions
@@ -18,8 +17,6 @@ import {
 import {
   type CollaborationMode,
   type IpcFrame,
-  type ThreadConversationState,
-  parseThreadConversationState,
   parseThreadStreamStateChangedBroadcast,
   parseUserInputResponsePayload
 } from "@codex-monitor/codex-protocol";
@@ -28,6 +25,7 @@ import {
   parseBody,
   ReplayBodySchema,
   SendMessageBodySchema,
+  StartThreadBodySchema,
   SetModeBodySchema,
   SubmitUserInputBodySchema,
   TraceMarkBodySchema,
@@ -257,7 +255,7 @@ type ActionStage = "attempt" | "success" | "error";
 
 function summarizeActionDetails(details: Record<string, unknown>): Record<string, unknown> {
   const summary: Record<string, unknown> = {};
-  const keys = ["threadId", "ownerClientId", "requestId", "textLength", "isSteering"];
+  const keys = ["threadId", "ownerClientId", "requestId", "textLength", "isSteering", "cwd", "model"];
 
   for (const key of keys) {
     const value = details[key];
@@ -526,24 +524,8 @@ function getThreadLiveState(threadId: string): {
   }
 
   return {
-    ownerClientId: state?.ownerClientId ?? null,
+    ownerClientId: state?.ownerClientId ?? threadOwnerById.get(threadId) ?? null,
     conversationState: state?.conversationState ?? null
-  };
-}
-
-async function resolveTurnStartTemplate(
-  threadId: string
-): Promise<{
-  turnStartTemplate: ReturnType<typeof findLatestTurnParamsTemplate>;
-  conversationState: ThreadConversationState;
-  source: "thread/read";
-}> {
-  const threadResult = await runAppServerCall(() => appClient.readThread(threadId, true));
-  const conversationState = parseThreadConversationState(threadResult.thread);
-  return {
-    turnStartTemplate: findLatestTurnParamsTemplate(conversationState),
-    conversationState,
-    source: "thread/read"
   };
 }
 
@@ -689,7 +671,8 @@ ipcClient.onFrame((frame) => {
     }
 
     if (frame.sourceClientId && frame.sourceClientId.trim()) {
-      threadOwnerById.set(conversationId, frame.sourceClientId);
+      const ownerClientId = frame.sourceClientId.trim();
+      threadOwnerById.set(conversationId, ownerClientId);
     }
 
     const current = streamEventsByThreadId.get(conversationId) ?? [];
@@ -741,6 +724,50 @@ const server = http.createServer(async (req, res) => {
       jsonResponse(res, 200, {
         ok: true,
         state: getRuntimeStateSnapshot()
+      });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/threads") {
+      const body = parseBody(StartThreadBodySchema, await readJsonBody(req));
+
+      pushActionEvent("thread-create", "attempt", {
+        cwd: body.cwd ?? DEFAULT_WORKSPACE,
+        model: body.model ?? null,
+        modelProvider: body.modelProvider ?? null
+      });
+
+      let result;
+      try {
+        result = await runAppServerCall(() =>
+          appClient.startThread({
+            cwd: body.cwd ?? DEFAULT_WORKSPACE,
+            ...(body.model ? { model: body.model } : {}),
+            ...(body.modelProvider ? { modelProvider: body.modelProvider } : {}),
+            ...(body.personality ? { personality: body.personality } : {}),
+            ...(body.sandbox ? { sandbox: body.sandbox } : {}),
+            ...(body.approvalPolicy ? { approvalPolicy: body.approvalPolicy } : {}),
+            ...(typeof body.ephemeral === "boolean" ? { ephemeral: body.ephemeral } : {})
+          })
+        );
+      } catch (error) {
+        const message = pushActionError("thread-create", error, {
+          cwd: body.cwd ?? DEFAULT_WORKSPACE
+        });
+        jsonResponse(res, 500, { ok: false, error: message });
+        return;
+      }
+
+      pushActionEvent("thread-create", "success", {
+        threadId: result.thread.id,
+        cwd: result.cwd ?? result.thread.cwd ?? null,
+        model: result.model ?? null
+      });
+
+      jsonResponse(res, 200, {
+        ok: true,
+        ...result,
+        threadId: result.thread.id
       });
       return;
     }
@@ -846,96 +873,36 @@ const server = http.createServer(async (req, res) => {
       }
 
       if (req.method === "POST" && segments[3] === "messages") {
-        if (!requireIpcReady(res)) {
-          return;
-        }
-
         const body = parseBody(SendMessageBodySchema, await readJsonBody(req));
-        let ownerClientId: string;
-        try {
-          ownerClientId = resolveOwnerClientId(threadOwnerById, threadId, body.ownerClientId);
-        } catch (error) {
-          const message = pushActionError("messages", error, { threadId });
-          jsonResponse(res, 409, { ok: false, error: message, threadId });
+
+        if (body.isSteering === true) {
+          jsonResponse(res, 400, {
+            ok: false,
+            error: "Steering messages are not supported on this endpoint."
+          });
           return;
         }
 
         pushActionEvent("messages", "attempt", {
           threadId,
-          ownerClientId,
-          textLength: body.text.length,
-          isSteering: typeof body.isSteering === "boolean" ? body.isSteering : false
+          textLength: body.text.length
         });
 
-        let resolvedTurnContext: Awaited<ReturnType<typeof resolveTurnStartTemplate>>;
         try {
-          resolvedTurnContext = await resolveTurnStartTemplate(threadId);
+          await runAppServerCall(() => appClient.sendUserMessage(threadId, body.text));
         } catch (error) {
-          const message = pushActionError("messages", error, {
-            threadId,
-            ownerClientId
-          });
-          jsonResponse(res, 409, { ok: false, error: message, threadId, ownerClientId });
-          return;
-        }
-
-        try {
-          const overrides: {
-            model?: string | null;
-            effort?: string | null;
-            collaborationMode?: CollaborationMode | null;
-          } = {};
-
-          if (Object.prototype.hasOwnProperty.call(resolvedTurnContext.conversationState, "latestModel")) {
-            overrides.model = resolvedTurnContext.conversationState.latestModel ?? null;
-          }
-
-          if (
-            Object.prototype.hasOwnProperty.call(
-              resolvedTurnContext.conversationState,
-              "latestReasoningEffort"
-            )
-          ) {
-            overrides.effort = resolvedTurnContext.conversationState.latestReasoningEffort ?? null;
-          }
-
-          if (
-            Object.prototype.hasOwnProperty.call(
-              resolvedTurnContext.conversationState,
-              "latestCollaborationMode"
-            )
-          ) {
-            overrides.collaborationMode =
-              resolvedTurnContext.conversationState.latestCollaborationMode ?? null;
-          }
-
-          await service.sendMessage({
-            threadId,
-            ownerClientId,
-            text: body.text,
-            turnStartTemplate: resolvedTurnContext.turnStartTemplate,
-            ...overrides,
-            ...(body.cwd ? { cwd: body.cwd } : {}),
-            ...(typeof body.isSteering === "boolean" ? { isSteering: body.isSteering } : {})
-          });
-        } catch (error) {
-          const message = pushActionError("messages", error, {
-            threadId,
-            ownerClientId
-          });
-          jsonResponse(res, 500, { ok: false, error: message, threadId, ownerClientId });
+          const message = pushActionError("messages", error, { threadId });
+          jsonResponse(res, 500, { ok: false, error: message, threadId });
           return;
         }
 
         pushActionEvent("messages", "success", {
-          threadId,
-          ownerClientId
+          threadId
         });
 
         jsonResponse(res, 200, {
           ok: true,
-          threadId,
-          ownerClientId
+          threadId
         });
         return;
       }
