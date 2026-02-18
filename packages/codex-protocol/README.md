@@ -53,8 +53,8 @@ All helpers throw `ProtocolValidationError` with issue paths.
 ## Development
 
 ```bash
-pnpm --filter @farfield/protocol build
-pnpm --filter @farfield/protocol test
+bun run --filter @farfield/protocol build
+bun run --filter @farfield/protocol test
 ```
 
 ## Generated App-Server Schemas
@@ -64,7 +64,7 @@ The app-server schemas in this package are generated from the official Codex app
 From repo root:
 
 ```bash
-pnpm generate:codex-schema
+bun run generate:codex-schema
 ```
 
 This regenerates:

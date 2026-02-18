@@ -22,10 +22,10 @@ violate the rules. If you think that is impossible, STOP and ask the user.
 
 ## Commands You Will Use Often
 
-- `pnpm dev`
-- `pnpm typecheck`
-- `pnpm test`
-- `pnpm lint`
+- `bun run dev`
+- `bun run typecheck`
+- `bun run test`
+- `bun run lint`
 
 ## Trace Privacy Rules (Strict)
 
@@ -34,7 +34,7 @@ Never commit raw traces from `traces/`.
 If you need traces for tests:
 
 1. Put raw trace files in `traces/` only.
-2. Run `pnpm sanitize:traces`.
+2. Run `bun run sanitize:traces`.
 3. Use only sanitized files from:
    - `packages/codex-protocol/test/fixtures/sanitized/`
 4. Manually inspect sanitized files before any commit.

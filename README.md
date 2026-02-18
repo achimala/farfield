@@ -23,8 +23,8 @@ This is an independent project and is not affiliated with, endorsed by, or spons
 ## Install & Run
 
 ```bash
-pnpm install
-pnpm dev
+bun install
+bun run dev
 ```
 
 Opens at `http://localhost:4312`. Defaults to Codex.
@@ -32,11 +32,11 @@ Opens at `http://localhost:4312`. Defaults to Codex.
 **Agent options:**
 
 ```bash
-pnpm dev -- --agents=opencode             # OpenCode only
-pnpm dev -- --agents=codex,opencode       # both
-pnpm dev -- --agents=all                  # expands to codex,opencode
-pnpm dev:remote                           # network-accessible (codex)
-pnpm dev:remote -- --agents=opencode      # network-accessible (opencode)
+bun run dev -- --agents=opencode             # OpenCode only
+bun run dev -- --agents=codex,opencode       # both
+bun run dev -- --agents=all                  # expands to codex,opencode
+bun run dev:remote                           # network-accessible (codex)
+bun run dev:remote -- --agents=opencode      # network-accessible (opencode)
 ```
 
 > **Warning:** `dev:remote` exposes Farfield with no authentication. Only use on trusted networks.
@@ -44,7 +44,7 @@ pnpm dev:remote -- --agents=opencode      # network-accessible (opencode)
 ## Requirements
 
 - Node.js 20+
-- pnpm 10+
+- Bun 1.2+
 - Codex or OpenCode installed locally
 
 ## Codex Schema Sync
@@ -52,7 +52,7 @@ pnpm dev:remote -- --agents=opencode      # network-accessible (opencode)
 Farfield now vendors official Codex app-server schemas and generates protocol Zod validators from them.
 
 ```bash
-pnpm generate:codex-schema
+bun run generate:codex-schema
 ```
 
 This command updates:

@@ -76,7 +76,7 @@ function ensureSchemaFilesExist() {
   throw new Error(
     [
       "Missing generated Codex JSON Schema files.",
-      "Run `pnpm generate:codex-schema` first.",
+      "Run `bun run generate:codex-schema` first.",
       names
     ].join("\n")
   );

@@ -2,12 +2,12 @@
 
 import { spawn, spawnSync } from "node:child_process";
 
-const pnpmBinary = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+const bunBinary = process.platform === "win32" ? "bun.exe" : "bun";
 
 function printHelp() {
   process.stdout.write(
     [
-      "Usage: pnpm dev -- [--remote] [--agents=<ids>]",
+      "Usage: bun run dev -- [--remote] [--agents=<ids>]",
       "",
       "Flags:",
       "  --remote                      Bind server and web to 0.0.0.0",
@@ -61,8 +61,8 @@ function parseArgs(argv) {
 
 function runBuild(filter) {
   const result = spawnSync(
-    pnpmBinary,
-    ["--filter", filter, "build"],
+    bunBinary,
+    ["run", "--filter", filter, "build"],
     {
       stdio: "inherit",
       env: process.env
@@ -95,19 +95,19 @@ if (args.agents.trim().length > 0) {
   serverArgs.push(`--agents=${args.agents.trim()}`);
 }
 
-const serverCommand = ["--filter", "@farfield/server", devScript];
+const serverCommand = ["run", "--filter", "@farfield/server", devScript];
 if (serverArgs.length > 0) {
   serverCommand.push("--", ...serverArgs);
 }
 
-const serverProcess = spawn(pnpmBinary, serverCommand, {
+const serverProcess = spawn(bunBinary, serverCommand, {
   stdio: "inherit",
   env: process.env
 });
 
 const webProcess = spawn(
-  pnpmBinary,
-  ["--filter", "@farfield/web", devScript],
+  bunBinary,
+  ["run", "--filter", "@farfield/web", devScript],
   {
     stdio: "inherit",
     env: process.env

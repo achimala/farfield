@@ -16,7 +16,7 @@ const defaultOutDir = path.join(
 function printHelp() {
   process.stdout.write(
     [
-      "Usage: pnpm generate:codex-schema [--out <dir>] [--codex <path>]",
+      "Usage: bun run generate:codex-schema [--out <dir>] [--codex <path>]",
       "",
       "Options:",
       "  --out <dir>      Output directory",
@@ -137,9 +137,9 @@ function readCodexVersion(codexExecutable) {
   return text.length > 0 ? text : "unknown";
 }
 
-function runPnpmScript(script, cwd) {
-  const pnpmExecutable = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
-  const result = spawnSync(pnpmExecutable, ["run", script], {
+function runBunScript(script, cwd) {
+  const bunExecutable = process.platform === "win32" ? "bun.exe" : "bun";
+  const result = spawnSync(bunExecutable, ["run", script], {
     cwd,
     stdio: "inherit",
     env: process.env
@@ -217,7 +217,7 @@ function main() {
   generateVariant(codexExecutable, outDir, "experimental", true);
   writeMetadataFile(codexExecutable, outDir);
 
-  const generateProtocolSchemasStatus = runPnpmScript(
+  const generateProtocolSchemasStatus = runBunScript(
     "generate:app-server-zod",
     path.join(root, "packages", "codex-protocol")
   );
