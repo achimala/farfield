@@ -1,8 +1,10 @@
 # Farfield
 
-A local UI for [Codex](https://openai.com/codex) desktop threads — read your conversations, send messages, switch models, and monitor agent activity, all from a clean web interface running on your machine.
+A local UI for the [Codex](https://openai.com/codex) app — read your conversations, send messages, switch models, and monitor agent activity, all from a clean web interface running on your machine.
 
 Built by [@anshuchimala](https://x.com/anshuchimala).
+
+<img src="./screenshot.png" alt="Farfield screenshot" width="500" />
 
 ## What it does
 
