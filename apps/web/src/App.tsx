@@ -926,161 +926,175 @@ export function App(): React.JSX.Element {
 
   const renderSidebarContent = (viewport: "desktop" | "mobile"): React.JSX.Element => (
     <>
-      <div className="flex items-center justify-between px-4 h-14 border-b border-sidebar-border shrink-0">
-        <span className="text-sm font-semibold">Farfield</span>
-        <div className="flex items-center gap-1">
-          {viewport === "desktop" && (
-            <IconBtn onClick={() => setDesktopSidebarOpen(false)} title="Hide sidebar">
-              <PanelLeft size={15} />
-            </IconBtn>
-          )}
-          {viewport === "mobile" && (
-            <Button
-              type="button"
-              onClick={() => setMobileSidebarOpen(false)}
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-muted-foreground hover:text-foreground"
-            >
-              <X size={14} />
-            </Button>
-          )}
-        </div>
-      </div>
-
-      <div className="flex-1 overflow-y-auto overflow-x-hidden py-2 pl-2 pr-0">
-        {threads.length === 0 && (
-          <div className="px-4 py-6 text-xs text-muted-foreground text-center">No threads</div>
-        )}
-        <div className="space-y-2 pr-2">
-          {groupedThreads.map((group) => {
-            const hasSelectedThread = group.threads.some((thread) => thread.id === selectedThreadId);
-            const isCollapsed = hasSelectedThread ? false : Boolean(sidebarCollapsedGroups[group.key]);
-            return (
-              <div key={group.key} className="space-y-1">
-                <div className="flex items-center gap-1">
-                  <Button
-                    type="button"
-                    onClick={() =>
-                      setSidebarCollapsedGroups((prev) => ({
-                        ...prev,
-                        [group.key]: !isCollapsed
-                      }))
-                    }
-                    variant="ghost"
-                    className="h-6 flex-1 justify-start gap-2 rounded-lg px-2 py-1 text-left text-[13px] tracking-tight font-normal text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-                  >
-                    {isCollapsed ? (
-                      <Folder size={13} className="shrink-0" />
-                    ) : (
-                      <FolderOpen size={13} className="shrink-0" />
-                    )}
-                    <span className="min-w-0 truncate">{group.label}</span>
-                  </Button>
-                  <IconBtn
-                    onClick={() => {
-                      if (!group.projectPath) {
-                        return;
-                      }
-                      void createNewThread(group.projectPath);
-                    }}
-                    title={
-                      group.projectPath
-                        ? `New thread in ${group.label}`
-                        : "Cannot create thread: missing project path"
-                    }
-                    disabled={isBusy || !group.projectPath}
-                  >
-                    <Plus size={14} />
-                  </IconBtn>
-                </div>
-                <AnimatePresence initial={false}>
-                  {!isCollapsed && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: "auto", opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      transition={{ duration: 0.16, ease: "easeInOut" }}
-                      className="overflow-hidden"
-                    >
-                      <div className="space-y-1 pl-4 pt-0.5">
-                        {group.threads.map((thread) => {
-                          const isSelected = thread.id === selectedThreadId;
-                          return (
-                            <Button
-                              key={thread.id}
-                              type="button"
-                              onClick={() => {
-                                setSelectedThreadId(thread.id);
-                                setMobileSidebarOpen(false);
-                              }}
-                              variant="ghost"
-                              className={`w-full min-w-0 h-auto flex items-center justify-between gap-2 rounded-xl px-2.5 py-1.5 text-left text-[13px] tracking-tight font-normal transition-colors ${
-                                isSelected
-                                  ? "bg-muted/90 text-foreground shadow-sm"
-                                  : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
-                              }`}
-                            >
-                              <span className="min-w-0 flex-1 truncate leading-5">{threadLabel(thread)}</span>
-                              {thread.updatedAt && (
-                                <span className="shrink-0 text-[10px] text-muted-foreground/50">
-                                  {formatDate(thread.updatedAt)}
-                                </span>
-                              )}
-                            </Button>
-                          );
-                        })}
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="p-3 border-t border-sidebar-border shrink-0 flex items-center justify-between gap-2">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <div className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted/40 transition-colors cursor-default min-w-0">
-              <span
-                className={`h-2 w-2 rounded-full shrink-0 ${
-                  allSystemsReady
-                    ? "bg-success"
-                    : hasAnySystemFailure
-                      ? "bg-danger"
-                      : "bg-muted-foreground/40"
-                }`}
-              />
-              <span className="font-mono truncate">commit {commitLabel}</span>
-            </div>
-          </TooltipTrigger>
-          <TooltipContent side="top" align="start" className="space-y-1 text-xs">
-            <div className="font-mono text-[11px]">commit {commitLabel}</div>
-            <div>App: {health?.state.appReady ? "ok" : "not ready"}</div>
-            <div>IPC: {health?.state.ipcConnected ? "connected" : "disconnected"}</div>
-            <div>Init: {health?.state.ipcInitialized ? "ready" : "not ready"}</div>
-            {health?.state.lastError && (
-              <div className="max-w-64 break-words text-destructive">
-                Error: {health.state.lastError}
-              </div>
+      <div className="relative z-20 h-14 shrink-0 px-4">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 top-0 -bottom-3 bg-gradient-to-b from-sidebar from-58% via-sidebar/88 via-80% to-transparent to-100%"
+        />
+        <div className="relative z-10 flex items-center justify-between h-full">
+          <span className="text-sm font-semibold">Farfield</span>
+          <div className="flex items-center gap-1">
+            {viewport === "desktop" && (
+              <IconBtn onClick={() => setDesktopSidebarOpen(false)} title="Hide sidebar">
+                <PanelLeft size={15} />
+              </IconBtn>
             )}
-          </TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <a
-              href="https://github.com/achimala/farfield"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="h-8 w-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
-            >
-              <Github size={14} />
-            </a>
-          </TooltipTrigger>
-          <TooltipContent side="top" align="end">GitHub</TooltipContent>
-        </Tooltip>
+            {viewport === "mobile" && (
+              <Button
+                type="button"
+                onClick={() => setMobileSidebarOpen(false)}
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 text-muted-foreground hover:text-foreground"
+              >
+                <X size={14} />
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="relative flex-1 min-h-0">
+        <div className="h-full min-h-0 overflow-y-auto overflow-x-hidden py-2 pl-2 pr-0">
+          {threads.length === 0 && (
+            <div className="px-4 py-6 text-xs text-muted-foreground text-center">No threads</div>
+          )}
+          <div className="space-y-2 pr-2">
+            {groupedThreads.map((group) => {
+              const hasSelectedThread = group.threads.some((thread) => thread.id === selectedThreadId);
+              const isCollapsed = hasSelectedThread ? false : Boolean(sidebarCollapsedGroups[group.key]);
+              return (
+                <div key={group.key} className="space-y-1">
+                  <div className="flex items-center gap-1">
+                    <Button
+                      type="button"
+                      onClick={() =>
+                        setSidebarCollapsedGroups((prev) => ({
+                          ...prev,
+                          [group.key]: !isCollapsed
+                        }))
+                      }
+                      variant="ghost"
+                      className="h-6 flex-1 justify-start gap-2 rounded-lg px-2 py-1 text-left text-[13px] tracking-tight font-normal text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                    >
+                      {isCollapsed ? (
+                        <Folder size={13} className="shrink-0" />
+                      ) : (
+                        <FolderOpen size={13} className="shrink-0" />
+                      )}
+                      <span className="min-w-0 truncate">{group.label}</span>
+                    </Button>
+                    <IconBtn
+                      onClick={() => {
+                        if (!group.projectPath) {
+                          return;
+                        }
+                        void createNewThread(group.projectPath);
+                      }}
+                      title={
+                        group.projectPath
+                          ? `New thread in ${group.label}`
+                          : "Cannot create thread: missing project path"
+                      }
+                      disabled={isBusy || !group.projectPath}
+                    >
+                      <Plus size={14} />
+                    </IconBtn>
+                  </div>
+                  <AnimatePresence initial={false}>
+                    {!isCollapsed && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.16, ease: "easeInOut" }}
+                        className="overflow-hidden"
+                      >
+                        <div className="space-y-1 pl-4 pt-0.5">
+                          {group.threads.map((thread) => {
+                            const isSelected = thread.id === selectedThreadId;
+                            return (
+                              <Button
+                                key={thread.id}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedThreadId(thread.id);
+                                  setMobileSidebarOpen(false);
+                                }}
+                                variant="ghost"
+                                className={`w-full min-w-0 h-auto flex items-center justify-between gap-2 rounded-xl px-2.5 py-1.5 text-left text-[13px] tracking-tight font-normal transition-colors ${
+                                  isSelected
+                                    ? "bg-muted/90 text-foreground shadow-sm"
+                                    : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
+                                }`}
+                              >
+                                <span className="min-w-0 flex-1 truncate leading-5">{threadLabel(thread)}</span>
+                                {thread.updatedAt && (
+                                  <span className="shrink-0 text-[10px] text-muted-foreground/50">
+                                    {formatDate(thread.updatedAt)}
+                                  </span>
+                                )}
+                              </Button>
+                            );
+                          })}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <div className="relative z-20 shrink-0 p-3">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 -top-3 bottom-0 bg-gradient-to-t from-sidebar from-58% via-sidebar/88 via-80% to-transparent to-100%"
+        />
+        <div className="relative z-10 flex items-center justify-between gap-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted/40 transition-colors cursor-default min-w-0">
+                <span
+                  className={`h-2 w-2 rounded-full shrink-0 ${
+                    allSystemsReady
+                      ? "bg-success"
+                      : hasAnySystemFailure
+                        ? "bg-danger"
+                        : "bg-muted-foreground/40"
+                  }`}
+                />
+                <span className="font-mono truncate">commit {commitLabel}</span>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="top" align="start" className="space-y-1 text-xs">
+              <div className="font-mono text-[11px]">commit {commitLabel}</div>
+              <div>App: {health?.state.appReady ? "ok" : "not ready"}</div>
+              <div>IPC: {health?.state.ipcConnected ? "connected" : "disconnected"}</div>
+              <div>Init: {health?.state.ipcInitialized ? "ready" : "not ready"}</div>
+              {health?.state.lastError && (
+                <div className="max-w-64 break-words text-destructive">
+                  Error: {health.state.lastError}
+                </div>
+              )}
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <a
+                href="https://github.com/achimala/farfield"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="h-8 w-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+              >
+                <Github size={14} />
+              </a>
+            </TooltipTrigger>
+            <TooltipContent side="top" align="end">GitHub</TooltipContent>
+          </Tooltip>
+        </div>
       </div>
     </>
   );
