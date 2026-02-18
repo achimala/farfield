@@ -56,10 +56,11 @@ const StreamEventsResponseSchema = z
 const CreateThreadResponseSchema = z
   .object({
     ok: z.literal(true),
-    threadId: z.string()
+    threadId: z.string(),
+    agentKind: z.enum(["codex", "opencode"]).optional()
   })
   .merge(AppServerStartThreadResponseSchema)
-  .strict();
+  .passthrough();
 
 const TraceStatusSchema = z
   .object({
@@ -136,12 +137,47 @@ export async function getHealth(): Promise<z.infer<typeof HealthResponseSchema>>
   return HealthResponseSchema.parse(await request("/api/health"));
 }
 
+const AgentKindSchema = z.enum(["codex", "opencode"]);
+export type AgentKind = z.infer<typeof AgentKindSchema>;
+
+const AgentsResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    agents: z.array(
+      z.object({
+        kind: AgentKindSchema,
+        enabled: z.boolean()
+      })
+    ),
+    defaultAgent: AgentKindSchema
+  })
+  .strict();
+
+export async function listAgents(): Promise<z.infer<typeof AgentsResponseSchema>> {
+  return AgentsResponseSchema.parse(await request("/api/agents"));
+}
+
+const ThreadListItemWithAgentSchema = AppServerListThreadsResponseSchema.shape.data.element
+  .passthrough()
+  .extend({
+    agentKind: z.enum(["codex", "opencode"]).optional(),
+    source: z.string().optional()
+  });
+
+const ThreadListResponseSchema = z
+  .object({
+    data: z.array(ThreadListItemWithAgentSchema),
+    nextCursor: z.union([z.string(), z.null(), z.undefined()]).transform((v) => v ?? null),
+    pages: z.number().int().nonnegative().optional(),
+    truncated: z.boolean().optional()
+  });
+
 export async function listThreads(options: {
   limit: number;
   archived: boolean;
   all: boolean;
   maxPages: number;
-}): Promise<z.infer<typeof AppServerListThreadsResponseSchema>> {
+}): Promise<z.infer<typeof ThreadListResponseSchema>> {
   const params = new URLSearchParams();
   params.set("limit", String(options.limit));
   params.set("archived", options.archived ? "1" : "0");
@@ -149,21 +185,26 @@ export async function listThreads(options: {
   params.set("maxPages", String(options.maxPages));
 
   const data = await request(`/api/threads?${params.toString()}`);
-  return AppServerListThreadsResponseSchema.parse(stripOk(data));
+  return ThreadListResponseSchema.parse(stripOk(data));
 }
+
+const ReadThreadResponseWithAgentSchema = AppServerReadThreadResponseSchema.extend({
+  agentKind: z.enum(["codex", "opencode"]).optional()
+});
 
 export async function readThread(
   threadId: string,
   options?: { includeTurns?: boolean }
-): Promise<z.infer<typeof AppServerReadThreadResponseSchema>> {
+): Promise<z.infer<typeof ReadThreadResponseWithAgentSchema>> {
   const includeTurns = options?.includeTurns ?? true;
   const data = await request(
     `/api/threads/${encodeURIComponent(threadId)}?includeTurns=${includeTurns ? "true" : "false"}`
   );
-  return AppServerReadThreadResponseSchema.parse(stripOk(data));
+  return ReadThreadResponseWithAgentSchema.parse(stripOk(data));
 }
 
 export async function createThread(input?: {
+  agentKind?: AgentKind;
   cwd?: string;
   model?: string;
   modelProvider?: string;

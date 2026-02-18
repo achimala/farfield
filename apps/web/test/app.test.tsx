@@ -13,6 +13,25 @@ class MockEventSource {
 
 vi.stubGlobal("EventSource", MockEventSource);
 
+// jsdom doesn't implement scrollTo or ResizeObserver.
+Element.prototype.scrollTo = vi.fn();
+vi.stubGlobal("ResizeObserver", class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+});
+
+vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+  matches: query === "(prefers-color-scheme: dark)",
+  media: query,
+  onchange: null,
+  addListener: vi.fn(),
+  removeListener: vi.fn(),
+  addEventListener: vi.fn(),
+  removeEventListener: vi.fn(),
+  dispatchEvent: vi.fn()
+})));
+
 vi.stubGlobal(
   "fetch",
   vi.fn(async (input: RequestInfo | URL) => {
@@ -104,6 +123,17 @@ vi.stubGlobal(
       } as Response;
     }
 
+    if (url.includes("/api/agents")) {
+      return {
+        ok: true,
+        json: async () => ({
+          ok: true,
+          agents: [{ kind: "codex", enabled: true }],
+          defaultAgent: "codex"
+        })
+      } as Response;
+    }
+
     return {
       ok: true,
       json: async () => ({
@@ -120,8 +150,7 @@ vi.stubGlobal(
 describe("App", () => {
   it("renders core sections", async () => {
     render(<App />);
-    expect(await screen.findByText("Threads")).toBeTruthy();
-    expect(await screen.findByText("Chat")).toBeTruthy();
-    expect(await screen.findByText("Debug")).toBeTruthy();
+    expect(await screen.findByText("Farfield")).toBeTruthy();
+    expect(await screen.findByText("No thread selected")).toBeTruthy();
   });
 });

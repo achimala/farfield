@@ -26,6 +26,9 @@ importers:
       '@farfield/api':
         specifier: workspace:*
         version: link:../../packages/codex-api
+      '@farfield/opencode-api':
+        specifier: workspace:*
+        version: link:../../packages/opencode-api
       '@farfield/protocol':
         specifier: workspace:*
         version: link:../../packages/codex-protocol
@@ -150,6 +153,15 @@ importers:
 
   packages/codex-protocol:
     dependencies:
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+
+  packages/opencode-api:
+    dependencies:
+      '@opencode-ai/sdk':
+        specifier: ^1.2.6
+        version: 1.2.6
       zod:
         specifier: ^3.24.1
         version: 3.25.76
@@ -624,6 +636,9 @@ packages:
 
   '@open-draft/until@2.1.0':
     resolution: {integrity: sha512-U69T3ItWHvLwGg5eJ0n3I62nWuE6ilHlmz7zM0npLBRvPRd7e6NYmg54vvRtP5mZG7kZqZCFVdsTWo7BPtBujg==}
+
+  '@opencode-ai/sdk@1.2.6':
+    resolution: {integrity: sha512-dWMF8Aku4h7fh8sw5tQ2FtbqRLbIFT8FcsukpxTird49ax7oUXP+gzqxM/VdxHjfksQvzLBjLZyMdDStc5g7xA==}
 
   '@pinojs/redact@0.4.0':
     resolution: {integrity: sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg==}
@@ -4235,6 +4250,8 @@ snapshots:
       outvariant: 1.4.3
 
   '@open-draft/until@2.1.0': {}
+
+  '@opencode-ai/sdk@1.2.6': {}
 
   '@pinojs/redact@0.4.0': {}
 
