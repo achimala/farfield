@@ -1088,7 +1088,7 @@ export function App(): React.JSX.Element {
   /* ── Render ─────────────────────────────────────────────── */
   return (
     <TooltipProvider delayDuration={120}>
-      <div className="h-screen flex overflow-hidden bg-background text-foreground font-sans">
+      <div className="app-shell flex bg-background text-foreground font-sans">
 
       {/* Mobile sidebar backdrop */}
       <AnimatePresence>
@@ -1113,7 +1113,7 @@ export function App(): React.JSX.Element {
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: -280, opacity: 0.94 }}
             transition={{ type: "spring", stiffness: 380, damping: 36, mass: 0.7 }}
-            className="hidden md:flex fixed inset-y-0 left-0 z-30 w-64 flex-col border-r border-sidebar-border bg-sidebar shadow-xl"
+            className="hidden md:flex fixed left-0 top-[env(safe-area-inset-top)] bottom-[env(safe-area-inset-bottom)] z-30 w-64 flex-col border-r border-sidebar-border bg-sidebar shadow-xl"
           >
             {renderSidebarContent("desktop")}
           </motion.aside>
@@ -1129,7 +1129,7 @@ export function App(): React.JSX.Element {
             animate={{ x: 0 }}
             exit={{ x: -280 }}
             transition={{ type: "spring", stiffness: 380, damping: 36, mass: 0.7 }}
-            className="md:hidden fixed inset-y-0 left-0 z-50 w-64 flex flex-col border-r border-sidebar-border bg-sidebar shadow-xl"
+            className="md:hidden fixed left-0 top-[env(safe-area-inset-top)] bottom-[env(safe-area-inset-bottom)] z-50 w-64 flex flex-col border-r border-sidebar-border bg-sidebar shadow-xl"
           >
             {renderSidebarContent("mobile")}
           </motion.aside>
