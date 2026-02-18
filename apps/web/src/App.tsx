@@ -398,7 +398,7 @@ export function App(): React.JSX.Element {
     () => threads.find((t) => t.id === selectedThreadId) ?? null,
     [threads, selectedThreadId]
   );
-  const conversationState = readThreadState?.thread ?? null;
+  const conversationState = liveState?.conversationState ?? readThreadState?.thread ?? null;
 
   const pendingRequests = useMemo(() => {
     if (!conversationState) return [] as PendingRequest[];
