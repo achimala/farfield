@@ -33,16 +33,24 @@ const HealthResponseSchema = z
       })
       .passthrough()
   })
-  .strict();
+  .passthrough();
 
-const LiveStateResponseSchema = z
+const LiveStateResponseSchema: z.ZodObject<
+  {
+    ok: z.ZodLiteral<true>;
+    threadId: z.ZodString;
+    ownerClientId: z.ZodNullable<z.ZodString>;
+    conversationState: z.ZodUnion<[typeof ThreadConversationStateSchema, z.ZodNull]>;
+  },
+  "passthrough"
+> = z
   .object({
     ok: z.literal(true),
     threadId: z.string(),
     ownerClientId: z.string().nullable(),
     conversationState: z.union([ThreadConversationStateSchema, z.null()])
   })
-  .strict();
+  .passthrough();
 
 const StreamEventsResponseSchema = z
   .object({
@@ -51,7 +59,7 @@ const StreamEventsResponseSchema = z
     ownerClientId: z.string().nullable(),
     events: z.array(z.unknown())
   })
-  .strict();
+  .passthrough();
 
 const CreateThreadResponseSchema = z
   .object({
@@ -59,7 +67,7 @@ const CreateThreadResponseSchema = z
     threadId: z.string()
   })
   .merge(AppServerStartThreadResponseSchema)
-  .strict();
+  .passthrough();
 
 const TraceStatusSchema = z
   .object({
@@ -85,7 +93,7 @@ const TraceStatusSchema = z
       })
     )
   })
-  .strict();
+  .passthrough();
 
 const HistoryListSchema = z
   .object({
@@ -101,7 +109,7 @@ const HistoryListSchema = z
       })
     )
   })
-  .strict();
+  .passthrough();
 
 const HistoryDetailSchema = z
   .object({
@@ -109,7 +117,7 @@ const HistoryDetailSchema = z
     entry: HistoryListSchema.shape.history.element,
     fullPayload: z.unknown()
   })
-  .strict();
+  .passthrough();
 
 async function request(path: string, init?: RequestInit): Promise<unknown> {
   const response = await fetch(path, init);

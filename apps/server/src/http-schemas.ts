@@ -6,7 +6,7 @@ export const SetModeBodySchema = z
     ownerClientId: z.string().optional(),
     collaborationMode: CollaborationModeSchema
   })
-  .strict();
+  .passthrough();
 
 export const StartThreadBodySchema = z
   .object({
@@ -18,7 +18,7 @@ export const StartThreadBodySchema = z
     approvalPolicy: z.string().optional(),
     ephemeral: z.boolean().optional()
   })
-  .strict();
+  .passthrough();
 
 export const SendMessageBodySchema = z
   .object({
@@ -27,7 +27,7 @@ export const SendMessageBodySchema = z
     cwd: z.string().optional(),
     isSteering: z.boolean().optional()
   })
-  .strict();
+  .passthrough();
 
 export const SubmitUserInputBodySchema = z
   .object({
@@ -35,32 +35,32 @@ export const SubmitUserInputBodySchema = z
     requestId: z.number().int().nonnegative(),
     response: z.unknown()
   })
-  .strict();
+  .passthrough();
 
 export const InterruptBodySchema = z
   .object({
     ownerClientId: z.string().optional()
   })
-  .strict();
+  .passthrough();
 
 export const TraceStartBodySchema = z
   .object({
     label: z.string().min(1).max(120)
   })
-  .strict();
+  .passthrough();
 
 export const TraceMarkBodySchema = z
   .object({
     note: z.string().max(500)
   })
-  .strict();
+  .passthrough();
 
 export const ReplayBodySchema = z
   .object({
     entryId: z.string().min(1),
     waitForResponse: z.boolean().optional()
   })
-  .strict();
+  .passthrough();
 
 export function parseBody<Schema extends z.ZodTypeAny>(
   schema: Schema,

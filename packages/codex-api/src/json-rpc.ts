@@ -8,7 +8,7 @@ export const JsonRpcRequestSchema = z
     method: z.string().min(1),
     params: z.unknown().optional()
   })
-  .strict();
+  .passthrough();
 
 export const JsonRpcResponseSchema = z
   .object({
@@ -21,10 +21,10 @@ export const JsonRpcResponseSchema = z
         message: z.string(),
         data: z.unknown().optional()
       })
-      .strict()
+      .passthrough()
       .optional()
   })
-  .strict()
+  .passthrough()
   .superRefine((value, context) => {
     if (value.result === undefined && value.error === undefined) {
       context.addIssue({
@@ -50,7 +50,7 @@ export const JsonRpcNotificationSchema = z
     method: z.string().min(1),
     params: z.unknown().optional()
   })
-  .strict();
+  .passthrough();
 
 export type JsonRpcNotification = z.infer<typeof JsonRpcNotificationSchema>;
 
@@ -59,20 +59,25 @@ export type JsonRpcIncomingMessage =
   | { kind: "notification"; value: JsonRpcNotification };
 
 export function parseJsonRpcIncomingMessage(value: unknown): JsonRpcIncomingMessage {
-  const parsed = z.union([JsonRpcResponseSchema, JsonRpcNotificationSchema]).safeParse(value);
-  if (!parsed.success) {
-    throw ProtocolValidationError.fromZod("JsonRpcIncomingMessage", parsed.error);
-  }
-
-  if ("id" in parsed.data) {
+  const parsedResponse = JsonRpcResponseSchema.safeParse(value);
+  if (parsedResponse.success) {
     return {
       kind: "response",
-      value: parsed.data
+      value: parsedResponse.data
     };
   }
 
-  return {
-    kind: "notification",
-    value: parsed.data
-  };
+  const parsedNotification = JsonRpcNotificationSchema.safeParse(value);
+  if (parsedNotification.success) {
+    return {
+      kind: "notification",
+      value: parsedNotification.data
+    };
+  }
+
+  const combinedError = new z.ZodError([
+    ...parsedResponse.error.issues,
+    ...parsedNotification.error.issues
+  ]);
+  throw ProtocolValidationError.fromZod("JsonRpcIncomingMessage", combinedError);
 }

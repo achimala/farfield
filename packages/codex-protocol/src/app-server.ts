@@ -17,7 +17,7 @@ export const AppServerThreadListItemSchema = z
     gitInfo: z.unknown().nullable().optional(),
     turns: z.array(z.unknown()).optional()
   })
-  .strict();
+  .passthrough();
 
 export const AppServerListThreadsResponseSchema = z
   .object({
@@ -26,20 +26,25 @@ export const AppServerListThreadsResponseSchema = z
     pages: NonNegativeIntSchema.optional(),
     truncated: z.boolean().optional()
   })
-  .strict();
+  .passthrough();
 
-export const AppServerReadThreadResponseSchema = z
+export const AppServerReadThreadResponseSchema: z.ZodObject<
+  {
+    thread: typeof ThreadConversationStateSchema;
+  },
+  "passthrough"
+> = z
   .object({
     thread: ThreadConversationStateSchema
   })
-  .strict();
+  .passthrough();
 
 export const AppServerModelReasoningEffortSchema = z
   .object({
     reasoningEffort: NonEmptyStringSchema,
     description: z.string()
   })
-  .strict();
+  .passthrough();
 
 export const AppServerModelSchema = z
   .object({
@@ -54,14 +59,14 @@ export const AppServerModelSchema = z
     supportsPersonality: z.boolean(),
     isDefault: z.boolean()
   })
-  .strict();
+  .passthrough();
 
 export const AppServerListModelsResponseSchema = z
   .object({
     data: z.array(AppServerModelSchema),
     nextCursor: z.union([z.string(), z.null()])
   })
-  .strict();
+  .passthrough();
 
 export const AppServerCollaborationModeListItemSchema = z
   .object({
@@ -71,13 +76,13 @@ export const AppServerCollaborationModeListItemSchema = z
     reasoning_effort: NullableNonEmptyStringSchema,
     developer_instructions: z.union([z.string(), z.null()])
   })
-  .strict();
+  .passthrough();
 
 export const AppServerCollaborationModeListResponseSchema = z
   .object({
     data: z.array(AppServerCollaborationModeListItemSchema)
   })
-  .strict();
+  .passthrough();
 
 export const AppServerStartThreadRequestSchema = z
   .object({
@@ -89,7 +94,7 @@ export const AppServerStartThreadRequestSchema = z
     approvalPolicy: z.string().optional(),
     ephemeral: z.boolean().optional()
   })
-  .strict();
+  .passthrough();
 
 export const AppServerStartThreadResponseSchema = z
   .object({
@@ -101,7 +106,7 @@ export const AppServerStartThreadResponseSchema = z
     sandbox: z.unknown().optional(),
     reasoningEffort: z.string().optional()
   })
-  .strict();
+  .passthrough();
 
 export const AppServerSendUserMessageItemSchema = z
   .object({
@@ -110,25 +115,25 @@ export const AppServerSendUserMessageItemSchema = z
       .object({
         text: z.string()
       })
-      .strict()
+      .passthrough()
   })
-  .strict();
+  .passthrough();
 
 export const AppServerSendUserMessageRequestSchema = z
   .object({
     conversationId: NonEmptyStringSchema,
     items: z.array(AppServerSendUserMessageItemSchema).min(1)
   })
-  .strict();
+  .passthrough();
 
-export const AppServerSendUserMessageResponseSchema = z.object({}).strict();
+export const AppServerSendUserMessageResponseSchema = z.object({}).passthrough();
 
 export const AppServerSetModeRequestSchema = z
   .object({
     conversationId: NonEmptyStringSchema,
     collaborationMode: CollaborationModeSchema
   })
-  .strict();
+  .passthrough();
 
 export type AppServerListThreadsResponse = z.infer<typeof AppServerListThreadsResponseSchema>;
 export type AppServerReadThreadResponse = z.infer<typeof AppServerReadThreadResponseSchema>;

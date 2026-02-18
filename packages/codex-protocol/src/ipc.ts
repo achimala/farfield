@@ -15,7 +15,7 @@ export const IpcRequestFrameSchema = z
     sourceClientId: NonEmptyStringSchema.optional(),
     version: NonNegativeIntSchema.optional()
   })
-  .strict();
+  .passthrough();
 
 export const IpcResponseFrameSchema = z
   .object({
@@ -27,7 +27,7 @@ export const IpcResponseFrameSchema = z
     result: z.unknown().optional(),
     error: z.unknown().optional()
   })
-  .strict();
+  .passthrough();
 
 export const IpcBroadcastFrameSchema = z
   .object({
@@ -38,7 +38,7 @@ export const IpcBroadcastFrameSchema = z
     targetClientId: NonEmptyStringSchema.optional(),
     version: NonNegativeIntSchema.optional()
   })
-  .strict();
+  .passthrough();
 
 export const IpcClientDiscoveryRequestFrameSchema = z
   .object({
@@ -46,7 +46,7 @@ export const IpcClientDiscoveryRequestFrameSchema = z
     requestId: IpcRequestIdSchema,
     request: IpcRequestFrameSchema
   })
-  .strict();
+  .passthrough();
 
 export const IpcClientDiscoveryResponseFrameSchema = z
   .object({
@@ -56,9 +56,9 @@ export const IpcClientDiscoveryResponseFrameSchema = z
       .object({
         canHandle: z.boolean()
       })
-      .strict()
+      .passthrough()
   })
-  .strict();
+  .passthrough();
 
 export const IpcFrameSchema = z.union([
   IpcRequestFrameSchema,
@@ -68,7 +68,16 @@ export const IpcFrameSchema = z.union([
   IpcClientDiscoveryResponseFrameSchema
 ]);
 
-export const ThreadStreamStateChangedBroadcastSchema = z
+export const ThreadStreamStateChangedBroadcastSchema: z.ZodObject<
+  {
+    type: z.ZodLiteral<"broadcast">;
+    method: z.ZodLiteral<"thread-stream-state-changed">;
+    sourceClientId: typeof NonEmptyStringSchema;
+    params: typeof ThreadStreamStateChangedParamsSchema;
+    version: typeof NonNegativeIntSchema;
+  },
+  "passthrough"
+> = z
   .object({
     type: z.literal("broadcast"),
     method: z.literal("thread-stream-state-changed"),
@@ -76,7 +85,7 @@ export const ThreadStreamStateChangedBroadcastSchema = z
     params: ThreadStreamStateChangedParamsSchema,
     version: NonNegativeIntSchema
   })
-  .strict();
+  .passthrough();
 
 export type IpcFrame = z.infer<typeof IpcFrameSchema>;
 export type IpcRequestFrame = z.infer<typeof IpcRequestFrameSchema>;

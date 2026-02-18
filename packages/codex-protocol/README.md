@@ -46,9 +46,9 @@ All helpers throw `ProtocolValidationError` with issue paths.
 
 ## Strictness Policy
 
-- Schemas use `.strict()` by default.
-- Unknown fields are rejected unless explicitly allowed.
-- No fallback parsing and no shape coercion.
+- Schemas use `.passthrough()` by default.
+- Unknown fields are allowed and preserved.
+- Required known fields are still validated with exact types.
 
 ## Development
 

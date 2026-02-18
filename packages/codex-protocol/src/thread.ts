@@ -14,14 +14,14 @@ export const CollaborationModeSettingsSchema = z
     reasoning_effort: NullableStringSchema.optional(),
     developer_instructions: z.union([z.string(), z.null()]).optional()
   })
-  .strict();
+  .passthrough();
 
 export const CollaborationModeSchema = z
   .object({
     mode: NonEmptyStringSchema,
     settings: CollaborationModeSettingsSchema
   })
-  .strict();
+  .passthrough();
 
 export const InputTextPartSchema = z
   .object({
@@ -29,7 +29,7 @@ export const InputTextPartSchema = z
     text: z.string(),
     text_elements: z.array(JsonValueSchema).optional()
   })
-  .strict();
+  .passthrough();
 
 export const InputImagePartSchema = z
   .object({
@@ -55,7 +55,7 @@ export const TurnStartParamsSchema = z
     personality: z.union([JsonValueSchema, z.null()]).optional(),
     outputSchema: z.union([JsonValueSchema, z.null()]).optional()
   })
-  .strict();
+  .passthrough();
 
 export const UserMessageContentPartSchema = z
   .object({
@@ -63,7 +63,7 @@ export const UserMessageContentPartSchema = z
     text: z.string(),
     text_elements: z.array(JsonValueSchema).optional()
   })
-  .strict();
+  .passthrough();
 
 export const UserMessageImageContentPartSchema = z
   .object({
@@ -83,7 +83,7 @@ export const UserMessageItemSchema = z
     type: z.literal("userMessage"),
     content: z.array(UserMessagePartSchema)
   })
-  .strict();
+  .passthrough();
 
 export const SteeringUserMessageItemSchema = z
   .object({
@@ -92,7 +92,7 @@ export const SteeringUserMessageItemSchema = z
     content: z.array(UserMessagePartSchema),
     attachments: z.array(JsonValueSchema).optional()
   })
-  .strict();
+  .passthrough();
 
 export const AgentMessageItemSchema = z
   .object({
@@ -100,7 +100,7 @@ export const AgentMessageItemSchema = z
     type: z.literal("agentMessage"),
     text: z.string()
   })
-  .strict();
+  .passthrough();
 
 export const ReasoningItemSchema = z
   .object({
@@ -110,7 +110,7 @@ export const ReasoningItemSchema = z
     content: z.array(JsonValueSchema).optional(),
     text: z.string().optional()
   })
-  .strict();
+  .passthrough();
 
 export const PlanItemSchema = z
   .object({
@@ -118,7 +118,7 @@ export const PlanItemSchema = z
     type: z.literal("plan"),
     text: z.string()
   })
-  .strict();
+  .passthrough();
 
 export const UserInputAnsweredQuestionSchema = z
   .object({
@@ -126,7 +126,7 @@ export const UserInputAnsweredQuestionSchema = z
     header: z.string().optional(),
     question: z.string().optional()
   })
-  .strict();
+  .passthrough();
 
 export const UserInputResponseItemSchema = z
   .object({
@@ -138,7 +138,7 @@ export const UserInputResponseItemSchema = z
     answers: z.record(z.array(z.string())),
     completed: z.boolean()
   })
-  .strict();
+  .passthrough();
 
 export const CommandActionSchema = z
   .object({
@@ -148,7 +148,7 @@ export const CommandActionSchema = z
     path: z.union([z.string(), z.null()]).optional(),
     query: z.string().optional()
   })
-  .strict();
+  .passthrough();
 
 export const CommandExecutionItemSchema = z
   .object({
@@ -163,14 +163,14 @@ export const CommandExecutionItemSchema = z
     exitCode: z.union([z.number().int(), z.null()]).optional(),
     durationMs: z.union([NonNegativeIntSchema, z.null()]).optional()
   })
-  .strict();
+  .passthrough();
 
 export const FileChangeKindSchema = z
   .object({
     type: NonEmptyStringSchema,
     move_path: z.union([z.string(), z.null()]).optional()
   })
-  .strict();
+  .passthrough();
 
 export const FileChangeEntrySchema = z
   .object({
@@ -178,7 +178,7 @@ export const FileChangeEntrySchema = z
     kind: FileChangeKindSchema,
     diff: z.string().optional()
   })
-  .strict();
+  .passthrough();
 
 export const FileChangeItemSchema = z
   .object({
@@ -187,7 +187,7 @@ export const FileChangeItemSchema = z
     changes: z.array(FileChangeEntrySchema),
     status: NonEmptyStringSchema
   })
-  .strict();
+  .passthrough();
 
 export const ContextCompactionItemSchema = z
   .object({
@@ -195,7 +195,7 @@ export const ContextCompactionItemSchema = z
     id: NonEmptyStringSchema,
     completed: z.boolean()
   })
-  .strict();
+  .passthrough();
 
 export const WebSearchActionSchema = z
   .object({
@@ -203,7 +203,7 @@ export const WebSearchActionSchema = z
     query: z.string().optional(),
     queries: z.array(z.string()).optional()
   })
-  .strict();
+  .passthrough();
 
 export const WebSearchItemSchema = z
   .object({
@@ -212,7 +212,7 @@ export const WebSearchItemSchema = z
     query: z.string(),
     action: WebSearchActionSchema
   })
-  .strict();
+  .passthrough();
 
 export const ModelChangedItemSchema = z
   .object({
@@ -221,7 +221,7 @@ export const ModelChangedItemSchema = z
     fromModel: NullableStringSchema.optional(),
     toModel: NullableStringSchema.optional()
   })
-  .strict();
+  .passthrough();
 
 export const TurnItemSchema = z.discriminatedUnion("type", [
   UserMessageItemSchema,
@@ -242,7 +242,7 @@ export const UserInputOptionSchema = z
     label: z.string(),
     description: z.string()
   })
-  .strict();
+  .passthrough();
 
 export const UserInputQuestionSchema = z
   .object({
@@ -253,7 +253,7 @@ export const UserInputQuestionSchema = z
     isSecret: z.boolean(),
     options: z.array(UserInputOptionSchema)
   })
-  .strict();
+  .passthrough();
 
 export const UserInputRequestParamsSchema = z
   .object({
@@ -262,7 +262,7 @@ export const UserInputRequestParamsSchema = z
     itemId: NonEmptyStringSchema,
     questions: z.array(UserInputQuestionSchema)
   })
-  .strict();
+  .passthrough();
 
 export const UserInputRequestSchema = z
   .object({
@@ -271,7 +271,7 @@ export const UserInputRequestSchema = z
     params: UserInputRequestParamsSchema,
     completed: z.boolean().optional()
   })
-  .strict();
+  .passthrough();
 
 export const ThreadTurnSchema = z
   .object({
@@ -320,7 +320,7 @@ export const ThreadStreamPatchSchema = z
     path: z.array(ThreadStreamPatchPathSegmentSchema).min(1),
     value: JsonValueSchema.optional()
   })
-  .strict()
+  .passthrough()
   .superRefine((patch, ctx) => {
     const hasValue = Object.prototype.hasOwnProperty.call(patch, "value");
 
@@ -339,33 +339,52 @@ export const ThreadStreamPatchSchema = z
     }
   });
 
-export const ThreadStreamSnapshotChangeSchema = z
+export const ThreadStreamSnapshotChangeSchema: z.ZodObject<
+  {
+    type: z.ZodLiteral<"snapshot">;
+    conversationState: typeof ThreadConversationStateSchema;
+  },
+  "passthrough"
+> = z
   .object({
     type: z.literal("snapshot"),
     conversationState: ThreadConversationStateSchema
   })
-  .strict();
+  .passthrough();
 
-export const ThreadStreamPatchesChangeSchema = z
+export const ThreadStreamPatchesChangeSchema: z.ZodObject<
+  {
+    type: z.ZodLiteral<"patches">;
+    patches: z.ZodArray<typeof ThreadStreamPatchSchema>;
+  },
+  "passthrough"
+> = z
   .object({
     type: z.literal("patches"),
     patches: z.array(ThreadStreamPatchSchema)
   })
-  .strict();
+  .passthrough();
 
-export const ThreadStreamChangeSchema = z.union([
-  ThreadStreamSnapshotChangeSchema,
-  ThreadStreamPatchesChangeSchema
-]);
+export const ThreadStreamChangeSchema: z.ZodUnion<
+  [typeof ThreadStreamSnapshotChangeSchema, typeof ThreadStreamPatchesChangeSchema]
+> = z.union([ThreadStreamSnapshotChangeSchema, ThreadStreamPatchesChangeSchema]);
 
-export const ThreadStreamStateChangedParamsSchema = z
+export const ThreadStreamStateChangedParamsSchema: z.ZodObject<
+  {
+    conversationId: typeof NonEmptyStringSchema;
+    change: typeof ThreadStreamChangeSchema;
+    version: typeof NonNegativeIntSchema;
+    type: z.ZodLiteral<"thread-stream-state-changed">;
+  },
+  "passthrough"
+> = z
   .object({
     conversationId: NonEmptyStringSchema,
     change: ThreadStreamChangeSchema,
     version: NonNegativeIntSchema,
     type: z.literal("thread-stream-state-changed")
   })
-  .strict();
+  .passthrough();
 
 export type CollaborationMode = z.infer<typeof CollaborationModeSchema>;
 export type TurnStartParams = z.infer<typeof TurnStartParamsSchema>;
@@ -396,13 +415,13 @@ export const UserInputAnswerSchema = z
   .object({
     answers: z.array(z.string().min(1))
   })
-  .strict();
+  .passthrough();
 
 export const UserInputResponsePayloadSchema = z
   .object({
     answers: z.record(UserInputAnswerSchema)
   })
-  .strict();
+  .passthrough();
 
 export type UserInputResponsePayload = z.infer<typeof UserInputResponsePayloadSchema>;
 

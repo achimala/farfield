@@ -475,13 +475,43 @@ describe("codex-protocol schemas", () => {
           defaultReasoningEffort: "xhigh",
           inputModalities: ["text", "image"],
           supportsPersonality: true,
-          isDefault: true
+          isDefault: true,
+          hidden: true
         }
       ],
       nextCursor: null
     });
 
     expect(parsed.data[0]?.id).toBe("gpt-5.3-codex");
+    expect(parsed.data[0]?.["hidden"]).toBe(true);
+  });
+
+  it("parses unknown top-level keys in app-server model/list response", () => {
+    const parsed = parseAppServerListModelsResponse({
+      data: [
+        {
+          id: "gpt-5.3-codex",
+          model: "gpt-5.3-codex",
+          upgrade: null,
+          displayName: "GPT-5.3 Codex",
+          description: "Latest frontier agentic coding model.",
+          supportedReasoningEfforts: [
+            {
+              reasoningEffort: "medium",
+              description: "Balanced"
+            }
+          ],
+          defaultReasoningEffort: "medium",
+          inputModalities: ["text"],
+          supportsPersonality: true,
+          isDefault: true
+        }
+      ],
+      nextCursor: null,
+      hidden: true
+    });
+
+    expect(parsed["hidden"]).toBe(true);
   });
 
   it("parses app-server thread/read response with subset validation", () => {
