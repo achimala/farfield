@@ -1138,13 +1138,19 @@ export function App(): React.JSX.Element {
 
       {/* ── Main area ───────────────────────────────────────── */}
       <div
-        className={`flex-1 flex flex-col min-w-0 transition-[margin] duration-200 ${
+        className={`relative flex-1 flex flex-col min-w-0 transition-[margin] duration-200 ${
           desktopSidebarOpen ? "md:ml-64" : "md:ml-0"
         }`}
       >
 
         {/* Header */}
-        <header className="flex items-center justify-between px-3 h-14 border-b border-border shrink-0 gap-2">
+        <header
+          className={`flex items-center justify-between px-3 h-14 shrink-0 gap-2 ${
+            activeTab === "chat"
+              ? "absolute inset-x-0 top-0 z-20 bg-transparent"
+              : "border-b border-border"
+          }`}
+        >
           <div className="flex items-center gap-2 min-w-0">
             <div className="md:hidden">
               <IconBtn onClick={() => setMobileSidebarOpen(true)} title="Threads">
@@ -1220,6 +1226,10 @@ export function App(): React.JSX.Element {
         {/* ── Chat tab ──────────────────────────────────────── */}
         {activeTab === "chat" && (
           <div className="relative flex-1 flex flex-col min-h-0">
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 -top-4 z-10 h-[5.5rem] bg-gradient-to-b from-background from-52% via-background/78 via-82% to-transparent to-100%"
+            />
 
             {/* Conversation */}
             <div ref={scrollRef} className="flex-1 overflow-y-auto">
@@ -1317,8 +1327,12 @@ export function App(): React.JSX.Element {
             </AnimatePresence>
 
             {/* Input area */}
-            <div className="border-t border-border px-4 py-4 shrink-0">
-              <div className="max-w-3xl mx-auto space-y-2">
+            <div className="relative z-10 -mt-6 px-4 pt-6 pb-4 shrink-0">
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-transparent via-background/85 to-background"
+              />
+              <div className="relative max-w-3xl mx-auto space-y-2">
 
                 {/* Pending user input */}
                 <AnimatePresence>
