@@ -60,6 +60,12 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from "@/components/ui/dropdown-menu";
+import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -709,7 +715,7 @@ export function App(): React.JSX.Element {
         }
         const isFirstRenderedItem = flattened.length === 0;
         const startsNewTurn = previousRenderedTurnIndex !== turnIndex;
-        const spacingTop = isFirstRenderedItem ? 0 : startsNewTurn ? 32 : 20;
+        const spacingTop = isFirstRenderedItem ? 0 : startsNewTurn ? 16 : 10;
         flattened.push({
           key: item.id ?? `${turnIndex}-${itemIndexInTurn}`,
           item,
@@ -1432,6 +1438,15 @@ export function App(): React.JSX.Element {
     }
   }, [refreshAll]);
 
+  const createThreadForSingleAgent = useCallback((projectPath: string) => {
+    const onlyAgentId = availableAgentIds[0];
+    if (!onlyAgentId) {
+      setError("Cannot create thread: no enabled agent");
+      return;
+    }
+    void createNewThread(projectPath, onlyAgentId);
+  }, [availableAgentIds, createNewThread]);
+
   const renderSidebarContent = (viewport: "desktop" | "mobile"): React.JSX.Element => (
     <>
       <div className="relative z-20 h-14 shrink-0 px-4">
@@ -1468,20 +1483,57 @@ export function App(): React.JSX.Element {
             <div className="px-4 py-6 text-xs text-muted-foreground text-center space-y-3">
               <div>No threads</div>
               {availableAgentIds.length > 0 && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="rounded-full"
-                  disabled={isBusy}
-                  onClick={() => {
-                    const defaultProjectPath = selectedAgentDescriptor?.projectDirectories[0] ?? ".";
-                    void createNewThread(defaultProjectPath, selectedAgentId);
-                  }}
-                >
-                  <Plus size={13} className="mr-1.5" />
-                  New {selectedAgentLabel} thread
-                </Button>
+                availableAgentIds.length === 1 ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="rounded-full"
+                    disabled={isBusy}
+                    onClick={() => {
+                      const defaultProjectPath = selectedAgentDescriptor?.projectDirectories[0] ?? ".";
+                      createThreadForSingleAgent(defaultProjectPath);
+                    }}
+                  >
+                    <Plus size={13} className="mr-1.5" />
+                    New {selectedAgentLabel} thread
+                  </Button>
+                ) : (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="rounded-full"
+                        disabled={isBusy}
+                      >
+                        <Plus size={13} className="mr-1.5" />
+                        New thread
+                      </Button>
+                    </DropdownMenuTrigger>
+                        <DropdownMenuContent align="center" sideOffset={6}>
+                      {availableAgentIds.map((agentId) => (
+                        <DropdownMenuItem
+                          key={agentId}
+                          onSelect={() => {
+                            const defaultProjectPath = agentsById[agentId]?.projectDirectories[0] ?? ".";
+                            void createNewThread(defaultProjectPath, agentId);
+                          }}
+                        >
+                          <span className="shrink-0 h-4 w-4 rounded-sm bg-muted/30 ring-1 ring-border/60 flex items-center justify-center overflow-hidden">
+                            <AgentFavicon
+                              agentId={agentId}
+                              label={agentsById[agentId]?.label ?? "Agent"}
+                              className="h-3.5 w-3.5"
+                            />
+                          </span>
+                          New {agentsById[agentId]?.label ?? agentId} thread
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )
               )}
             </div>
           )}
@@ -1512,22 +1564,65 @@ export function App(): React.JSX.Element {
                       )}
                       <span className="min-w-0 truncate">{group.label}</span>
                     </Button>
-                    <IconBtn
-                      onClick={() => {
-                        if (!group.projectPath) {
-                          return;
+                    {availableAgentIds.length <= 1 ? (
+                      <IconBtn
+                        onClick={() => {
+                          if (!group.projectPath) {
+                            return;
+                          }
+                          createThreadForSingleAgent(group.projectPath);
+                        }}
+                        title={
+                          group.projectPath
+                            ? `New ${nextAgentLabel} thread in ${group.label}`
+                            : "Cannot create thread: missing project path"
                         }
-                        void createNewThread(group.projectPath, nextAgentId);
-                      }}
-                      title={
-                        group.projectPath
-                          ? `New ${nextAgentLabel} thread in ${group.label}`
-                          : "Cannot create thread: missing project path"
-                      }
-                      disabled={isBusy || !group.projectPath}
-                    >
-                      <Plus size={14} />
-                    </IconBtn>
+                        disabled={isBusy || !group.projectPath}
+                      >
+                        <Plus size={14} />
+                      </IconBtn>
+                    ) : (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            type="button"
+                            disabled={isBusy || !group.projectPath}
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted"
+                            title={
+                              group.projectPath
+                                ? `New thread in ${group.label}`
+                                : "Cannot create thread: missing project path"
+                            }
+                          >
+                            <Plus size={14} />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" sideOffset={6}>
+                          {availableAgentIds.map((agentId) => (
+                            <DropdownMenuItem
+                              key={agentId}
+                              onSelect={() => {
+                                if (!group.projectPath) {
+                                  return;
+                                }
+                                void createNewThread(group.projectPath, agentId);
+                              }}
+                            >
+                              <span className="shrink-0 h-4 w-4 rounded-sm bg-muted/30 ring-1 ring-border/60 flex items-center justify-center overflow-hidden">
+                                <AgentFavicon
+                                  agentId={agentId}
+                                  label={agentsById[agentId]?.label ?? "Agent"}
+                                  className="h-3.5 w-3.5"
+                                />
+                              </span>
+                              New {agentsById[agentId]?.label ?? agentId} thread
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
                   </div>
                   {!isCollapsed && (
                     <div className="space-y-1 pl-4 pt-0.5">
@@ -1808,7 +1903,7 @@ export function App(): React.JSX.Element {
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
                   transition={{ duration: 0.14, ease: "easeOut" }}
-                  className="max-w-3xl mx-auto px-4 pt-16 pb-8"
+                  className="max-w-3xl mx-auto px-4 pt-8 pb-6"
                 >
                   {turns.length === 0 ? (
                     <div className="text-center py-20 text-sm text-muted-foreground">
@@ -1821,7 +1916,7 @@ export function App(): React.JSX.Element {
                   ) : (
                     <div ref={chatContentRef} className="space-y-0">
                       {hasHiddenChatItems && (
-                        <div className="flex justify-center pb-6">
+                        <div className="flex justify-center pb-3">
                           <Button
                             type="button"
                             variant="outline"
@@ -1918,23 +2013,6 @@ export function App(): React.JSX.Element {
 
                   {/* Toolbar */}
                   <div className="flex items-center gap-1 min-w-0 overflow-x-auto overflow-y-hidden whitespace-nowrap">
-                    {availableAgentIds.length > 1 && (
-                      <Select
-                        value={selectedAgentId}
-                        onValueChange={(value) => setSelectedAgentId(value as AgentId)}
-                      >
-                        <SelectTrigger className="h-8 w-[100px] shrink-0 rounded-full border-0 bg-transparent dark:bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:text-foreground focus-visible:ring-0">
-                          <SelectValue placeholder="Agent" />
-                        </SelectTrigger>
-                        <SelectContent position="popper">
-                          {availableAgentIds.map((agentId) => (
-                            <SelectItem key={agentId} value={agentId}>
-                              {agentsById[agentId]?.label ?? agentId}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
                     {canSetCollaborationMode && canListCollaborationModes && (
                       <Button
                         type="button"
