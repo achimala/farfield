@@ -405,7 +405,8 @@ export class CodexAgentAdapter implements AgentAdapter {
     if (rawEvents.length === 0) {
       return {
         ownerClientId: this.threadOwnerById.get(threadId) ?? null,
-        conversationState: null
+        conversationState: null,
+        liveStateError: null
       };
     }
 
@@ -458,7 +459,8 @@ export class CodexAgentAdapter implements AgentAdapter {
     if (events.length === 0) {
       return {
         ownerClientId: this.threadOwnerById.get(threadId) ?? null,
-        conversationState: null
+        conversationState: null,
+        liveStateError: null
       };
     }
 
@@ -467,7 +469,8 @@ export class CodexAgentAdapter implements AgentAdapter {
       const state = reduced.get(threadId);
       return {
         ownerClientId: state?.ownerClientId ?? this.threadOwnerById.get(threadId) ?? null,
-        conversationState: state?.conversationState ?? null
+        conversationState: state?.conversationState ?? null,
+        liveStateError: null
       };
     } catch (error) {
       const details =
@@ -489,7 +492,13 @@ export class CodexAgentAdapter implements AgentAdapter {
       );
       return {
         ownerClientId: this.threadOwnerById.get(threadId) ?? null,
-        conversationState: null
+        conversationState: null,
+        liveStateError: {
+          kind: "reductionFailed",
+          message: toErrorMessage(error),
+          eventIndex: details?.eventIndex ?? null,
+          patchIndex: details?.patchIndex ?? null
+        }
       };
     }
   }

@@ -245,6 +245,98 @@ export const ModelChangedItemSchema = z
   })
   .passthrough();
 
+export const McpToolCallStatusSchema = z.enum(["inProgress", "completed", "failed"]);
+
+export const McpToolCallResultSchema = z
+  .object({
+    content: z.array(JsonValueSchema),
+    structuredContent: z.union([JsonValueSchema, z.null()]).optional()
+  })
+  .passthrough();
+
+export const McpToolCallErrorSchema = z
+  .object({
+    message: z.string()
+  })
+  .passthrough();
+
+export const McpToolCallItemSchema = z
+  .object({
+    type: z.literal("mcpToolCall"),
+    id: NonEmptyStringSchema,
+    server: z.string(),
+    tool: z.string(),
+    status: McpToolCallStatusSchema,
+    arguments: JsonValueSchema,
+    result: z.union([McpToolCallResultSchema, z.null()]).optional(),
+    error: z.union([McpToolCallErrorSchema, z.null()]).optional(),
+    durationMs: z.union([NonNegativeIntSchema, z.null()]).optional()
+  })
+  .passthrough();
+
+export const CollabAgentToolSchema = z.enum([
+  "spawnAgent",
+  "sendInput",
+  "resumeAgent",
+  "wait",
+  "closeAgent"
+]);
+
+export const CollabAgentStatusSchema = z.enum([
+  "pendingInit",
+  "running",
+  "completed",
+  "errored",
+  "shutdown",
+  "notFound"
+]);
+
+export const CollabAgentStateSchema = z
+  .object({
+    status: CollabAgentStatusSchema,
+    message: z.union([z.string(), z.null()]).optional()
+  })
+  .passthrough();
+
+export const CollabAgentToolCallStatusSchema = z.enum(["inProgress", "completed", "failed"]);
+
+export const CollabAgentToolCallItemSchema = z
+  .object({
+    type: z.literal("collabAgentToolCall"),
+    id: NonEmptyStringSchema,
+    tool: CollabAgentToolSchema,
+    status: CollabAgentToolCallStatusSchema,
+    senderThreadId: z.string(),
+    receiverThreadIds: z.array(z.string()),
+    prompt: z.union([z.string(), z.null()]).optional(),
+    agentsStates: z.record(CollabAgentStateSchema)
+  })
+  .passthrough();
+
+export const ImageViewItemSchema = z
+  .object({
+    type: z.literal("imageView"),
+    id: NonEmptyStringSchema,
+    path: z.string()
+  })
+  .passthrough();
+
+export const EnteredReviewModeItemSchema = z
+  .object({
+    type: z.literal("enteredReviewMode"),
+    id: NonEmptyStringSchema,
+    review: z.string()
+  })
+  .passthrough();
+
+export const ExitedReviewModeItemSchema = z
+  .object({
+    type: z.literal("exitedReviewMode"),
+    id: NonEmptyStringSchema,
+    review: z.string()
+  })
+  .passthrough();
+
 export const TurnItemSchema = z.discriminatedUnion("type", [
   UserMessageItemSchema,
   SteeringUserMessageItemSchema,
@@ -258,6 +350,11 @@ export const TurnItemSchema = z.discriminatedUnion("type", [
   FileChangeItemSchema,
   ContextCompactionItemSchema,
   WebSearchItemSchema,
+  McpToolCallItemSchema,
+  CollabAgentToolCallItemSchema,
+  ImageViewItemSchema,
+  EnteredReviewModeItemSchema,
+  ExitedReviewModeItemSchema,
   ModelChangedItemSchema
 ]);
 

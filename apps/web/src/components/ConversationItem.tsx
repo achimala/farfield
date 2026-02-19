@@ -20,7 +20,9 @@ interface Props {
 const TOOL_BLOCK_TYPES: readonly TurnItem["type"][] = [
   "commandExecution",
   "fileChange",
-  "webSearch"
+  "webSearch",
+  "mcpToolCall",
+  "collabAgentToolCall"
 ];
 
 function isToolBlockType(type: TurnItem["type"] | undefined): boolean {
@@ -188,6 +190,78 @@ function ConversationItemComponent({
           <div className="text-xs text-foreground/80 whitespace-pre-wrap break-words">
             {item.query}
           </div>
+        </div>
+      );
+
+    case "mcpToolCall": {
+      const argumentsText = JSON.stringify(item.arguments);
+      return (
+        <div className={`${toolSpacing} rounded-lg border border-border bg-muted/20 px-3 py-2`}>
+          <div className="text-[10px] text-muted-foreground font-mono mb-1 uppercase tracking-wider">
+            MCP tool
+          </div>
+          <div className="text-xs text-foreground/90 whitespace-pre-wrap break-words">
+            {item.server}/{item.tool} ({item.status})
+          </div>
+          {item.durationMs != null && (
+            <div className="mt-1 text-[11px] text-muted-foreground font-mono">{item.durationMs}ms</div>
+          )}
+          {item.error?.message && (
+            <div className="mt-2 text-xs text-danger whitespace-pre-wrap break-words">{item.error.message}</div>
+          )}
+          {item.result?.content && item.result.content.length > 0 && (
+            <div className="mt-2 text-xs text-muted-foreground">
+              Result parts: {item.result.content.length}
+            </div>
+          )}
+          <div className="mt-2 text-[11px] text-muted-foreground font-mono whitespace-pre-wrap break-all">
+            {argumentsText}
+          </div>
+        </div>
+      );
+    }
+
+    case "collabAgentToolCall":
+      return (
+        <div className={`${toolSpacing} rounded-lg border border-border bg-muted/20 px-3 py-2`}>
+          <div className="text-[10px] text-muted-foreground font-mono mb-1 uppercase tracking-wider">
+            Collab tool
+          </div>
+          <div className="text-xs text-foreground/90 whitespace-pre-wrap break-words">
+            {item.tool} ({item.status})
+          </div>
+          <div className="mt-1 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
+            sender: {item.senderThreadId}
+          </div>
+          <div className="text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
+            receivers: {item.receiverThreadIds.join(", ") || "none"}
+          </div>
+          {item.prompt && (
+            <div className="mt-2 text-xs text-foreground/80 whitespace-pre-wrap break-words">
+              {item.prompt}
+            </div>
+          )}
+        </div>
+      );
+
+    case "imageView":
+      return (
+        <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+          Viewed image: {item.path}
+        </div>
+      );
+
+    case "enteredReviewMode":
+      return (
+        <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+          Entered review mode: {item.review}
+        </div>
+      );
+
+    case "exitedReviewMode":
+      return (
+        <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+          Exited review mode: {item.review}
         </div>
       );
 

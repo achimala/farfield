@@ -632,6 +632,13 @@ export function App(): React.JSX.Element {
     if (!conversationState) return [] as PendingRequest[];
     return getPendingUserInputRequests(conversationState);
   }, [conversationState]);
+  const liveStateReductionError = useMemo(() => {
+    const errorState = liveState?.liveStateError;
+    if (!errorState || errorState.kind !== "reductionFailed") {
+      return null;
+    }
+    return errorState;
+  }, [liveState?.liveStateError]);
 
   const activeRequest = useMemo(() => {
     if (!pendingRequests.length) return null;
@@ -904,7 +911,8 @@ export function App(): React.JSX.Element {
             ok: true as const,
             threadId,
             ownerClientId: null,
-            conversationState: null
+            conversationState: null,
+            liveStateError: null
           }),
       canReadStreamEvents
         ? getStreamEvents(threadId)
@@ -1881,6 +1889,30 @@ export function App(): React.JSX.Element {
                 >
                   <X size={13} />
                 </Button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+        <AnimatePresence>
+          {liveStateReductionError && activeTab === "chat" && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="overflow-hidden shrink-0"
+            >
+              <div className="px-4 py-2 bg-amber-500/10 border-b border-amber-500/30 text-sm text-amber-200">
+                Live updates failed for this thread. Showing saved messages only.
+                {liveStateReductionError.eventIndex !== null && (
+                  <span className="ml-2 text-xs text-amber-300/90">
+                    event {liveStateReductionError.eventIndex}
+                  </span>
+                )}
+                {liveStateReductionError.patchIndex !== null && (
+                  <span className="ml-1 text-xs text-amber-300/90">
+                    patch {liveStateReductionError.patchIndex}
+                  </span>
+                )}
               </div>
             </motion.div>
           )}

@@ -96,6 +96,12 @@ export interface AgentInterruptInput {
 export interface AgentThreadLiveState {
   ownerClientId: string | null;
   conversationState: AppServerReadThreadResponse["thread"] | null;
+  liveStateError: {
+    kind: "reductionFailed";
+    message: string;
+    eventIndex: number | null;
+    patchIndex: number | null;
+  } | null;
 }
 
 export interface AgentThreadStreamEvents {

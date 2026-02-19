@@ -757,7 +757,8 @@ const server = http.createServer(async (req, res) => {
           ok: true,
           threadId,
           ownerClientId: liveState.ownerClientId,
-          conversationState: liveState.conversationState
+          conversationState: liveState.conversationState,
+          liveStateError: liveState.liveStateError
         });
         return;
       }

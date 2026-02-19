@@ -41,6 +41,14 @@ const LiveStateResponseSchema: z.ZodObject<
     threadId: z.ZodString;
     ownerClientId: z.ZodNullable<z.ZodString>;
     conversationState: z.ZodUnion<[typeof ThreadConversationStateSchema, z.ZodNull]>;
+    liveStateError: z.ZodNullable<
+      z.ZodObject<{
+        kind: z.ZodLiteral<"reductionFailed">;
+        message: z.ZodString;
+        eventIndex: z.ZodNullable<z.ZodNumber>;
+        patchIndex: z.ZodNullable<z.ZodNumber>;
+      }>
+    >;
   },
   "passthrough"
 > = z
@@ -48,7 +56,15 @@ const LiveStateResponseSchema: z.ZodObject<
     ok: z.literal(true),
     threadId: z.string(),
     ownerClientId: z.string().nullable(),
-    conversationState: z.union([ThreadConversationStateSchema, z.null()])
+    conversationState: z.union([ThreadConversationStateSchema, z.null()]),
+    liveStateError: z
+      .object({
+        kind: z.literal("reductionFailed"),
+        message: z.string(),
+        eventIndex: z.number().int().nonnegative().nullable(),
+        patchIndex: z.number().int().nonnegative().nullable()
+      })
+      .nullable()
   })
   .passthrough();
 

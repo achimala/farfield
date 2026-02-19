@@ -455,6 +455,70 @@ describe("codex-protocol schemas", () => {
     expect(parsed.turns[0]?.items[1]?.type).toBe("webSearch");
   });
 
+  it("parses thread conversation state with mcp and collab tool call items", () => {
+    const parsed = parseThreadConversationState({
+      id: "thread-123",
+      turns: [
+        {
+          status: "completed",
+          items: [
+            {
+              id: "item-mcp",
+              type: "mcpToolCall",
+              server: "filesystem",
+              tool: "read_file",
+              status: "completed",
+              arguments: { path: "README.md" },
+              result: {
+                content: ["ok"],
+                structuredContent: null
+              },
+              error: null,
+              durationMs: 18
+            },
+            {
+              id: "item-collab",
+              type: "collabAgentToolCall",
+              tool: "sendInput",
+              status: "inProgress",
+              senderThreadId: "thread-123",
+              receiverThreadIds: ["thread-124"],
+              prompt: "Check this file",
+              agentsStates: {
+                "thread-124": {
+                  status: "running",
+                  message: null
+                }
+              }
+            },
+            {
+              id: "item-image-view",
+              type: "imageView",
+              path: "/tmp/example.png"
+            },
+            {
+              id: "item-review-enter",
+              type: "enteredReviewMode",
+              review: "review-1"
+            },
+            {
+              id: "item-review-exit",
+              type: "exitedReviewMode",
+              review: "review-1"
+            }
+          ]
+        }
+      ],
+      requests: []
+    });
+
+    expect(parsed.turns[0]?.items[0]?.type).toBe("mcpToolCall");
+    expect(parsed.turns[0]?.items[1]?.type).toBe("collabAgentToolCall");
+    expect(parsed.turns[0]?.items[2]?.type).toBe("imageView");
+    expect(parsed.turns[0]?.items[3]?.type).toBe("enteredReviewMode");
+    expect(parsed.turns[0]?.items[4]?.type).toBe("exitedReviewMode");
+  });
+
   it("parses contextCompaction item when completed is omitted", () => {
     const parsed = parseThreadConversationState({
       id: "thread-123",
