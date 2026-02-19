@@ -14,7 +14,8 @@
     "lint": "bun run --workspaces lint",
     "typecheck": "bun run --workspaces typecheck",
     "sanitize:traces": "node scripts/sanitize-traces.mjs",
-    "generate:codex-schema": "node scripts/generate-codex-schema.mjs"
+    "generate:codex-schema": "node scripts/generate-codex-schema.mjs",
+    "screenshot:codex": "node skills/codex-window-debug/tools/codex-window-screenshot.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
