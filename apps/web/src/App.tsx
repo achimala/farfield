@@ -2171,7 +2171,6 @@ export function App(): React.JSX.Element {
                       transition={{ duration: 0.15 }}
                       className="px-1 flex items-center gap-1.5 text-xs text-muted-foreground"
                     >
-                      <Loader2 size={11} className="animate-spin" />
                       <span className="reasoning-shimmer font-medium">Thinking…</span>
                     </motion.div>
                   )}
