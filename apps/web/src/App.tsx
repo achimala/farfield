@@ -1035,15 +1035,31 @@ export function App(): React.JSX.Element {
   }, [activeTab, selectedThreadId]);
 
   useEffect(() => {
+    if (document.visibilityState !== "visible") {
+      return;
+    }
     void refreshAll();
   }, [refreshAll]);
 
   useEffect(() => {
-    coreRefreshIntervalRef.current = window.setInterval(() => {
+    const refreshCoreData = () => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
       void loadCoreData().catch((e) => setError(toErrorMessage(e)));
-    }, 5000);
+    };
+
+    coreRefreshIntervalRef.current = window.setInterval(refreshCoreData, 5000);
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+      refreshCoreData();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       if (coreRefreshIntervalRef.current) window.clearInterval(coreRefreshIntervalRef.current);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [loadCoreData]);
 
@@ -1122,7 +1138,7 @@ export function App(): React.JSX.Element {
     };
 
     const connectEvents = () => {
-      if (disposed) {
+      if (disposed || document.visibilityState !== "visible") {
         return;
       }
 
@@ -1175,14 +1191,15 @@ export function App(): React.JSX.Element {
       };
     };
 
-    connectEvents();
-
-    return () => {
-      disposed = true;
+    const closeEvents = () => {
       if (reconnectTimer !== null) {
         window.clearTimeout(reconnectTimer);
+        reconnectTimer = null;
       }
-      if (refreshTimerRef.current) window.clearTimeout(refreshTimerRef.current);
+      if (refreshTimerRef.current) {
+        window.clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = null;
+      }
       pendingRefreshFlagsRef.current = {
         refreshCore: false,
         refreshHistory: false,
@@ -1190,7 +1207,26 @@ export function App(): React.JSX.Element {
       };
       if (source) {
         source.close();
+        source = null;
       }
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        connectEvents();
+        scheduleRefresh(true, activeTabRef.current === "debug", Boolean(selectedThreadIdRef.current));
+        return;
+      }
+      closeEvents();
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    connectEvents();
+
+    return () => {
+      disposed = true;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      closeEvents();
     };
   }, [loadCoreData, loadSelectedThread]);
 
