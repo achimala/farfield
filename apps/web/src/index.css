@@ -157,8 +157,8 @@ pre {
 ::-webkit-scrollbar-thumb:hover { background: var(--muted-foreground); }
 
 @keyframes reasoning-shimmer {
-  0% { background-position: -300% center; }
-  100% { background-position: 300% center; }
+  0% { background-position: 300% center; }
+  100% { background-position: -300% center; }
 }
 
 .reasoning-shimmer {
@@ -173,7 +173,7 @@ pre {
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: reasoning-shimmer 2.2s linear infinite;
+  animation: reasoning-shimmer 11s linear infinite;
 }
 
 .markdown-content > * + * {
