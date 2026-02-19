@@ -1035,9 +1035,6 @@ export function App(): React.JSX.Element {
   }, [activeTab, selectedThreadId]);
 
   useEffect(() => {
-    if (document.visibilityState !== "visible") {
-      return;
-    }
     void refreshAll();
   }, [refreshAll]);
 
@@ -1138,7 +1135,7 @@ export function App(): React.JSX.Element {
     };
 
     const connectEvents = () => {
-      if (disposed || document.visibilityState !== "visible") {
+      if (disposed) {
         return;
       }
 
