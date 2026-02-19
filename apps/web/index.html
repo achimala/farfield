@@ -3,6 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#09090b" media="(prefers-color-scheme: dark)" />
+    <script>
+      (() => {
+        try {
+          const storedTheme = localStorage.getItem("theme");
+          const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+          const useDarkTheme = storedTheme === "dark" || (!storedTheme && prefersDark);
+          const root = document.documentElement;
+          root.classList.toggle("dark", useDarkTheme);
+          root.style.colorScheme = useDarkTheme ? "dark" : "light";
+          root.style.backgroundColor = useDarkTheme ? "#09090b" : "#ffffff";
+        } catch {
+          document.documentElement.style.backgroundColor = "#ffffff";
+        }
+      })();
+    </script>
     <title>Farfield</title>
   </head>
   <body>
