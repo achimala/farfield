@@ -338,32 +338,36 @@ export class CodexAgentAdapter implements AgentAdapter {
     }
 
     if (this.isIpcReady()) {
-      const ownerClientId = resolveOwnerClientId(
-        this.threadOwnerById,
-        input.threadId,
-        input.ownerClientId
-      );
+      const mappedOwnerClientId = this.threadOwnerById.get(input.threadId);
+      const overrideOwnerClientId = input.ownerClientId;
+      const ownerClientId = mappedOwnerClientId && mappedOwnerClientId.trim()
+        ? mappedOwnerClientId.trim()
+        : overrideOwnerClientId && overrideOwnerClientId.trim()
+          ? overrideOwnerClientId.trim()
+          : null;
 
-      const readResult = await this.runAppServerCall(() =>
-        this.appClient.readThread(input.threadId, true)
-      );
+      if (ownerClientId) {
+        const readResult = await this.runAppServerCall(() =>
+          this.appClient.readThread(input.threadId, true)
+        );
 
-      let turnStartTemplate: ReturnType<typeof findLatestTurnParamsTemplate> | null = null;
-      try {
-        turnStartTemplate = findLatestTurnParamsTemplate(readResult.thread);
-      } catch {
-        turnStartTemplate = null;
+        let turnStartTemplate: ReturnType<typeof findLatestTurnParamsTemplate> | null = null;
+        try {
+          turnStartTemplate = findLatestTurnParamsTemplate(readResult.thread);
+        } catch {
+          turnStartTemplate = null;
+        }
+
+        await this.service.sendMessage({
+          threadId: input.threadId,
+          ownerClientId,
+          text: input.text,
+          ...(input.cwd ? { cwd: input.cwd } : {}),
+          ...(typeof input.isSteering === "boolean" ? { isSteering: input.isSteering } : {}),
+          turnStartTemplate
+        });
+        return;
       }
-
-      await this.service.sendMessage({
-        threadId: input.threadId,
-        ownerClientId,
-        text: input.text,
-        ...(input.cwd ? { cwd: input.cwd } : {}),
-        ...(typeof input.isSteering === "boolean" ? { isSteering: input.isSteering } : {}),
-        turnStartTemplate
-      });
-      return;
     }
 
     try {
