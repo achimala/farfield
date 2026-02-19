@@ -181,6 +181,10 @@ function shouldRenderConversationItem(item: ConversationTurnItem): boolean {
   }
 }
 
+function isTurnInProgressStatus(status: string | undefined): boolean {
+  return status === "in-progress" || status === "inProgress";
+}
+
 function signaturesMatch(prev: string[], next: string[]): boolean {
   if (prev.length !== next.length) {
     return false;
@@ -706,7 +710,7 @@ export function App(): React.JSX.Element {
   const deferredConversationState = useDeferredValue(conversationState);
   const turns = deferredConversationState?.turns ?? [];
   const lastTurn = turns[turns.length - 1];
-  const isGenerating = lastTurn?.status === "in-progress";
+  const isGenerating = isTurnInProgressStatus(lastTurn?.status);
   const flatConversationItems = useMemo(() => {
     const flattened: FlatConversationItem[] = [];
     let previousRenderedTurnIndex = -1;
@@ -1688,6 +1692,7 @@ export function App(): React.JSX.Element {
                       )}
                       {group.threads.map((thread) => {
                         const isSelected = thread.id === selectedThreadId;
+                        const threadIsGenerating = isSelected && isGenerating;
                         return (
                           <Button
                             key={thread.id}
@@ -1702,8 +1707,8 @@ export function App(): React.JSX.Element {
                                 ? "bg-muted/90 text-foreground shadow-sm"
                                 : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
                             }`}
-                          >
-                            <span className="min-w-0 flex-1 flex items-center gap-1.5 truncate leading-5">
+                            >
+                              <span className="min-w-0 flex-1 flex items-center gap-1.5 truncate leading-5">
                               {thread.agentId && (
                                 <span className="shrink-0 h-4 w-4 rounded-sm bg-muted/30 ring-1 ring-border/60 flex items-center justify-center overflow-hidden">
                                   <AgentFavicon
@@ -1713,13 +1718,18 @@ export function App(): React.JSX.Element {
                                   />
                                 </span>
                               )}
-                              <span className="truncate">{threadLabel(thread)}</span>
-                            </span>
-                            {thread.updatedAt && (
-                              <span className="shrink-0 text-[10px] text-muted-foreground/50">
-                                {formatDate(thread.updatedAt)}
+                                <span className="truncate">{threadLabel(thread)}</span>
                               </span>
-                            )}
+                            <span className="shrink-0 flex items-center gap-1.5">
+                              {threadIsGenerating && (
+                                <Loader2 size={11} className="animate-spin text-muted-foreground/70" />
+                              )}
+                              {thread.updatedAt && (
+                                <span className="text-[10px] text-muted-foreground/50">
+                                  {formatDate(thread.updatedAt)}
+                                </span>
+                              )}
+                            </span>
                           </Button>
                         );
                       })}
@@ -2072,6 +2082,21 @@ export function App(): React.JSX.Element {
                       onSkip={() => void skipPendingRequest()}
                       isBusy={isBusy}
                     />
+                  )}
+                </AnimatePresence>
+
+                <AnimatePresence initial={false}>
+                  {isGenerating && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 4 }}
+                      transition={{ duration: 0.15 }}
+                      className="px-1 flex items-center gap-1.5 text-xs text-muted-foreground"
+                    >
+                      <Loader2 size={11} className="animate-spin" />
+                      <span className="reasoning-shimmer font-medium">Thinking…</span>
+                    </motion.div>
                   )}
                 </AnimatePresence>
 

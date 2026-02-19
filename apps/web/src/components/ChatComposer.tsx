@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUp, CirclePause, Loader2 } from "lucide-react";
+import { ArrowUp, Loader2, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -116,6 +116,8 @@ export function ChatComposer({
           void sendDraft();
         }}
         disabled={disableSend}
+        title={isGenerating ? "Stop" : "Send"}
+        aria-label={isGenerating ? "Stop" : "Send"}
         size="icon"
         className={`h-9 w-9 shrink-0 self-end rounded-full disabled:opacity-30 ${
           isGenerating
@@ -124,7 +126,7 @@ export function ChatComposer({
         }`}
       >
         {isGenerating ? (
-          <CirclePause size={13} />
+          <Square size={11} />
         ) : isBusy ? (
           <Loader2 size={13} className="animate-spin" />
         ) : (
