@@ -56,6 +56,13 @@ export interface StartThreadOptions {
   ephemeral?: boolean;
 }
 
+const AppServerResumeThreadRequestSchema = z
+  .object({
+    threadId: z.string().min(1),
+    persistExtendedHistory: z.boolean()
+  })
+  .passthrough();
+
 export class AppServerClient {
   private readonly transport: AppServerTransport;
 
@@ -169,5 +176,17 @@ export class AppServerClient {
     });
     const result = await this.transport.request("sendUserMessage", request);
     parseWithSchema(AppServerSendUserMessageResponseSchema, result, "AppServerSendUserMessageResponse");
+  }
+
+  public async resumeThread(
+    threadId: string,
+    options?: { persistExtendedHistory?: boolean }
+  ): Promise<AppServerReadThreadResponse> {
+    const request = AppServerResumeThreadRequestSchema.parse({
+      threadId,
+      persistExtendedHistory: options?.persistExtendedHistory ?? true
+    });
+    const result = await this.transport.request("thread/resume", request);
+    return parseWithSchema(AppServerReadThreadResponseSchema, result, "AppServerResumeThreadResponse");
   }
 }

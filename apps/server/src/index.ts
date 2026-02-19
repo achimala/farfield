@@ -317,7 +317,7 @@ function pushActionEvent(
     action,
     stage,
     ...details
-  });
+  }, details);
 }
 
 function pushActionError(

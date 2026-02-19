@@ -12,7 +12,7 @@ export interface SendMessageInput {
   text: string;
   cwd?: string;
   isSteering?: boolean;
-  turnStartTemplate: TurnStartParams;
+  turnStartTemplate?: TurnStartParams | null;
   model?: string | null;
   effort?: string | null;
   collaborationMode?: CollaborationMode | null;
@@ -51,13 +51,20 @@ export class CodexMonitorService {
 
     const template = input.turnStartTemplate;
 
-    const turnStartParams = {
-      ...template,
-      threadId: input.threadId,
-      input: [{ type: "text" as const, text }],
-      cwd: input.cwd ?? template.cwd,
-      attachments: Array.isArray(template.attachments) ? template.attachments : []
-    };
+    const turnStartParams: TurnStartParams = template
+      ? {
+          ...template,
+          threadId: input.threadId,
+          input: [{ type: "text" as const, text }],
+          cwd: input.cwd ?? template.cwd,
+          attachments: Array.isArray(template.attachments) ? template.attachments : []
+        }
+      : {
+          threadId: input.threadId,
+          input: [{ type: "text" as const, text }],
+          ...(input.cwd ? { cwd: input.cwd } : {}),
+          attachments: []
+        };
 
     if (Object.prototype.hasOwnProperty.call(input, "model")) {
       turnStartParams.model = input.model ?? null;

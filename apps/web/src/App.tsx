@@ -321,6 +321,32 @@ function modeSelectionSignatureFromConversationState(
   return buildModeSignature(selection.modeKey, selection.modelId, selection.reasoningEffort);
 }
 
+function conversationProgressSignature(
+  state: NonNullable<ReadThreadResponse["thread"]> | null | undefined
+): string {
+  if (!state) {
+    return "";
+  }
+
+  const lastTurn = state.turns[state.turns.length - 1];
+  if (!lastTurn) {
+    return "no-turns";
+  }
+
+  const lastTurnId = lastTurn.id ?? lastTurn.turnId ?? "";
+  const items = lastTurn.items ?? [];
+  const lastItem = items[items.length - 1];
+
+  return [
+    String(state.turns.length),
+    lastTurnId,
+    lastTurn.status,
+    String(items.length),
+    lastItem?.id ?? "",
+    lastItem?.type ?? ""
+  ].join("|");
+}
+
 function buildLiveStateSyncSignature(state: LiveStateResponse | null | undefined): string {
   if (!state) {
     return "";
@@ -332,7 +358,8 @@ function buildLiveStateSyncSignature(state: LiveStateResponse | null | undefined
     state.ownerClientId ?? "",
     String(getConversationStateUpdatedAt(conversationState)),
     String(conversationState?.turns.length ?? -1),
-    modeSelectionSignatureFromConversationState(conversationState)
+    modeSelectionSignatureFromConversationState(conversationState),
+    conversationProgressSignature(conversationState)
   ].join("|");
 }
 
@@ -346,7 +373,8 @@ function buildReadThreadSyncSignature(state: ReadThreadResponse | null | undefin
     conversationState.id,
     String(getConversationStateUpdatedAt(conversationState)),
     String(conversationState.turns.length),
-    modeSelectionSignatureFromConversationState(conversationState)
+    modeSelectionSignatureFromConversationState(conversationState),
+    conversationProgressSignature(conversationState)
   ].join("|");
 }
 

@@ -35,3 +35,26 @@ describe("AppServerClient.sendUserMessage", () => {
     await expect(client.sendUserMessage("thread-1", "hello")).resolves.toBeUndefined();
   });
 });
+
+describe("AppServerClient.resumeThread", () => {
+  it("sends the expected resume request payload", async () => {
+    const transport: AppServerTransport = {
+      request: vi.fn().mockResolvedValue({
+        thread: {
+          id: "thread-1",
+          turns: [],
+          requests: []
+        }
+      }),
+      close: vi.fn().mockResolvedValue(undefined)
+    };
+
+    const client = new AppServerClient(transport);
+    await client.resumeThread("thread-1");
+
+    expect(transport.request).toHaveBeenCalledWith("thread/resume", {
+      threadId: "thread-1",
+      persistExtendedHistory: true
+    });
+  });
+});

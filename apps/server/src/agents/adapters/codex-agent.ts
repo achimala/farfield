@@ -6,6 +6,7 @@ import {
   AppServerTransportError,
   CodexMonitorService,
   DesktopIpcClient,
+  findLatestTurnParamsTemplate,
   reduceThreadStreamEvents,
   ThreadStreamReductionError,
   type SendRequestOptions
@@ -206,6 +207,18 @@ export class CodexAgentAdapter implements AgentAdapter {
     return error.message.includes("thread not loaded");
   }
 
+  public isConversationNotFoundError(error: unknown): boolean {
+    if (!(error instanceof AppServerRpcError)) {
+      return false;
+    }
+
+    if (error.code !== -32600) {
+      return false;
+    }
+
+    return error.message.includes("conversation not found");
+  }
+
   public isEnabled(): boolean {
     return true;
   }
@@ -323,6 +336,50 @@ export class CodexAgentAdapter implements AgentAdapter {
     if (input.isSteering === true) {
       throw new Error("Steering messages are not supported on this endpoint.");
     }
+
+    if (this.isIpcReady()) {
+      const ownerClientId = resolveOwnerClientId(
+        this.threadOwnerById,
+        input.threadId,
+        input.ownerClientId
+      );
+
+      const readResult = await this.runAppServerCall(() =>
+        this.appClient.readThread(input.threadId, true)
+      );
+
+      let turnStartTemplate: ReturnType<typeof findLatestTurnParamsTemplate> | null = null;
+      try {
+        turnStartTemplate = findLatestTurnParamsTemplate(readResult.thread);
+      } catch {
+        turnStartTemplate = null;
+      }
+
+      await this.service.sendMessage({
+        threadId: input.threadId,
+        ownerClientId,
+        text: input.text,
+        ...(input.cwd ? { cwd: input.cwd } : {}),
+        ...(typeof input.isSteering === "boolean" ? { isSteering: input.isSteering } : {}),
+        turnStartTemplate
+      });
+      return;
+    }
+
+    try {
+      await this.runAppServerCall(() =>
+        this.appClient.sendUserMessage(input.threadId, input.text)
+      );
+      return;
+    } catch (error) {
+      if (!this.isConversationNotFoundError(error)) {
+        throw error;
+      }
+    }
+
+    await this.runAppServerCall(() =>
+      this.appClient.resumeThread(input.threadId, { persistExtendedHistory: true })
+    );
     await this.runAppServerCall(() =>
       this.appClient.sendUserMessage(input.threadId, input.text)
     );
@@ -688,6 +745,7 @@ export class CodexAgentAdapter implements AgentAdapter {
           ipcConnected: this.ipcClient.isConnected(),
           lastError: toErrorMessage(error)
         });
+        this.scheduleIpcReconnect();
       } finally {
         this.bootstrapInFlight = null;
       }

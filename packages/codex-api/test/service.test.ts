@@ -90,6 +90,39 @@ describe("CodexMonitorService", () => {
     );
   });
 
+  it("sends message without a template when none is available", async () => {
+    const ipcClient = {
+      sendRequestAndWait: vi.fn().mockResolvedValue({ type: "response", requestId: 1 })
+    };
+
+    const service = new CodexMonitorService(ipcClient as never);
+
+    await service.sendMessage({
+      threadId: "thread-1",
+      ownerClientId: "client-1",
+      text: "new message without template",
+      cwd: "/tmp/project"
+    });
+
+    expect(ipcClient.sendRequestAndWait).toHaveBeenCalledWith(
+      "thread-follower-start-turn",
+      expect.objectContaining({
+        conversationId: "thread-1",
+        turnStartParams: expect.objectContaining({
+          threadId: "thread-1",
+          cwd: "/tmp/project",
+          input: [
+            {
+              type: "text",
+              text: "new message without template"
+            }
+          ]
+        })
+      }),
+      expect.any(Object)
+    );
+  });
+
   it("submits user input with validated payload", async () => {
     const service = new CodexMonitorService({ sendRequestAndWait: vi.fn().mockResolvedValue({}) } as never);
 
