@@ -1013,38 +1013,12 @@ export function App(): React.JSX.Element {
   }, [loadSelectedThread, selectedThreadId]);
 
   useEffect(() => {
-    const source = new EventSource("/events");
-    source.onmessage = (event: MessageEvent<string>) => {
-      let refreshCore = false;
-      const refreshHistory = activeTabRef.current === "debug";
-      let refreshSelectedThread = false;
+    let disposed = false;
+    let source: EventSource | null = null;
+    let reconnectTimer: number | null = null;
+    let reconnectDelayMs = 1000;
 
-      try {
-        const parsedEventResult = SseEventSchema.safeParse(JSON.parse(event.data));
-        if (!parsedEventResult.success) {
-          refreshCore = true;
-        } else {
-          const parsedEvent = parsedEventResult.data;
-          if (parsedEvent.type === "state") {
-            refreshCore = true;
-          } else if (parsedEvent.type === "history") {
-            if (parsedEvent.entry.source === "app" || parsedEvent.entry.source === "system") {
-              refreshCore = true;
-            }
-            const eventThreadId = parsedEvent.entry.meta.threadId;
-            if (
-              eventThreadId &&
-              selectedThreadIdRef.current &&
-              eventThreadId === selectedThreadIdRef.current
-            ) {
-              refreshSelectedThread = true;
-            }
-          }
-        }
-      } catch {
-        refreshCore = true;
-      }
-
+    const scheduleRefresh = (refreshCore: boolean, refreshHistory: boolean, refreshSelectedThread: boolean) => {
       const previousFlags = pendingRefreshFlagsRef.current;
       pendingRefreshFlagsRef.current = {
         refreshCore: previousFlags.refreshCore || refreshCore,
@@ -1090,15 +1064,88 @@ export function App(): React.JSX.Element {
         })();
       }, 200);
     };
-    source.onerror = () => source.close();
+
+    const scheduleReconnect = () => {
+      if (disposed || reconnectTimer !== null) {
+        return;
+      }
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = null;
+        connectEvents();
+      }, reconnectDelayMs);
+      reconnectDelayMs = Math.min(reconnectDelayMs * 2, 10_000);
+    };
+
+    const connectEvents = () => {
+      if (disposed) {
+        return;
+      }
+
+      source = new EventSource("/events");
+      source.onopen = () => {
+        reconnectDelayMs = 1000;
+        scheduleRefresh(true, activeTabRef.current === "debug", Boolean(selectedThreadIdRef.current));
+      };
+
+      source.onmessage = (event: MessageEvent<string>) => {
+        let refreshCore = false;
+        const refreshHistory = activeTabRef.current === "debug";
+        let refreshSelectedThread = false;
+
+        try {
+          const parsedEventResult = SseEventSchema.safeParse(JSON.parse(event.data));
+          if (!parsedEventResult.success) {
+            refreshCore = true;
+          } else {
+            const parsedEvent = parsedEventResult.data;
+            if (parsedEvent.type === "state") {
+              refreshCore = true;
+            } else if (parsedEvent.type === "history") {
+              if (parsedEvent.entry.source === "app" || parsedEvent.entry.source === "system") {
+                refreshCore = true;
+              }
+              const eventThreadId = parsedEvent.entry.meta.threadId;
+              if (
+                eventThreadId &&
+                selectedThreadIdRef.current &&
+                eventThreadId === selectedThreadIdRef.current
+              ) {
+                refreshSelectedThread = true;
+              }
+            }
+          }
+        } catch {
+          refreshCore = true;
+        }
+
+        scheduleRefresh(refreshCore, refreshHistory, refreshSelectedThread);
+      };
+
+      source.onerror = () => {
+        if (source) {
+          source.close();
+          source = null;
+        }
+        scheduleReconnect();
+      };
+    };
+
+    connectEvents();
+
     return () => {
+      disposed = true;
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer);
+      }
       if (refreshTimerRef.current) window.clearTimeout(refreshTimerRef.current);
       pendingRefreshFlagsRef.current = {
         refreshCore: false,
         refreshHistory: false,
         refreshSelectedThread: false
       };
-      source.close();
+      if (source) {
+        source.close();
+      }
     };
   }, [loadCoreData, loadSelectedThread]);
 

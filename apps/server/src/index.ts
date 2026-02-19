@@ -239,6 +239,7 @@ const gitCommit = resolveGitCommitHash();
 const history: HistoryEntry[] = [];
 const historyById = new Map<string, unknown>();
 const sseClients = new Set<ServerResponse>();
+const SSE_KEEPALIVE_INTERVAL_MS = 15_000;
 const threadIndex = new ThreadIndex();
 
 let activeTrace: ActiveTrace | null = null;
@@ -414,12 +415,26 @@ function broadcastSse(payload: unknown): void {
   }
 }
 
+function writeSseKeepalive(): void {
+  for (const client of sseClients) {
+    try {
+      client.write(": keepalive\n\n");
+    } catch {
+      sseClients.delete(client);
+    }
+  }
+}
+
 function broadcastRuntimeState(): void {
   broadcastSse({
     type: "state",
     state: getRuntimeStateSnapshot()
   });
 }
+
+setInterval(() => {
+  writeSseKeepalive();
+}, SSE_KEEPALIVE_INTERVAL_MS);
 
 function resolveCreateThreadAdapter(
   requestedAgentId: AgentId | undefined
@@ -500,8 +515,10 @@ const server = http.createServer(async (req, res) => {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
         "Access-Control-Allow-Origin": "*"
       });
+      res.write("retry: 1000\n\n");
 
       sseClients.add(res);
       eventResponse(res, {
