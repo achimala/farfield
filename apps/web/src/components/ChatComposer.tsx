@@ -65,7 +65,7 @@ export function ChatComposer({
 
   useEffect(() => {
     resizeTextarea();
-  }, [resizeTextarea]);
+  }, [draft, resizeTextarea]);
 
   useEffect(() => {
     return () => {
