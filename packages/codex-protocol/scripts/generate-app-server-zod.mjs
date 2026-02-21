@@ -66,8 +66,28 @@ const schemaTargets = [
   }
 ];
 
+const methodManifestSources = {
+  clientRequest: path.join(vendorRoot, "stable", "json", "ClientRequest.json"),
+  clientNotification: path.join(vendorRoot, "stable", "json", "ClientNotification.json"),
+  serverRequest: path.join(vendorRoot, "stable", "json", "ServerRequest.json"),
+  serverNotification: path.join(vendorRoot, "stable", "json", "ServerNotification.json")
+};
+
 function ensureSchemaFilesExist() {
   const missing = schemaTargets.filter((target) => !fs.existsSync(target.source));
+  const missingManifestSources = Object.entries(methodManifestSources)
+    .filter(([, source]) => !fs.existsSync(source))
+    .map(([name, source]) => ({ name, source }));
+
+  for (const entry of missingManifestSources) {
+    missing.push({
+      id: `method-manifest-${entry.name}`,
+      source: entry.source,
+      fileName: "",
+      exportName: ""
+    });
+  }
+
   if (missing.length === 0) {
     return;
   }
@@ -99,11 +119,78 @@ async function writeSchemaModule(target) {
   fs.writeFileSync(path.join(outDir, target.fileName), withHeader, "utf8");
 }
 
+function readMethodNames(sourcePath) {
+  const schema = JSON.parse(fs.readFileSync(sourcePath, "utf8"));
+  if (!Array.isArray(schema.oneOf)) {
+    throw new Error(`Expected oneOf array in ${sourcePath}`);
+  }
+
+  const methodNames = new Set();
+
+  for (const branch of schema.oneOf) {
+    const method = branch?.properties?.method;
+    if (!method || !Array.isArray(method.enum) || method.enum.length !== 1) {
+      continue;
+    }
+    const value = method.enum[0];
+    if (typeof value === "string" && value.trim().length > 0) {
+      methodNames.add(value);
+    }
+  }
+
+  return Array.from(methodNames).sort((left, right) => left.localeCompare(right));
+}
+
+function renderStringTuple(name, values) {
+  const renderedValues = values.map((value) => `  ${JSON.stringify(value)}`).join(",\n");
+  return [
+    `export const ${name} = [`,
+    renderedValues,
+    "] as const;",
+    ""
+  ].join("\n");
+}
+
+function writeMethodManifestModule() {
+  const clientRequestMethods = readMethodNames(methodManifestSources.clientRequest);
+  const clientNotificationMethods = readMethodNames(methodManifestSources.clientNotification);
+  const serverRequestMethods = readMethodNames(methodManifestSources.serverRequest);
+  const serverNotificationMethods = readMethodNames(methodManifestSources.serverNotification);
+
+  const lines = [
+    "// GENERATED FILE. DO NOT EDIT.",
+    `// Source: ${path.relative(root, methodManifestSources.clientRequest)}`,
+    `// Source: ${path.relative(root, methodManifestSources.clientNotification)}`,
+    `// Source: ${path.relative(root, methodManifestSources.serverRequest)}`,
+    `// Source: ${path.relative(root, methodManifestSources.serverNotification)}`,
+    "",
+    renderStringTuple("APP_SERVER_CLIENT_REQUEST_METHODS", clientRequestMethods),
+    "export type AppServerClientRequestMethod =",
+    "  typeof APP_SERVER_CLIENT_REQUEST_METHODS[number];",
+    "",
+    renderStringTuple("APP_SERVER_CLIENT_NOTIFICATION_METHODS", clientNotificationMethods),
+    "export type AppServerClientNotificationMethod =",
+    "  typeof APP_SERVER_CLIENT_NOTIFICATION_METHODS[number];",
+    "",
+    renderStringTuple("APP_SERVER_SERVER_REQUEST_METHODS", serverRequestMethods),
+    "export type AppServerServerRequestMethod =",
+    "  typeof APP_SERVER_SERVER_REQUEST_METHODS[number];",
+    "",
+    renderStringTuple("APP_SERVER_SERVER_NOTIFICATION_METHODS", serverNotificationMethods),
+    "export type AppServerServerNotificationMethod =",
+    "  typeof APP_SERVER_SERVER_NOTIFICATION_METHODS[number];",
+    ""
+  ];
+
+  fs.writeFileSync(path.join(outDir, "MethodManifest.ts"), lines.join("\n"), "utf8");
+}
+
 function writeIndexModule() {
   const exportLines = schemaTargets.map((target) => {
     const importPath = `./${target.fileName.replace(/\.ts$/, ".js")}`;
     return `export { ${target.exportName} } from "${importPath}";`;
   });
+  exportLines.push('export * from "./MethodManifest.js";');
   const file = [
     "// GENERATED FILE. DO NOT EDIT.",
     ...exportLines,
@@ -122,6 +209,7 @@ async function main() {
     await writeSchemaModule(target);
   }
 
+  writeMethodManifestModule();
   writeIndexModule();
   process.stdout.write("Generated app-server Zod schema modules.\n");
 }

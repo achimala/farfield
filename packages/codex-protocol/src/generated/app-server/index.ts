@@ -8,3 +8,4 @@ export { SendUserMessageParamsSchema } from "./SendUserMessageParamsSchema.js";
 export { SendUserMessageResponseSchema } from "./SendUserMessageResponseSchema.js";
 export { ToolRequestUserInputResponseSchema } from "./ToolRequestUserInputResponseSchema.js";
 export { CollaborationModeListResponseSchema } from "./CollaborationModeListResponseSchema.js";
+export * from "./MethodManifest.js";
