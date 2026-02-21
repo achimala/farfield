@@ -1040,23 +1040,50 @@ export function App(): React.JSX.Element {
 
   useEffect(() => {
     const refreshCoreData = () => {
-      if (document.visibilityState !== "visible") {
+      if (document.visibilityState === "hidden") {
         return;
       }
       void loadCoreData().catch((e) => setError(toErrorMessage(e)));
     };
 
-    coreRefreshIntervalRef.current = window.setInterval(refreshCoreData, 5000);
-    const onVisibilityChange = () => {
-      if (document.visibilityState !== "visible") {
+    const startCoreRefresh = () => {
+      if (coreRefreshIntervalRef.current !== null) {
         return;
       }
-      refreshCoreData();
+      coreRefreshIntervalRef.current = window.setInterval(refreshCoreData, 5000);
     };
+
+    const stopCoreRefresh = () => {
+      if (coreRefreshIntervalRef.current === null) {
+        return;
+      }
+      window.clearInterval(coreRefreshIntervalRef.current);
+      coreRefreshIntervalRef.current = null;
+    };
+
+    startCoreRefresh();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        stopCoreRefresh();
+        return;
+      }
+      startCoreRefresh();
+    };
+    const onPageHide = () => {
+      stopCoreRefresh();
+    };
+    const onPageShow = () => {
+      startCoreRefresh();
+    };
+
     document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("pageshow", onPageShow);
     return () => {
-      if (coreRefreshIntervalRef.current) window.clearInterval(coreRefreshIntervalRef.current);
+      stopCoreRefresh();
       document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("pageshow", onPageShow);
     };
   }, [loadCoreData]);
 
@@ -1075,6 +1102,7 @@ export function App(): React.JSX.Element {
     let source: EventSource | null = null;
     let reconnectTimer: number | null = null;
     let reconnectDelayMs = 1000;
+    let hasOpenedConnection = false;
 
     const scheduleRefresh = (refreshCore: boolean, refreshHistory: boolean, refreshSelectedThread: boolean) => {
       const previousFlags = pendingRefreshFlagsRef.current;
@@ -1135,13 +1163,17 @@ export function App(): React.JSX.Element {
     };
 
     const connectEvents = () => {
-      if (disposed) {
+      if (disposed || source) {
         return;
       }
 
       source = new EventSource("/events");
       source.onopen = () => {
         reconnectDelayMs = 1000;
+        if (hasOpenedConnection) {
+          return;
+        }
+        hasOpenedConnection = true;
         scheduleRefresh(true, activeTabRef.current === "debug", Boolean(selectedThreadIdRef.current));
       };
 
@@ -1211,18 +1243,27 @@ export function App(): React.JSX.Element {
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") {
         connectEvents();
-        scheduleRefresh(true, activeTabRef.current === "debug", Boolean(selectedThreadIdRef.current));
         return;
       }
       closeEvents();
     };
+    const onPageHide = () => {
+      closeEvents();
+    };
+    const onPageShow = () => {
+      connectEvents();
+    };
 
     document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("pageshow", onPageShow);
     connectEvents();
 
     return () => {
       disposed = true;
       document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("pageshow", onPageShow);
       closeEvents();
     };
   }, [loadCoreData, loadSelectedThread]);
