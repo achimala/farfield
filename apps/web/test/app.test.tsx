@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App";
 
@@ -427,6 +427,45 @@ describe("App", () => {
   it("shows mode controls when capability is enabled", async () => {
     render(<App />);
     expect(await screen.findByText("Plan")).toBeTruthy();
+  });
+
+  it("allows collapsing the selected thread project group", async () => {
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: "thread-site",
+          preview: "selected site thread label",
+          createdAt: 1700000000,
+          updatedAt: 1700000001,
+          cwd: "/tmp/site",
+          source: "opencode",
+          agentId: "codex"
+        },
+        {
+          id: "thread-other",
+          preview: "other project thread label",
+          createdAt: 1700000000,
+          updatedAt: 1700000000,
+          cwd: "/tmp/other",
+          source: "opencode",
+          agentId: "codex"
+        }
+      ],
+      nextCursor: null,
+      pages: 1,
+      truncated: false
+    };
+
+    render(<App />);
+    expect(await screen.findByRole("button", { name: /selected site thread label/i })).toBeTruthy();
+
+    const siteGroupButton = screen.getByRole("button", { name: "site" });
+    fireEvent.click(siteGroupButton);
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /selected site thread label/i })).toBeNull();
+    });
   });
 
   it("updates the picker when remote model changes with same updatedAt and turns", async () => {

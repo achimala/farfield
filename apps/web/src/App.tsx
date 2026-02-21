@@ -1626,8 +1626,7 @@ export function App(): React.JSX.Element {
           )}
           <div className="space-y-2 pr-2">
             {groupedThreads.map((group) => {
-              const hasSelectedThread = group.threads.some((thread) => thread.id === selectedThreadId);
-              const isCollapsed = hasSelectedThread ? false : Boolean(sidebarCollapsedGroups[group.key]);
+              const isCollapsed = Boolean(sidebarCollapsedGroups[group.key]);
               const nextAgentId = group.preferredAgentId ?? selectedAgentId;
               const nextAgentLabel = agentsById[nextAgentId]?.label ?? nextAgentId;
               return (
