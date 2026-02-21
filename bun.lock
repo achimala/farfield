@@ -90,6 +90,13 @@
         "zod": "^3.24.1",
       },
     },
+    "packages/unified-surface": {
+      "name": "@farfield/unified-surface",
+      "version": "0.0.0",
+      "dependencies": {
+        "zod": "^3.24.1",
+      },
+    },
   },
   "packages": {
     "@antfu/ni": ["@antfu/ni@25.0.0", "", { "dependencies": { "ansis": "^4.0.0", "fzf": "^0.5.2", "package-manager-detector": "^1.3.0", "tinyexec": "^1.0.1" }, "bin": { "na": "bin/na.mjs", "ni": "bin/ni.mjs", "nr": "bin/nr.mjs", "nci": "bin/nci.mjs", "nlx": "bin/nlx.mjs", "nun": "bin/nun.mjs", "nup": "bin/nup.mjs" } }, "sha512-9q/yCljni37pkMr4sPrI3G4jqdIk074+iukc5aFJl7kmDCCsiJrbZ6zKxnES1Gwg+i9RcDZwvktl23puGslmvA=="],
@@ -233,6 +240,8 @@
     "@farfield/protocol": ["@farfield/protocol@workspace:packages/codex-protocol"],
 
     "@farfield/server": ["@farfield/server@workspace:apps/server"],
+
+    "@farfield/unified-surface": ["@farfield/unified-surface@workspace:packages/unified-surface"],
 
     "@farfield/web": ["@farfield/web@workspace:apps/web"],
 

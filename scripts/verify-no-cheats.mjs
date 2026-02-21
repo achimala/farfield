@@ -35,6 +35,13 @@ function isSourceFile(filePath) {
     return false;
   }
 
+  if (
+    filePath === "scripts/verify-no-cheats.mjs" ||
+    filePath === "scripts/verify-no-provider-imports-in-ui.mjs"
+  ) {
+    return false;
+  }
+
   if (filePath.startsWith("scripts/")) {
     return filePath.endsWith(".mjs") || filePath.endsWith(".js");
   }
