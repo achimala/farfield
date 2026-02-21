@@ -128,6 +128,7 @@ export const UnifiedUserInputQuestionSchema = z
     header: z.string(),
     question: z.string(),
     options: z.array(UnifiedQuestionOptionSchema).default([]),
+    isOther: z.boolean().optional().default(false),
     isSecret: z.boolean().optional().default(false)
   })
   .strict();
@@ -448,6 +449,19 @@ export const UnifiedTurnSchema = z
   .strict();
 export type UnifiedTurn = z.infer<typeof UnifiedTurnSchema>;
 
+const UnifiedLatestCollaborationModeSchema = z
+  .object({
+    mode: NonEmptyStringSchema,
+    settings: z
+      .object({
+        model: NullableStringSchema.optional(),
+        reasoningEffort: NullableStringSchema.optional(),
+        developerInstructions: NullableStringSchema.optional()
+      })
+      .strict()
+  })
+  .strict();
+
 export const UnifiedThreadSchema = z
   .object({
     id: NonEmptyStringSchema,
@@ -457,6 +471,7 @@ export const UnifiedThreadSchema = z
     createdAt: NonNegativeIntSchema.optional(),
     updatedAt: NonNegativeIntSchema.optional(),
     title: NullableStringSchema.optional(),
+    latestCollaborationMode: z.union([UnifiedLatestCollaborationModeSchema, z.null()]).optional(),
     latestModel: NullableStringSchema.optional(),
     latestReasoningEffort: NullableStringSchema.optional(),
     cwd: z.string().optional(),

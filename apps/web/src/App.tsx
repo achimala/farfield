@@ -50,6 +50,11 @@ import {
   submitUserInput,
   type AgentId
 } from "@/lib/api";
+import {
+  UnifiedEventSchema,
+  type UnifiedFeatureAvailability,
+  type UnifiedFeatureId
+} from "@farfield/unified-surface";
 import { useTheme } from "@/hooks/useTheme";
 import { ConversationItem } from "@/components/ConversationItem";
 import { ChatComposer } from "@/components/ChatComposer";
@@ -78,7 +83,6 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
-import { z } from "zod";
 
 /* ── Types ─────────────────────────────────────────────────── */
 type Health = Awaited<ReturnType<typeof getHealth>>;
@@ -110,32 +114,6 @@ interface FlatConversationItem {
   spacingTop: number;
 }
 
-const SseStateEventSchema = z
-  .object({
-    type: z.literal("state"),
-    state: z.object({}).passthrough()
-  })
-  .passthrough();
-
-const SseHistoryEventSchema = z
-  .object({
-    type: z.literal("history"),
-    entry: z
-      .object({
-        source: z.enum(["ipc", "app", "system"]),
-        meta: z
-          .object({
-            method: z.string().optional(),
-            threadId: z.string().optional()
-          })
-          .passthrough()
-      })
-      .passthrough()
-  })
-  .passthrough();
-
-const SseEventSchema = z.union([SseStateEventSchema, SseHistoryEventSchema]);
-
 interface RefreshFlags {
   refreshCore: boolean;
   refreshHistory: boolean;
@@ -160,7 +138,16 @@ function threadLabel(thread: Thread): string {
 }
 
 function toErrorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  if (err instanceof Error) {
+    return err.message;
+  }
+  if (typeof err === "object" && err !== null && "message" in err) {
+    const withMessage = err as { message?: string };
+    if (typeof withMessage.message === "string") {
+      return withMessage.message;
+    }
+  }
+  return String(err);
 }
 
 function shouldRenderConversationItem(item: ConversationTurnItem): boolean {
@@ -171,15 +158,27 @@ function shouldRenderConversationItem(item: ConversationTurnItem): boolean {
     case "agentMessage":
       return item.text.length > 0;
     case "reasoning": {
-      const hasSummary = Array.isArray(item.summary)
-        && item.summary.some((line) => typeof line === "string");
-      return hasSummary || Boolean(item.text);
+      return (item.summary?.length ?? 0) > 0 || Boolean(item.text);
     }
     case "userInputResponse":
       return Object.values(item.answers).some((answers) => answers.length > 0);
     default:
       return true;
   }
+}
+
+function isFeatureAvailable(availability: UnifiedFeatureAvailability | undefined): boolean {
+  return availability?.status === "available";
+}
+
+function canUseFeature(
+  descriptor: AgentDescriptor | null | undefined,
+  featureId: UnifiedFeatureId
+): boolean {
+  if (!descriptor) {
+    return false;
+  }
+  return isFeatureAvailable(descriptor.features[featureId]);
 }
 
 function isTurnInProgressStatus(status: string | undefined): boolean {
@@ -302,7 +301,7 @@ function readModeSelectionFromConversationState(state: NonNullable<ReadThreadRes
         ASSUMED_APP_DEFAULT_MODEL
       ),
       reasoningEffort: normalizeModeSettingValue(
-        state.latestCollaborationMode.settings.reasoning_effort,
+        state.latestCollaborationMode.settings.reasoningEffort,
         ASSUMED_APP_DEFAULT_EFFORT
       )
     };
@@ -586,18 +585,6 @@ export function App(): React.JSX.Element {
     [agentsById, selectedAgentId]
   );
   const selectedAgentLabel = selectedAgentDescriptor?.label ?? "Agent";
-  const selectedAgentCapabilities = selectedAgentDescriptor?.capabilities ?? null;
-  const projectLabelsByPath = useMemo(() => {
-    const labels = new Map<string, string>();
-    for (const descriptor of agentDescriptors) {
-      for (const [projectPath, label] of Object.entries(descriptor.projectLabels)) {
-        if (!labels.has(projectPath)) {
-          labels.set(projectPath, label);
-        }
-      }
-    }
-    return labels;
-  }, [agentDescriptors]);
   const groupedThreads = useMemo(() => {
     type Group = {
       key: string;
@@ -611,14 +598,11 @@ export function App(): React.JSX.Element {
 
     for (const thread of threads) {
       const cwd = typeof thread.cwd === "string" && thread.cwd.trim() ? thread.cwd.trim() : null;
-      const path = typeof thread.path === "string" && thread.path.trim() ? thread.path.trim() : null;
-      const projectPath = cwd ?? path;
+      const projectPath = cwd;
       const key = projectPath ? `project:${projectPath}` : "project:unknown";
-      const label = projectPath
-        ? (projectLabelsByPath.get(projectPath) ?? basenameFromPath(projectPath))
-        : "Unknown";
+      const label = projectPath ? basenameFromPath(projectPath) : "Unknown";
       const updatedAt = typeof thread.updatedAt === "number" ? thread.updatedAt : 0;
-      const threadAgentId = thread.agentId;
+      const threadAgentId = thread.provider;
 
       const existing = groups.get(key);
       if (existing) {
@@ -653,7 +637,7 @@ export function App(): React.JSX.Element {
         }
         groups.set(key, {
           key,
-          label: projectLabelsByPath.get(normalized) ?? basenameFromPath(normalized),
+          label: basenameFromPath(normalized),
           projectPath: normalized,
           latestUpdatedAt: 0,
           preferredAgentId: descriptor.id,
@@ -663,7 +647,7 @@ export function App(): React.JSX.Element {
     }
 
     return Array.from(groups.values()).sort((left, right) => right.latestUpdatedAt - left.latestUpdatedAt);
-  }, [agentDescriptors, projectLabelsByPath, threads]);
+  }, [agentDescriptors, threads]);
   const conversationState = useMemo(() => {
     const liveConversationState = liveState?.conversationState ?? null;
     const readConversationState = readThreadState?.thread ?? null;
@@ -693,7 +677,7 @@ export function App(): React.JSX.Element {
   }, [pendingRequests, selectedRequestId]);
 
   const activeThreadAgentId: AgentId = useMemo(
-    () => selectedThread?.agentId ?? selectedAgentId,
+    () => selectedThread?.provider ?? selectedAgentId,
     [selectedAgentId, selectedThread]
   );
   const activeAgentDescriptor = useMemo(
@@ -701,11 +685,13 @@ export function App(): React.JSX.Element {
     [activeThreadAgentId, agentsById, selectedAgentDescriptor]
   );
   const activeAgentLabel = activeAgentDescriptor?.label ?? selectedAgentLabel;
-  const activeAgentCapabilities = activeAgentDescriptor?.capabilities ?? selectedAgentCapabilities;
-  const canSetCollaborationMode = Boolean(activeAgentCapabilities?.canSetCollaborationMode);
-  const canListModels = Boolean(activeAgentCapabilities?.canListModels);
-  const canListCollaborationModes = Boolean(activeAgentCapabilities?.canListCollaborationModes);
-  const canSubmitUserInputForActiveAgent = Boolean(activeAgentCapabilities?.canSubmitUserInput);
+  const canSetCollaborationMode = canUseFeature(activeAgentDescriptor, "setCollaborationMode");
+  const canListModels = canUseFeature(activeAgentDescriptor, "listModels");
+  const canListCollaborationModes = canUseFeature(activeAgentDescriptor, "listCollaborationModes");
+  const canSubmitUserInputForActiveAgent = canUseFeature(activeAgentDescriptor, "submitUserInput");
+  const canSendMessageForActiveAgent = canUseFeature(activeAgentDescriptor, "sendMessage");
+  const canInterruptForActiveAgent = canUseFeature(activeAgentDescriptor, "interrupt");
+  const canCreateThreadForSelectedAgent = canUseFeature(selectedAgentDescriptor, "createThread");
 
   const planModeOption = useMemo(
     () => modes.find((mode) => isPlanModeOption(mode)) ?? null,
@@ -719,7 +705,11 @@ export function App(): React.JSX.Element {
 
   const effortOptions = useMemo(() => {
     const vals = new Set<string>(DEFAULT_EFFORT_OPTIONS);
-    for (const m of modes) if (m.reasoning_effort) vals.add(m.reasoning_effort);
+    for (const m of modes) {
+      if (m.reasoningEffort) {
+        vals.add(m.reasoningEffort);
+      }
+    }
     const le = conversationState?.latestReasoningEffort;
     if (le) vals.add(le);
     if (selectedReasoningEffort) vals.add(selectedReasoningEffort);
@@ -753,6 +743,13 @@ export function App(): React.JSX.Element {
   const turns = deferredConversationState?.turns ?? [];
   const lastTurn = turns[turns.length - 1];
   const isGenerating = isTurnInProgressStatus(lastTurn?.status);
+  const canUseComposer = isGenerating
+    ? canInterruptForActiveAgent
+    : (
+      selectedThreadId
+        ? canSendMessageForActiveAgent
+        : (availableAgentIds.length > 0 && canCreateThreadForSelectedAgent && canSendMessageForActiveAgent)
+    );
   const flatConversationItems = useMemo(() => {
     const flattened: FlatConversationItem[] = [];
     let previousRenderedTurnIndex = -1;
@@ -814,28 +811,43 @@ export function App(): React.JSX.Element {
     : !openCodeConnected;
   /* Data loading */
   const loadCoreData = useCallback(async () => {
-    const [nh, nt, nm, nmo, ntr, nhist, nag] = await Promise.all([
+    const [nh, nt, ntr, nhist, nag] = await Promise.all([
       getHealth(),
       listThreads({ limit: 80, archived: false, all: true, maxPages: 20 }),
-      listCollaborationModes(),
-      listModels(),
       getTraceStatus(),
       listDebugHistory(120),
-      listAgents().catch(() => null)
+      listAgents()
     ]);
+
+    const enabledAgents = nag.agents.filter((agent) => agent.enabled).map((agent) => agent.id);
+    const nextDefaultAgent = enabledAgents.includes(nag.defaultAgentId)
+      ? nag.defaultAgentId
+      : (enabledAgents[0] ?? nag.defaultAgentId);
+    const threadForActiveProvider = nt.data.find((thread) => thread.id === selectedThreadIdRef.current) ?? null;
+    const activeProviderId = threadForActiveProvider?.provider ?? selectedAgentId;
+    const activeDescriptor = nag.agents.find((agent) => agent.id === activeProviderId) ?? null;
+
+    const [nm, nmo] = await Promise.all([
+      canUseFeature(activeDescriptor, "listCollaborationModes")
+        ? listCollaborationModes(activeProviderId)
+        : Promise.resolve({ data: [] as ModesResponse["data"] }),
+      canUseFeature(activeDescriptor, "listModels")
+        ? listModels(activeProviderId)
+        : Promise.resolve({ data: [] as ModelsResponse["data"] })
+    ]);
+
     let preferredAgentId: AgentId | null = null;
     const nextThreadsSignature = nt.data.map((thread) =>
       [
         thread.id,
         String(thread.updatedAt ?? 0),
         thread.preview,
-        thread.agentId,
-        thread.cwd ?? "",
-        thread.path ?? ""
+        thread.provider,
+        thread.cwd ?? ""
       ].join("|")
     );
     const nextModesSignature = nm.data.map((mode) =>
-      [mode.mode, mode.name, mode.reasoning_effort ?? ""].join("|")
+      [mode.mode, mode.name, mode.reasoningEffort ?? ""].join("|")
     );
     const nextModelsSignature = nmo.data.map((model) =>
       [model.id, model.displayName ?? ""].join("|")
@@ -903,7 +915,14 @@ export function App(): React.JSX.Element {
               return (
                 agent.id === nextAgent.id &&
                 agent.enabled === nextAgent.enabled &&
-                agent.connected === nextAgent.connected
+                agent.connected === nextAgent.connected &&
+                agent.capabilities.canListModels === nextAgent.capabilities.canListModels &&
+                agent.capabilities.canListCollaborationModes === nextAgent.capabilities.canListCollaborationModes &&
+                agent.capabilities.canSetCollaborationMode === nextAgent.capabilities.canSetCollaborationMode &&
+                agent.capabilities.canSubmitUserInput === nextAgent.capabilities.canSubmitUserInput &&
+                agent.capabilities.canReadLiveState === nextAgent.capabilities.canReadLiveState &&
+                agent.capabilities.canReadStreamEvents === nextAgent.capabilities.canReadStreamEvents &&
+                agent.capabilities.canListProjectDirectories === nextAgent.capabilities.canListProjectDirectories
               );
             })
           ) {
@@ -911,10 +930,6 @@ export function App(): React.JSX.Element {
           }
           return nag.agents;
         });
-        const enabledAgents = nag.agents.filter((agent) => agent.enabled).map((agent) => agent.id);
-        const nextDefaultAgent = enabledAgents.includes(nag.defaultAgentId)
-          ? nag.defaultAgentId
-          : (enabledAgents[0] ?? nag.defaultAgentId);
         preferredAgentId = nextDefaultAgent;
         setSelectedAgentId((cur) => {
           if (!hasHydratedAgentSelectionRef.current) {
@@ -927,7 +942,7 @@ export function App(): React.JSX.Element {
       setSelectedThreadId((cur) => {
         if (cur) return cur;
         if (preferredAgentId) {
-          const preferredThread = nt.data.find((thread) => thread.agentId === preferredAgentId);
+          const preferredThread = nt.data.find((thread) => thread.provider === preferredAgentId);
           if (preferredThread) {
             return preferredThread.id;
           }
@@ -940,19 +955,19 @@ export function App(): React.JSX.Element {
         return nonPlanDefault?.mode ?? nm.data[0]?.mode ?? "";
       });
     });
-  }, []);
+  }, [selectedAgentId]);
 
   const loadSelectedThread = useCallback(async (threadId: string) => {
     const includeTurns = !pendingMaterializationThreadIdsRef.current.has(threadId);
     const thread = threads.find((entry) => entry.id === threadId) ?? null;
-    const threadAgentId = thread?.agentId ?? selectedAgentId;
+    const threadAgentId = thread?.provider ?? selectedAgentId;
     const descriptor = agentsById[threadAgentId];
-    const canReadLiveState = descriptor?.capabilities.canReadLiveState ?? (threadAgentId === "codex");
-    const canReadStreamEvents = descriptor?.capabilities.canReadStreamEvents ?? (threadAgentId === "codex");
+    const canReadLiveState = canUseFeature(descriptor, "readLiveState");
+    const canReadStreamEvents = canUseFeature(descriptor, "readStreamEvents");
 
     const [live, stream, read] = await Promise.all([
       canReadLiveState
-        ? getLiveState(threadId)
+        ? getLiveState(threadId, threadAgentId)
         : Promise.resolve({
             ok: true as const,
             threadId,
@@ -961,14 +976,14 @@ export function App(): React.JSX.Element {
             liveStateError: null
           }),
       canReadStreamEvents
-        ? getStreamEvents(threadId)
+        ? getStreamEvents(threadId, threadAgentId)
         : Promise.resolve({
             ok: true as const,
             threadId,
             ownerClientId: null,
             events: []
           }),
-      readThread(threadId, { includeTurns })
+      readThread(threadId, { includeTurns, provider: threadAgentId })
     ]);
     if ((live.conversationState?.turns.length ?? 0) > 0 || read.thread.turns.length > 0) {
       pendingMaterializationThreadIdsRef.current.delete(threadId);
@@ -1168,7 +1183,7 @@ export function App(): React.JSX.Element {
         return;
       }
 
-      source = new EventSource("/events");
+      source = new EventSource("/api/unified/events");
       source.onopen = () => {
         reconnectDelayMs = 1000;
         if (hasOpenedConnection) {
@@ -1180,29 +1195,38 @@ export function App(): React.JSX.Element {
 
       source.onmessage = (event: MessageEvent<string>) => {
         let refreshCore = false;
-        const refreshHistory = activeTabRef.current === "debug";
+        const refreshHistory = false;
         let refreshSelectedThread = false;
 
         try {
-          const parsedEventResult = SseEventSchema.safeParse(JSON.parse(event.data));
+          const parsedEventResult = UnifiedEventSchema.safeParse(JSON.parse(event.data));
           if (!parsedEventResult.success) {
             refreshCore = true;
           } else {
             const parsedEvent = parsedEventResult.data;
-            if (parsedEvent.type === "state") {
+            if (parsedEvent.kind === "providerStateChanged") {
               refreshCore = true;
-            } else if (parsedEvent.type === "history") {
-              if (parsedEvent.entry.source === "app" || parsedEvent.entry.source === "system") {
-                refreshCore = true;
-              }
-              const eventThreadId = parsedEvent.entry.meta.threadId;
+            } else if (parsedEvent.kind === "threadUpdated") {
+              refreshCore = true;
               if (
-                eventThreadId &&
                 selectedThreadIdRef.current &&
-                eventThreadId === selectedThreadIdRef.current
+                parsedEvent.threadId === selectedThreadIdRef.current
               ) {
                 refreshSelectedThread = true;
               }
+            } else if (
+              parsedEvent.kind === "userInputRequested"
+              || parsedEvent.kind === "userInputResolved"
+            ) {
+              if (
+                selectedThreadIdRef.current &&
+                parsedEvent.threadId === selectedThreadIdRef.current
+              ) {
+                refreshCore = true;
+                refreshSelectedThread = true;
+              }
+            } else if (parsedEvent.kind === "error") {
+              refreshCore = true;
             }
           }
         } catch {
@@ -1440,12 +1464,14 @@ export function App(): React.JSX.Element {
   /* Actions */
   const submitMessage = useCallback(async (draft: string) => {
     if (!draft.trim()) return;
+    if (!canSendMessageForActiveAgent) return;
 
     setIsBusy(true);
     try {
       setError("");
 
       let threadId = selectedThreadId;
+      let threadAgentId = activeThreadAgentId;
 
       // Auto-create a thread if none is selected.
       if (!threadId) {
@@ -1453,12 +1479,13 @@ export function App(): React.JSX.Element {
           agentId: selectedAgentId
         });
         threadId = created.threadId;
+        threadAgentId = selectedAgentId;
         pendingMaterializationThreadIdsRef.current.add(threadId);
         setSelectedThreadId(threadId);
         selectedThreadIdRef.current = threadId;
       }
 
-      await sendMessage({ threadId, text: draft });
+      await sendMessage({ provider: threadAgentId, threadId, text: draft });
       pendingMaterializationThreadIdsRef.current.delete(threadId);
       await refreshAll();
     } catch (e) {
@@ -1466,7 +1493,7 @@ export function App(): React.JSX.Element {
     } finally {
       setIsBusy(false);
     }
-  }, [refreshAll, selectedAgentId, selectedThreadId]);
+  }, [activeThreadAgentId, canSendMessageForActiveAgent, refreshAll, selectedAgentId, selectedThreadId]);
 
   const applyModeDraft = useCallback(async (draft: {
     modeKey: string;
@@ -1493,13 +1520,14 @@ export function App(): React.JSX.Element {
     try {
       setError("");
       await setCollaborationMode({
+        provider: activeThreadAgentId,
         threadId: selectedThreadId,
         collaborationMode: {
           mode: mode.mode,
           settings: {
             model: draft.modelId || null,
-            reasoning_effort: draft.reasoningEffort || null,
-            developer_instructions: mode.developer_instructions ?? null
+            reasoningEffort: draft.reasoningEffort || null,
+            developerInstructions: mode.developerInstructions ?? null
           }
         }
       });
@@ -1510,7 +1538,7 @@ export function App(): React.JSX.Element {
     } finally {
       setIsModeSyncing(false);
     }
-  }, [isModeSyncing, loadSelectedThread, modes, selectedThreadId]);
+  }, [activeThreadAgentId, isModeSyncing, loadSelectedThread, modes, selectedThreadId]);
 
   const submitPendingRequest = useCallback(async () => {
     if (!selectedThreadId || !activeRequest) return;
@@ -1524,6 +1552,7 @@ export function App(): React.JSX.Element {
     try {
       setError("");
       await submitUserInput({
+        provider: activeThreadAgentId,
         threadId: selectedThreadId,
         requestId: activeRequest.id,
         response: { answers }
@@ -1534,7 +1563,7 @@ export function App(): React.JSX.Element {
     } finally {
       setIsBusy(false);
     }
-  }, [activeRequest, answerDraft, refreshAll, selectedThreadId]);
+  }, [activeRequest, activeThreadAgentId, answerDraft, refreshAll, selectedThreadId]);
 
   const skipPendingRequest = useCallback(async () => {
     if (!selectedThreadId || !activeRequest) return;
@@ -1542,6 +1571,7 @@ export function App(): React.JSX.Element {
     try {
       setError("");
       await submitUserInput({
+        provider: activeThreadAgentId,
         threadId: selectedThreadId,
         requestId: activeRequest.id,
         response: { answers: {} }
@@ -1552,21 +1582,21 @@ export function App(): React.JSX.Element {
     } finally {
       setIsBusy(false);
     }
-  }, [activeRequest, refreshAll, selectedThreadId]);
+  }, [activeRequest, activeThreadAgentId, refreshAll, selectedThreadId]);
 
   const runInterrupt = useCallback(async () => {
-    if (!selectedThreadId) return;
+    if (!selectedThreadId || !canInterruptForActiveAgent) return;
     setIsBusy(true);
     try {
       setError("");
-      await interruptThread({ threadId: selectedThreadId });
+      await interruptThread({ provider: activeThreadAgentId, threadId: selectedThreadId });
       await refreshAll();
     } catch (e) {
       setError(toErrorMessage(e));
     } finally {
       setIsBusy(false);
     }
-  }, [refreshAll, selectedThreadId]);
+  }, [activeThreadAgentId, canInterruptForActiveAgent, refreshAll, selectedThreadId]);
 
   const loadHistoryDetail = useCallback(async (id: string) => {
     if (!id) { setHistoryDetail(null); return; }
@@ -1590,8 +1620,13 @@ export function App(): React.JSX.Element {
 
   const createNewThread = useCallback(async (projectPath: string, agentId?: AgentId) => {
     const trimmedProjectPath = projectPath.trim();
+    const targetAgentId = agentId ?? selectedAgentId;
     if (!trimmedProjectPath) {
       setError("Cannot create thread: missing project path");
+      return;
+    }
+    if (!canUseFeature(agentsById[targetAgentId], "createThread")) {
+      setError(`Cannot create thread: ${targetAgentId} does not support thread creation`);
       return;
     }
     setIsBusy(true);
@@ -1599,7 +1634,7 @@ export function App(): React.JSX.Element {
       setError("");
       const created = await createThread({
         cwd: trimmedProjectPath,
-        ...(agentId ? { agentId } : {})
+        agentId: targetAgentId
       });
       pendingMaterializationThreadIdsRef.current.add(created.threadId);
       setSelectedThreadId(created.threadId);
@@ -1611,7 +1646,7 @@ export function App(): React.JSX.Element {
     } finally {
       setIsBusy(false);
     }
-  }, [refreshAll]);
+  }, [agentsById, refreshAll, selectedAgentId]);
 
   const createThreadForSingleAgent = useCallback((projectPath: string) => {
     const onlyAgentId = availableAgentIds[0];
@@ -1664,7 +1699,7 @@ export function App(): React.JSX.Element {
                     variant="outline"
                     size="sm"
                     className="rounded-full"
-                    disabled={isBusy}
+                    disabled={isBusy || !canCreateThreadForSelectedAgent}
                     onClick={() => {
                       const defaultProjectPath = selectedAgentDescriptor?.projectDirectories[0] ?? ".";
                       createThreadForSingleAgent(defaultProjectPath);
@@ -1681,7 +1716,10 @@ export function App(): React.JSX.Element {
                         variant="outline"
                         size="sm"
                         className="rounded-full"
-                        disabled={isBusy}
+                        disabled={
+                          isBusy
+                          || !availableAgentIds.some((agentId) => canUseFeature(agentsById[agentId], "createThread"))
+                        }
                       >
                         <Plus size={13} className="mr-1.5" />
                         New thread
@@ -1691,7 +1729,11 @@ export function App(): React.JSX.Element {
                       {availableAgentIds.map((agentId) => (
                         <DropdownMenuItem
                           key={agentId}
+                          disabled={!canUseFeature(agentsById[agentId], "createThread")}
                           onSelect={() => {
+                            if (!canUseFeature(agentsById[agentId], "createThread")) {
+                              return;
+                            }
                             const defaultProjectPath = agentsById[agentId]?.projectDirectories[0] ?? ".";
                             void createNewThread(defaultProjectPath, agentId);
                           }}
@@ -1752,7 +1794,7 @@ export function App(): React.JSX.Element {
                             ? `New ${nextAgentLabel} thread in ${group.label}`
                             : "Cannot create thread: missing project path"
                         }
-                        disabled={isBusy || !group.projectPath}
+                        disabled={isBusy || !group.projectPath || !canCreateThreadForSelectedAgent}
                       >
                         <Plus size={14} />
                       </IconBtn>
@@ -1761,7 +1803,11 @@ export function App(): React.JSX.Element {
                         <DropdownMenuTrigger asChild>
                           <Button
                             type="button"
-                            disabled={isBusy || !group.projectPath}
+                            disabled={
+                              isBusy
+                              || !group.projectPath
+                              || !availableAgentIds.some((agentId) => canUseFeature(agentsById[agentId], "createThread"))
+                            }
                             variant="ghost"
                             size="icon"
                             className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted"
@@ -1778,8 +1824,12 @@ export function App(): React.JSX.Element {
                           {availableAgentIds.map((agentId) => (
                             <DropdownMenuItem
                               key={agentId}
+                              disabled={!canUseFeature(agentsById[agentId], "createThread")}
                               onSelect={() => {
                                 if (!group.projectPath) {
+                                  return;
+                                }
+                                if (!canUseFeature(agentsById[agentId], "createThread")) {
                                   return;
                                 }
                                 void createNewThread(group.projectPath, agentId);
@@ -1825,15 +1875,13 @@ export function App(): React.JSX.Element {
                             }`}
                             >
                               <span className="min-w-0 flex-1 flex items-center gap-1.5 truncate leading-5">
-                              {thread.agentId && (
-                                <span className="shrink-0 h-4 w-4 rounded-sm bg-muted/30 ring-1 ring-border/60 flex items-center justify-center overflow-hidden">
-                                  <AgentFavicon
-                                    agentId={thread.agentId}
-                                    label={agentsById[thread.agentId]?.label ?? "Agent"}
-                                    className="h-3.5 w-3.5"
-                                  />
-                                </span>
-                              )}
+                              <span className="shrink-0 h-4 w-4 rounded-sm bg-muted/30 ring-1 ring-border/60 flex items-center justify-center overflow-hidden">
+                                <AgentFavicon
+                                  agentId={thread.provider}
+                                  label={agentsById[thread.provider]?.label ?? "Agent"}
+                                  className="h-3.5 w-3.5"
+                                />
+                              </span>
                                 <span className="truncate">{threadLabel(thread)}</span>
                               </span>
                             <span className="shrink-0 flex items-center gap-1.5">
@@ -2218,7 +2266,7 @@ export function App(): React.JSX.Element {
                 {/* Composer */}
                 <div className="flex flex-col gap-2">
                   <ChatComposer
-                    canSend={Boolean(selectedThreadId) || availableAgentIds.length > 0}
+                    canSend={canUseComposer}
                     isBusy={isBusy}
                     isGenerating={isGenerating}
                     placeholder={

@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 
 interface FileChange {
   path: string;
-  kind: { type: string; move_path?: string | null | undefined };
+  kind: { type: string; movePath?: string | null | undefined };
   diff?: string | undefined;
 }
 

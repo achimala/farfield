@@ -484,6 +484,7 @@ function mapThread(provider: UnifiedProviderId, thread: ThreadConversationState)
           id: question.id,
           header: question.header,
           question: question.question,
+          isOther: question.isOther ?? false,
           isSecret: question.isSecret ?? false,
           options: question.options.map((option) => ({
             label: option.label,
@@ -496,6 +497,26 @@ function mapThread(provider: UnifiedProviderId, thread: ThreadConversationState)
     ...(thread.createdAt !== undefined ? { createdAt: thread.createdAt } : {}),
     ...(thread.updatedAt !== undefined ? { updatedAt: thread.updatedAt } : {}),
     ...(thread.title !== undefined ? { title: thread.title } : {}),
+    ...(thread.latestCollaborationMode !== undefined
+      ? {
+          latestCollaborationMode: thread.latestCollaborationMode
+            ? {
+                mode: thread.latestCollaborationMode.mode,
+                settings: {
+                  ...(thread.latestCollaborationMode.settings.model !== undefined
+                    ? { model: thread.latestCollaborationMode.settings.model }
+                    : {}),
+                  ...(thread.latestCollaborationMode.settings.reasoning_effort !== undefined
+                    ? { reasoningEffort: thread.latestCollaborationMode.settings.reasoning_effort }
+                    : {}),
+                  ...(thread.latestCollaborationMode.settings.developer_instructions !== undefined
+                    ? { developerInstructions: thread.latestCollaborationMode.settings.developer_instructions }
+                    : {})
+                }
+              }
+            : null
+        }
+      : {}),
     ...(thread.latestModel !== undefined ? { latestModel: thread.latestModel } : {}),
     ...(thread.latestReasoningEffort !== undefined
       ? { latestReasoningEffort: thread.latestReasoningEffort }

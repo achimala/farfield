@@ -11,12 +11,11 @@ import {
   FileText,
   FileSearch
 } from "lucide-react";
-import type { z } from "zod";
-import type { CommandExecutionItemSchema } from "@farfield/protocol";
+import type { UnifiedItem } from "@farfield/unified-surface";
 import { Button } from "@/components/ui/button";
 import { CodeSnippet } from "./CodeSnippet";
 
-type CommandItem = z.infer<typeof CommandExecutionItemSchema>;
+type CommandItem = Extract<UnifiedItem, { type: "commandExecution" }>;
 
 const ACTION_ICONS: Record<string, React.ElementType> = {
   search: Search,
