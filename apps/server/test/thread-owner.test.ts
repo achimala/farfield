@@ -23,9 +23,9 @@ describe("resolveOwnerClientId", () => {
     expect(owner).toBe("client-map");
   });
 
-  it("uses fallback owner when mapped owner and override are missing", () => {
-    const owner = resolveOwnerClientId(new Map(), "thread-1", undefined, "client-fallback");
-    expect(owner).toBe("client-fallback");
+  it("uses global owner when mapped owner and override are missing", () => {
+    const owner = resolveOwnerClientId(new Map(), "thread-1", undefined, "client-global");
+    expect(owner).toBe("client-global");
   });
 
   it("throws when owner is unavailable", () => {

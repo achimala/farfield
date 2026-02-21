@@ -2,7 +2,7 @@ export function resolveOwnerClientId(
   threadOwnerById: Map<string, string>,
   threadId: string,
   override?: string,
-  fallbackOwnerClientId?: string
+  globalOwnerClientId?: string
 ): string {
   const mapped = threadOwnerById.get(threadId);
   if (mapped && mapped.trim()) {
@@ -13,8 +13,8 @@ export function resolveOwnerClientId(
     return override.trim();
   }
 
-  if (fallbackOwnerClientId && fallbackOwnerClientId.trim()) {
-    return fallbackOwnerClientId.trim();
+  if (globalOwnerClientId && globalOwnerClientId.trim()) {
+    return globalOwnerClientId.trim();
   }
 
   throw new Error(
