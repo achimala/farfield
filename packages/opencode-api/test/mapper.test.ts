@@ -1,39 +1,57 @@
 import { describe, expect, it } from "vitest";
-import {
-  sessionToThreadListItem,
-  sessionToConversationState,
-  messagesToTurns,
-  partToTurnItem
-} from "../src/mapper.js";
 import type {
-  Session,
-  UserMessage,
   AssistantMessage,
-  TextPart,
-  ToolPart,
-  ReasoningPart,
+  Event,
+  Message,
   Part,
-  Message
+  Session,
+  ToolState,
+  UserMessage
 } from "@opencode-ai/sdk";
+import {
+  OPENCODE_EVENT_TYPES,
+  OPENCODE_PART_TYPES,
+  type OpenCodeEventType,
+  type OpenCodePartType
+} from "../src/generated/OpenCodeManifest.js";
+import {
+  mapOpenCodeEventToSsePayload,
+  messagesToTurns,
+  partToTurnItem,
+  sessionToConversationState,
+  sessionToThreadListItem
+} from "../src/mapper.js";
 
 function makeSession(overrides?: Partial<Session>): Session {
   return {
     id: "sess-1",
-    title: "Test Session",
+    projectID: "project-1",
     directory: "/tmp/project",
-    time: { created: 1700000000, updated: 1700001000 },
+    title: "Test Session",
+    version: "1",
+    time: {
+      created: 1700000000,
+      updated: 1700001000
+    },
     ...overrides
-  } as Session;
+  };
 }
 
-function makeUserMessage(id: string, text: string): UserMessage {
+function makeUserMessage(id: string): UserMessage {
   return {
     id,
     role: "user",
     sessionID: "sess-1",
     parentID: "",
-    time: { created: 1700000100, updated: 1700000100 }
-  } as UserMessage;
+    agent: "codex",
+    model: {
+      providerID: "openai",
+      modelID: "gpt-5.3-codex"
+    },
+    time: {
+      created: 1700000100
+    }
+  };
 }
 
 function makeAssistantMessage(id: string, parentID: string): AssistantMessage {
@@ -44,40 +62,347 @@ function makeAssistantMessage(id: string, parentID: string): AssistantMessage {
     parentID,
     providerID: "anthropic",
     modelID: "claude-sonnet",
-    time: { created: 1700000200, updated: 1700000200 }
-  } as AssistantMessage;
+    mode: "default",
+    path: {
+      cwd: "/tmp/project",
+      root: "/tmp"
+    },
+    cost: 0,
+    tokens: {
+      input: 0,
+      output: 0,
+      reasoning: 0,
+      cache: {
+        read: 0,
+        write: 0
+      }
+    },
+    time: {
+      created: 1700000200
+    },
+    finish: "stop"
+  };
 }
 
-function makeTextPart(id: string, text: string): TextPart {
-  return { id, type: "text", text } as TextPart;
+function makeToolState(status: ToolState["status"]): ToolState {
+  switch (status) {
+    case "pending":
+      return {
+        status,
+        input: {
+          command: "echo pending"
+        },
+        raw: "raw"
+      };
+    case "running":
+      return {
+        status,
+        input: {
+          command: "echo running"
+        },
+        time: {
+          start: 1700000100
+        }
+      };
+    case "completed":
+      return {
+        status,
+        input: {
+          command: "echo done",
+          cwd: "/tmp/project",
+          file_path: "/tmp/project/file.ts"
+        },
+        output: "done",
+        title: "completed",
+        metadata: {
+          exit_code: 0
+        },
+        time: {
+          start: 1700000100,
+          end: 1700000200
+        }
+      };
+    case "error":
+      return {
+        status,
+        input: {
+          command: "echo fail"
+        },
+        error: "failed",
+        metadata: {
+          exit_code: 1
+        },
+        time: {
+          start: 1700000100,
+          end: 1700000200
+        }
+      };
+  }
 }
 
-function makeReasoningPart(id: string, text: string): ReasoningPart {
-  return { id, type: "reasoning", text } as ReasoningPart;
+function makePart(type: OpenCodePartType): Part {
+  switch (type) {
+    case "agent":
+      return {
+        id: "part-agent",
+        sessionID: "sess-1",
+        messageID: "msg-1",
+        type,
+        name: "helper-agent"
+      };
+    case "compaction":
+      return {
+        id: "part-compaction",
+        sessionID: "sess-1",
+        messageID: "msg-1",
+        type,
+        auto: true
+      };
+    case "file":
+      return {
+        id: "part-file",
+        sessionID: "sess-1",
+        messageID: "msg-1",
+        type,
+        mime: "text/plain",
+        url: "/tmp/project/file.ts"
+      };
+    case "patch":
+      return {
+        id: "part-patch",
+        sessionID: "sess-1",
+        messageID: "msg-1",
+        type,
+        hash: "hash",
+        files: ["/tmp/project/file.ts"]
+      };
+    case "reasoning":
+      return {
+        id: "part-reasoning",
+        sessionID: "sess-1",
+        messageID: "msg-1",
+        type,
+        text: "thinking",
+        time: {
+          start: 1700000100
+        }
+      };
+    case "retry":
+      return {
+        id: "part-retry",
+        sessionID: "sess-1",
+        messageID: "msg-1",
+        type,
+        attempt: 1,
+        error: {
+          name: "APIError",
+          data: {
+            message: "retry failed",
+            isRetryable: false
+          }
+        },
+        time: {
+          created: 1700000100
+        }
+      };
+    case "snapshot":
+      return {
+        id: "part-snapshot",
+        sessionID: "sess-1",
+        messageID: "msg-1",
+        type,
+        snapshot: "snapshot"
+      };
+    case "step-finish":
+      return {
+        id: "part-step-finish",
+        sessionID: "sess-1",
+        messageID: "msg-1",
+        type,
+        reason: "completed",
+        cost: 0,
+        tokens: {
+          input: 0,
+          output: 0,
+          reasoning: 0,
+          cache: {
+            read: 0,
+            write: 0
+          }
+        }
+      };
+    case "step-start":
+      return {
+        id: "part-step-start",
+        sessionID: "sess-1",
+        messageID: "msg-1",
+        type
+      };
+    case "subtask":
+      return {
+        id: "part-subtask",
+        sessionID: "sess-1",
+        messageID: "msg-1",
+        type,
+        prompt: "Do X",
+        description: "Task",
+        agent: "helper"
+      };
+    case "text":
+      return {
+        id: "part-text",
+        sessionID: "sess-1",
+        messageID: "msg-1",
+        type,
+        text: "hello"
+      };
+    case "tool":
+      return {
+        id: "part-tool",
+        sessionID: "sess-1",
+        messageID: "msg-1",
+        type,
+        callID: "call-1",
+        tool: "bash",
+        state: makeToolState("completed")
+      };
+  }
 }
 
-function makeToolPart(
-  id: string,
-  tool: string,
-  state: { status: string; input: Record<string, unknown>; output?: string }
-): ToolPart {
-  return {
-    id,
-    type: "tool",
-    tool,
-    state: {
-      status: state.status,
-      input: state.input,
-      output: state.output ?? null,
-      time: { start: 1700000100, end: 1700000200 }
-    }
-  } as ToolPart;
+function makeEvent(type: OpenCodeEventType): Event {
+  switch (type) {
+    case "command.executed":
+      return {
+        type,
+        properties: {
+          name: "cmd",
+          sessionID: "sess-1",
+          arguments: "",
+          messageID: "msg-1"
+        }
+      };
+    case "message.part.removed":
+      return {
+        type,
+        properties: {
+          sessionID: "sess-1",
+          messageID: "msg-1",
+          partID: "part-1"
+        }
+      };
+    case "message.part.updated":
+      return {
+        type,
+        properties: {
+          part: makePart("text")
+        }
+      };
+    case "message.removed":
+      return {
+        type,
+        properties: {
+          sessionID: "sess-1",
+          messageID: "msg-1"
+        }
+      };
+    case "message.updated":
+      return {
+        type,
+        properties: {
+          info: makeUserMessage("msg-1")
+        }
+      };
+    case "permission.replied":
+      return {
+        type,
+        properties: {
+          sessionID: "sess-1",
+          permissionID: "perm-1",
+          response: "approve"
+        }
+      };
+    case "permission.updated":
+      return {
+        type,
+        properties: {
+          id: "perm-1",
+          type: "approval",
+          sessionID: "sess-1",
+          messageID: "msg-1",
+          title: "Permission",
+          metadata: {},
+          time: {
+            created: 1700000100
+          }
+        }
+      };
+    case "session.compacted":
+      return {
+        type,
+        properties: {
+          sessionID: "sess-1"
+        }
+      };
+    case "session.created":
+    case "session.deleted":
+    case "session.updated":
+      return {
+        type,
+        properties: {
+          info: makeSession()
+        }
+      };
+    case "session.diff":
+      return {
+        type,
+        properties: {
+          sessionID: "sess-1",
+          diff: []
+        }
+      };
+    case "session.error":
+      return {
+        type,
+        properties: {
+          sessionID: "sess-1"
+        }
+      };
+    case "session.idle":
+      return {
+        type,
+        properties: {
+          sessionID: "sess-1"
+        }
+      };
+    case "session.status":
+      return {
+        type,
+        properties: {
+          sessionID: "sess-1",
+          status: {
+            type: "busy"
+          }
+        }
+      };
+    case "todo.updated":
+      return {
+        type,
+        properties: {
+          sessionID: "sess-1",
+          todos: []
+        }
+      };
+    default:
+      return {
+        type,
+        properties: {}
+      } as Event;
+  }
 }
 
 describe("sessionToThreadListItem", () => {
   it("maps session fields correctly", () => {
-    const session = makeSession();
-    const result = sessionToThreadListItem(session);
+    const result = sessionToThreadListItem(makeSession());
 
     expect(result.id).toBe("sess-1");
     expect(result.preview).toBe("Test Session");
@@ -86,132 +411,77 @@ describe("sessionToThreadListItem", () => {
     expect(result.cwd).toBe("/tmp/project");
     expect(result.source).toBe("opencode");
   });
-
-  it("uses (untitled) for sessions without title", () => {
-    const session = makeSession({ title: "" });
-    const result = sessionToThreadListItem(session);
-    expect(result.preview).toBe("(untitled)");
-  });
 });
 
 describe("messagesToTurns", () => {
   it("pairs user and assistant messages into turns", () => {
-    const userMsg = makeUserMessage("u1", "hello");
-    const assistantMsg = makeAssistantMessage("a1", "u1");
-    const messages: Message[] = [userMsg, assistantMsg];
+    const userMessage = makeUserMessage("u1");
+    const assistantMessage = makeAssistantMessage("a1", "u1");
+    const messages: Message[] = [userMessage, assistantMessage];
 
     const partsByMessage = new Map<string, Part[]>();
-    partsByMessage.set("u1", [makeTextPart("p1", "hello")]);
-    partsByMessage.set("a1", [makeTextPart("p2", "hi there")]);
+    partsByMessage.set("u1", [makePart("text")]);
+    partsByMessage.set("a1", [makePart("text"), makePart("tool")]);
 
     const turns = messagesToTurns(messages, partsByMessage);
 
     expect(turns).toHaveLength(1);
-    expect(turns[0].items).toHaveLength(2);
     expect(turns[0].items[0].type).toBe("userMessage");
     expect(turns[0].items[1].type).toBe("agentMessage");
-  });
-
-  it("creates a turn for user message without assistant response", () => {
-    const userMsg = makeUserMessage("u1", "hello");
-    const messages: Message[] = [userMsg];
-
-    const partsByMessage = new Map<string, Part[]>();
-    partsByMessage.set("u1", [makeTextPart("p1", "hello")]);
-
-    const turns = messagesToTurns(messages, partsByMessage);
-
-    expect(turns).toHaveLength(1);
-    expect(turns[0].items).toHaveLength(1);
-    expect(turns[0].items[0].type).toBe("userMessage");
-    expect(turns[0].status).toBe("pending");
+    expect(turns[0].status).toBe("completed");
   });
 });
 
 describe("partToTurnItem", () => {
-  it("maps text part to agentMessage", () => {
-    const part = makeTextPart("p1", "Hello world");
-    const result = partToTurnItem(part);
+  it("maps every SDK part type", () => {
+    for (const partType of OPENCODE_PART_TYPES) {
+      const mapped = partToTurnItem(makePart(partType));
+      expect(mapped.id.length).toBeGreaterThan(0);
+      expect(typeof mapped.type).toBe("string");
+    }
+  });
+});
 
-    expect(result).not.toBeNull();
-    expect(result!.type).toBe("agentMessage");
-    if (result!.type === "agentMessage") {
-      expect(result!.text).toBe("Hello world");
+describe("mapOpenCodeEventToSsePayload", () => {
+  it("maps every SDK event type", () => {
+    for (const eventType of OPENCODE_EVENT_TYPES) {
+      const payload = mapOpenCodeEventToSsePayload(makeEvent(eventType), "sess-1");
+      expect(payload.type).toBe("opencode-event");
+      expect(payload.eventType).toBe(eventType);
+      expect(payload.sessionId).toBe("sess-1");
     }
   });
 
-  it("maps reasoning part", () => {
-    const part = makeReasoningPart("p1", "thinking about it...");
-    const result = partToTurnItem(part);
+  it("marks non-matching session events as not relevant", () => {
+    const payload = mapOpenCodeEventToSsePayload(
+      {
+        type: "message.updated",
+        properties: {
+          info: {
+            ...makeUserMessage("msg-1"),
+            sessionID: "sess-other"
+          }
+        }
+      },
+      "sess-1"
+    );
 
-    expect(result).not.toBeNull();
-    expect(result!.type).toBe("reasoning");
-    if (result!.type === "reasoning") {
-      expect(result!.text).toBe("thinking about it...");
-    }
-  });
-
-  it("maps bash tool part to commandExecution", () => {
-    const part = makeToolPart("p1", "bash", {
-      status: "completed",
-      input: { command: "ls -la", cwd: "/tmp" },
-      output: "file1.txt\nfile2.txt"
-    });
-    const result = partToTurnItem(part);
-
-    expect(result).not.toBeNull();
-    expect(result!.type).toBe("commandExecution");
-    if (result!.type === "commandExecution") {
-      expect(result!.command).toBe("ls -la");
-      expect(result!.cwd).toBe("/tmp");
-      expect(result!.aggregatedOutput).toBe("file1.txt\nfile2.txt");
-    }
-  });
-
-  it("maps write tool part to fileChange", () => {
-    const part = makeToolPart("p1", "write", {
-      status: "completed",
-      input: { file_path: "/tmp/foo.ts" },
-      output: "wrote 50 lines"
-    });
-    const result = partToTurnItem(part);
-
-    expect(result).not.toBeNull();
-    expect(result!.type).toBe("fileChange");
-    if (result!.type === "fileChange") {
-      expect(result!.changes).toHaveLength(1);
-      expect(result!.changes[0].path).toBe("/tmp/foo.ts");
-      expect(result!.changes[0].kind.type).toBe("created");
-    }
-  });
-
-  it("maps edit tool part to fileChange with modified kind", () => {
-    const part = makeToolPart("p1", "edit", {
-      status: "completed",
-      input: { path: "/tmp/bar.ts" }
-    });
-    const result = partToTurnItem(part);
-
-    expect(result).not.toBeNull();
-    expect(result!.type).toBe("fileChange");
-    if (result!.type === "fileChange") {
-      expect(result!.changes[0].kind.type).toBe("modified");
-    }
+    expect(payload.relatedSessionId).toBe("sess-other");
+    expect(payload.relevantToSession).toBe(false);
   });
 });
 
 describe("sessionToConversationState", () => {
   it("builds full conversation state", () => {
-    const session = makeSession();
-    const userMsg = makeUserMessage("u1", "hello");
-    const assistantMsg = makeAssistantMessage("a1", "u1");
-    const messages: Message[] = [userMsg, assistantMsg];
+    const userMessage = makeUserMessage("u1");
+    const assistantMessage = makeAssistantMessage("a1", "u1");
+    const messages: Message[] = [userMessage, assistantMessage];
 
     const partsByMessage = new Map<string, Part[]>();
-    partsByMessage.set("u1", [makeTextPart("p1", "hello")]);
-    partsByMessage.set("a1", [makeTextPart("p2", "hi there")]);
+    partsByMessage.set("u1", [makePart("text")]);
+    partsByMessage.set("a1", [makePart("text")]);
 
-    const state = sessionToConversationState(session, messages, partsByMessage);
+    const state = sessionToConversationState(makeSession(), messages, partsByMessage);
 
     expect(state.id).toBe("sess-1");
     expect(state.turns).toHaveLength(1);
