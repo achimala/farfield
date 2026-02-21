@@ -1,8 +1,12 @@
 // GENERATED FILE. DO NOT EDIT.
 // Source: vendor/codex-app-server-schema/stable/json/ClientRequest.json
+// Source: vendor/codex-app-server-schema/experimental/json/ClientRequest.json
 // Source: vendor/codex-app-server-schema/stable/json/ClientNotification.json
+// Source: vendor/codex-app-server-schema/experimental/json/ClientNotification.json
 // Source: vendor/codex-app-server-schema/stable/json/ServerRequest.json
+// Source: vendor/codex-app-server-schema/experimental/json/ServerRequest.json
 // Source: vendor/codex-app-server-schema/stable/json/ServerNotification.json
+// Source: vendor/codex-app-server-schema/experimental/json/ServerNotification.json
 
 export const APP_SERVER_CLIENT_REQUEST_METHODS = [
   "account/login/cancel",
@@ -14,6 +18,7 @@ export const APP_SERVER_CLIENT_REQUEST_METHODS = [
   "app/list",
   "archiveConversation",
   "cancelLoginChatGpt",
+  "collaborationMode/list",
   "command/exec",
   "config/batchWrite",
   "config/mcpServer/reload",
@@ -25,6 +30,9 @@ export const APP_SERVER_CLIENT_REQUEST_METHODS = [
   "feedback/upload",
   "forkConversation",
   "fuzzyFileSearch",
+  "fuzzyFileSearch/sessionStart",
+  "fuzzyFileSearch/sessionStop",
+  "fuzzyFileSearch/sessionUpdate",
   "getAuthStatus",
   "getConversationSummary",
   "getUserAgent",
@@ -38,6 +46,7 @@ export const APP_SERVER_CLIENT_REQUEST_METHODS = [
   "logoutChatGpt",
   "mcpServer/oauth/login",
   "mcpServerStatus/list",
+  "mock/experimentalMethod",
   "model/list",
   "newConversation",
   "removeConversationListener",
@@ -51,6 +60,7 @@ export const APP_SERVER_CLIENT_REQUEST_METHODS = [
   "skills/remote/export",
   "skills/remote/list",
   "thread/archive",
+  "thread/backgroundTerminals/clean",
   "thread/compact/start",
   "thread/fork",
   "thread/list",

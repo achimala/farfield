@@ -58,3 +58,61 @@ describe("AppServerClient.resumeThread", () => {
     });
   });
 });
+
+describe("AppServerClient.turn controls", () => {
+  it("starts a turn with text input", async () => {
+    const transport: AppServerTransport = {
+      request: vi.fn().mockResolvedValue({}),
+      close: vi.fn().mockResolvedValue(undefined)
+    };
+
+    const client = new AppServerClient(transport);
+    await client.startTurn({
+      threadId: "thread-1",
+      input: [{ type: "text", text: "hello from turn start" }],
+      attachments: []
+    });
+
+    expect(transport.request).toHaveBeenCalledWith(
+      "turn/start",
+      expect.objectContaining({
+        threadId: "thread-1"
+      })
+    );
+  });
+
+  it("steers an active turn", async () => {
+    const transport: AppServerTransport = {
+      request: vi.fn().mockResolvedValue({}),
+      close: vi.fn().mockResolvedValue(undefined)
+    };
+
+    const client = new AppServerClient(transport);
+    await client.steerTurn({
+      threadId: "thread-1",
+      expectedTurnId: "turn-1",
+      input: [{ type: "text", text: "continue with this approach" }]
+    });
+
+    expect(transport.request).toHaveBeenCalledWith("turn/steer", {
+      threadId: "thread-1",
+      expectedTurnId: "turn-1",
+      input: [{ type: "text", text: "continue with this approach" }]
+    });
+  });
+
+  it("interrupts a specific turn", async () => {
+    const transport: AppServerTransport = {
+      request: vi.fn().mockResolvedValue({}),
+      close: vi.fn().mockResolvedValue(undefined)
+    };
+
+    const client = new AppServerClient(transport);
+    await client.interruptTurn("thread-1", "turn-2");
+
+    expect(transport.request).toHaveBeenCalledWith("turn/interrupt", {
+      threadId: "thread-1",
+      turnId: "turn-2"
+    });
+  });
+});

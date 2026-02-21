@@ -67,17 +67,32 @@ const schemaTargets = [
 ];
 
 const methodManifestSources = {
-  clientRequest: path.join(vendorRoot, "stable", "json", "ClientRequest.json"),
-  clientNotification: path.join(vendorRoot, "stable", "json", "ClientNotification.json"),
-  serverRequest: path.join(vendorRoot, "stable", "json", "ServerRequest.json"),
-  serverNotification: path.join(vendorRoot, "stable", "json", "ServerNotification.json")
+  clientRequest: [
+    path.join(vendorRoot, "stable", "json", "ClientRequest.json"),
+    path.join(vendorRoot, "experimental", "json", "ClientRequest.json")
+  ],
+  clientNotification: [
+    path.join(vendorRoot, "stable", "json", "ClientNotification.json"),
+    path.join(vendorRoot, "experimental", "json", "ClientNotification.json")
+  ],
+  serverRequest: [
+    path.join(vendorRoot, "stable", "json", "ServerRequest.json"),
+    path.join(vendorRoot, "experimental", "json", "ServerRequest.json")
+  ],
+  serverNotification: [
+    path.join(vendorRoot, "stable", "json", "ServerNotification.json"),
+    path.join(vendorRoot, "experimental", "json", "ServerNotification.json")
+  ]
 };
 
 function ensureSchemaFilesExist() {
   const missing = schemaTargets.filter((target) => !fs.existsSync(target.source));
   const missingManifestSources = Object.entries(methodManifestSources)
-    .filter(([, source]) => !fs.existsSync(source))
-    .map(([name, source]) => ({ name, source }));
+    .flatMap(([name, sources]) =>
+      sources
+        .filter((source) => !fs.existsSync(source))
+        .map((source) => ({ name, source }))
+    );
 
   for (const entry of missingManifestSources) {
     missing.push({
@@ -119,22 +134,24 @@ async function writeSchemaModule(target) {
   fs.writeFileSync(path.join(outDir, target.fileName), withHeader, "utf8");
 }
 
-function readMethodNames(sourcePath) {
-  const schema = JSON.parse(fs.readFileSync(sourcePath, "utf8"));
-  if (!Array.isArray(schema.oneOf)) {
-    throw new Error(`Expected oneOf array in ${sourcePath}`);
-  }
-
+function readMethodNames(sourcePaths) {
   const methodNames = new Set();
 
-  for (const branch of schema.oneOf) {
-    const method = branch?.properties?.method;
-    if (!method || !Array.isArray(method.enum) || method.enum.length !== 1) {
-      continue;
+  for (const sourcePath of sourcePaths) {
+    const schema = JSON.parse(fs.readFileSync(sourcePath, "utf8"));
+    if (!Array.isArray(schema.oneOf)) {
+      throw new Error(`Expected oneOf array in ${sourcePath}`);
     }
-    const value = method.enum[0];
-    if (typeof value === "string" && value.trim().length > 0) {
-      methodNames.add(value);
+
+    for (const branch of schema.oneOf) {
+      const method = branch?.properties?.method;
+      if (!method || !Array.isArray(method.enum) || method.enum.length !== 1) {
+        continue;
+      }
+      const value = method.enum[0];
+      if (typeof value === "string" && value.trim().length > 0) {
+        methodNames.add(value);
+      }
     }
   }
 
@@ -159,10 +176,10 @@ function writeMethodManifestModule() {
 
   const lines = [
     "// GENERATED FILE. DO NOT EDIT.",
-    `// Source: ${path.relative(root, methodManifestSources.clientRequest)}`,
-    `// Source: ${path.relative(root, methodManifestSources.clientNotification)}`,
-    `// Source: ${path.relative(root, methodManifestSources.serverRequest)}`,
-    `// Source: ${path.relative(root, methodManifestSources.serverNotification)}`,
+    ...methodManifestSources.clientRequest.map((source) => `// Source: ${path.relative(root, source)}`),
+    ...methodManifestSources.clientNotification.map((source) => `// Source: ${path.relative(root, source)}`),
+    ...methodManifestSources.serverRequest.map((source) => `// Source: ${path.relative(root, source)}`),
+    ...methodManifestSources.serverNotification.map((source) => `// Source: ${path.relative(root, source)}`),
     "",
     renderStringTuple("APP_SERVER_CLIENT_REQUEST_METHODS", clientRequestMethods),
     "export type AppServerClientRequestMethod =",

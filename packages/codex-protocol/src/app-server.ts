@@ -2,6 +2,14 @@ import { z } from "zod";
 import { ProtocolValidationError } from "./errors.js";
 import { CollaborationModeSchema, ThreadConversationStateSchema } from "./thread.js";
 import {
+  APP_SERVER_CLIENT_NOTIFICATION_METHODS,
+  APP_SERVER_CLIENT_REQUEST_METHODS,
+  APP_SERVER_SERVER_NOTIFICATION_METHODS,
+  APP_SERVER_SERVER_REQUEST_METHODS,
+  type AppServerClientNotificationMethod,
+  type AppServerClientRequestMethod,
+  type AppServerServerNotificationMethod,
+  type AppServerServerRequestMethod,
   CollaborationModeListResponseSchema as GeneratedCollaborationModeListResponseSchema,
   ModelListResponseSchema as GeneratedModelListResponseSchema,
   SendUserMessageParamsSchema as GeneratedSendUserMessageParamsSchema,
@@ -103,6 +111,18 @@ export type AppServerCollaborationModeListResponse = z.infer<
   typeof AppServerCollaborationModeListResponseSchema
 >;
 export type AppServerStartThreadResponse = z.infer<typeof AppServerStartThreadResponseSchema>;
+export {
+  APP_SERVER_CLIENT_REQUEST_METHODS,
+  APP_SERVER_CLIENT_NOTIFICATION_METHODS,
+  APP_SERVER_SERVER_REQUEST_METHODS,
+  APP_SERVER_SERVER_NOTIFICATION_METHODS
+};
+export type {
+  AppServerClientRequestMethod,
+  AppServerClientNotificationMethod,
+  AppServerServerRequestMethod,
+  AppServerServerNotificationMethod
+};
 
 function parseWithSchema<Schema extends z.ZodTypeAny>(
   schema: Schema,

@@ -6,7 +6,6 @@ import {
   AppServerTransportError,
   CodexMonitorService,
   DesktopIpcClient,
-  findLatestTurnParamsTemplate,
   reduceThreadStreamEvents,
   ThreadStreamReductionError,
   type SendRequestOptions
@@ -334,47 +333,36 @@ export class CodexAgentAdapter implements AgentAdapter {
 
   public async sendMessage(input: AgentSendMessageInput): Promise<void> {
     this.ensureCodexAvailable();
-    if (input.isSteering === true) {
-      throw new Error("Steering messages are not supported on this endpoint.");
+    const text = input.text.trim();
+    if (text.length === 0) {
+      throw new Error("Message text is required");
     }
 
-    if (this.isIpcReady()) {
-      const mappedOwnerClientId = this.threadOwnerById.get(input.threadId);
-      const overrideOwnerClientId = input.ownerClientId;
-      const ownerClientId = mappedOwnerClientId && mappedOwnerClientId.trim()
-        ? mappedOwnerClientId.trim()
-        : overrideOwnerClientId && overrideOwnerClientId.trim()
-          ? overrideOwnerClientId.trim()
-          : null;
-
-      if (ownerClientId) {
-        const readResult = await this.runAppServerCall(() =>
-          this.appClient.readThread(input.threadId, true)
-        );
-
-        let turnStartTemplate: ReturnType<typeof findLatestTurnParamsTemplate> | null = null;
-        try {
-          turnStartTemplate = findLatestTurnParamsTemplate(readResult.thread);
-        } catch {
-          turnStartTemplate = null;
+    const sendTurn = async (): Promise<void> => {
+      if (input.isSteering === true) {
+        const activeTurnId = await this.getActiveTurnId(input.threadId);
+        if (!activeTurnId) {
+          throw new Error("Cannot steer because there is no active turn");
         }
 
-        await this.service.sendMessage({
+        await this.appClient.steerTurn({
           threadId: input.threadId,
-          ownerClientId,
-          text: input.text,
-          ...(input.cwd ? { cwd: input.cwd } : {}),
-          ...(typeof input.isSteering === "boolean" ? { isSteering: input.isSteering } : {}),
-          turnStartTemplate
+          expectedTurnId: activeTurnId,
+          input: [{ type: "text", text }]
         });
         return;
       }
-    }
+
+      await this.appClient.startTurn({
+        threadId: input.threadId,
+        input: [{ type: "text", text }],
+        ...(input.cwd ? { cwd: input.cwd } : {}),
+        attachments: []
+      });
+    };
 
     try {
-      await this.runAppServerCall(() =>
-        this.appClient.sendUserMessage(input.threadId, input.text)
-      );
+      await this.runAppServerCall(sendTurn);
       return;
     } catch (error) {
       if (!this.isConversationNotFoundError(error)) {
@@ -385,25 +373,33 @@ export class CodexAgentAdapter implements AgentAdapter {
     await this.runAppServerCall(() =>
       this.appClient.resumeThread(input.threadId, { persistExtendedHistory: true })
     );
-    await this.runAppServerCall(() =>
-      this.appClient.sendUserMessage(input.threadId, input.text)
-    );
+    await this.runAppServerCall(sendTurn);
   }
 
   public async interrupt(input: AgentInterruptInput): Promise<void> {
     this.ensureCodexAvailable();
-    this.ensureIpcReady();
 
-    const ownerClientId = resolveOwnerClientId(
-      this.threadOwnerById,
-      input.threadId,
-      input.ownerClientId
+    const interruptTurn = async (): Promise<void> => {
+      const activeTurnId = await this.getActiveTurnId(input.threadId);
+      if (!activeTurnId) {
+        return;
+      }
+      await this.appClient.interruptTurn(input.threadId, activeTurnId);
+    };
+
+    try {
+      await this.runAppServerCall(interruptTurn);
+      return;
+    } catch (error) {
+      if (!this.isConversationNotFoundError(error)) {
+        throw error;
+      }
+    }
+
+    await this.runAppServerCall(() =>
+      this.appClient.resumeThread(input.threadId, { persistExtendedHistory: true })
     );
-
-    await this.service.interrupt({
-      threadId: input.threadId,
-      ownerClientId
-    });
+    await this.runAppServerCall(interruptTurn);
   }
 
   public async listModels(limit: number) {
@@ -757,6 +753,38 @@ export class CodexAgentAdapter implements AgentAdapter {
     })();
 
     return this.bootstrapInFlight;
+  }
+
+  private async getActiveTurnId(threadId: string): Promise<string | null> {
+    const readResult = await this.appClient.readThread(threadId, true);
+    const turns = readResult.thread.turns;
+
+    for (let index = turns.length - 1; index >= 0; index -= 1) {
+      const turn = turns[index];
+      if (!turn) {
+        continue;
+      }
+
+      const status = turn.status.trim().toLowerCase();
+      const isTerminal = status === "completed"
+        || status === "failed"
+        || status === "error"
+        || status === "cancelled"
+        || status === "canceled";
+      if (isTerminal) {
+        continue;
+      }
+
+      if (turn.turnId && turn.turnId.trim().length > 0) {
+        return turn.turnId.trim();
+      }
+
+      if (turn.id && turn.id.trim().length > 0) {
+        return turn.id.trim();
+      }
+    }
+
+    return null;
   }
 }
 

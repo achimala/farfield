@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@farfield/protocol": "workspace:*",
+    "@farfield/unified-surface": "workspace:*",
     "zod": "^3.24.1"
   }
 }

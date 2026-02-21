@@ -11,7 +11,9 @@ import {
   AppServerSendUserMessageResponseSchema,
   type AppServerStartThreadResponse,
   AppServerStartThreadRequestSchema,
-  AppServerStartThreadResponseSchema
+  AppServerStartThreadResponseSchema,
+  TurnStartParamsSchema,
+  type TurnStartParams
 } from "@farfield/protocol";
 import { ProtocolValidationError } from "@farfield/protocol";
 import { z } from "zod";
@@ -56,10 +58,31 @@ export interface StartThreadOptions {
   ephemeral?: boolean;
 }
 
+export interface SteerTurnOptions {
+  threadId: string;
+  expectedTurnId: string;
+  input: TurnStartParams["input"];
+}
+
 const AppServerResumeThreadRequestSchema = z
   .object({
     threadId: z.string().min(1),
     persistExtendedHistory: z.boolean()
+  })
+  .passthrough();
+
+const AppServerTurnInterruptRequestSchema = z
+  .object({
+    threadId: z.string().min(1),
+    turnId: z.string().min(1)
+  })
+  .passthrough();
+
+const AppServerTurnSteerRequestSchema = z
+  .object({
+    threadId: z.string().min(1),
+    expectedTurnId: z.string().min(1),
+    input: TurnStartParamsSchema.shape.input
   })
   .passthrough();
 
@@ -176,6 +199,24 @@ export class AppServerClient {
     });
     const result = await this.transport.request("sendUserMessage", request);
     parseWithSchema(AppServerSendUserMessageResponseSchema, result, "AppServerSendUserMessageResponse");
+  }
+
+  public async startTurn(params: TurnStartParams): Promise<void> {
+    const request = TurnStartParamsSchema.parse(params);
+    await this.transport.request("turn/start", request);
+  }
+
+  public async steerTurn(options: SteerTurnOptions): Promise<void> {
+    const request = AppServerTurnSteerRequestSchema.parse(options);
+    await this.transport.request("turn/steer", request);
+  }
+
+  public async interruptTurn(threadId: string, turnId: string): Promise<void> {
+    const request = AppServerTurnInterruptRequestSchema.parse({
+      threadId,
+      turnId
+    });
+    await this.transport.request("turn/interrupt", request);
   }
 
   public async resumeThread(
