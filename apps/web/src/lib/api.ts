@@ -748,28 +748,6 @@ export async function getHistoryEntry(entryId: string): Promise<z.infer<typeof H
   return requestEnvelope(`/api/debug/history/${encodeURIComponent(entryId)}`, HistoryDetailSchema);
 }
 
-export async function replayHistoryEntry(input: {
-  entryId: string;
-  waitForResponse: boolean;
-}): Promise<JsonValue> {
-  const { response, payload } = await requestJson("/api/debug/replay", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input)
-  });
-
-  if (!response.ok) {
-    throw new Error(readErrorMessage(payload));
-  }
-
-  const envelope = ApiEnvelopeSchema.parse(payload);
-  if (!envelope.ok) {
-    throw new Error(readErrorMessage(payload));
-  }
-
-  return payload;
-}
-
 export function getPendingUserInputRequests(
   conversationState: UnifiedThread | null
 ): UnifiedUserInputRequest[] {

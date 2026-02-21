@@ -42,7 +42,6 @@ import {
   listDebugHistory,
   listThreads,
   markTrace,
-  replayHistoryEntry,
   sendMessage,
   setCollaborationMode,
   startTrace,
@@ -61,7 +60,6 @@ import { ChatComposer } from "@/components/ChatComposer";
 import { PendingRequestCard } from "@/components/PendingRequestCard";
 import { StreamEventCard } from "@/components/StreamEventCard";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -526,7 +524,6 @@ export function App(): React.JSX.Element {
   const [history, setHistory] = useState<HistoryResponse["history"]>([]);
   const [selectedHistoryId, setSelectedHistoryId] = useState("");
   const [historyDetail, setHistoryDetail] = useState<HistoryDetail | null>(null);
-  const [waitForReplayResponse, setWaitForReplayResponse] = useState(false);
   const [selectedRequestId, setSelectedRequestId] = useState<PendingRequestId | null>(null);
   const [answerDraft, setAnswerDraft] = useState<Record<string, { option: string; freeform: string }>>({});
   const [agentDescriptors, setAgentDescriptors] = useState<AgentDescriptor[]>([]);
@@ -2441,35 +2438,6 @@ export function App(): React.JSX.Element {
                       <div className="text-xs text-muted-foreground py-4">Select an entry</div>
                     ) : (
                       <>
-                        <div className="flex items-center gap-2">
-                          <Label
-                            htmlFor="wait-for-replay-response"
-                            className="flex items-center gap-1.5 text-xs font-normal text-muted-foreground cursor-pointer"
-                          >
-                            <Checkbox
-                              id="wait-for-replay-response"
-                              checked={waitForReplayResponse}
-                              onCheckedChange={(checked) =>
-                                setWaitForReplayResponse(checked === true)
-                              }
-                            />
-                            wait for response
-                          </Label>
-                          <Button
-                            type="button"
-                            onClick={() =>
-                              void replayHistoryEntry({
-                                entryId: historyDetail.entry.id,
-                                waitForResponse: waitForReplayResponse
-                              }).then(refreshAll)
-                            }
-                            variant="outline"
-                            size="sm"
-                            className="h-7 text-xs"
-                          >
-                            Replay
-                          </Button>
-                        </div>
                         <pre className="font-mono text-[11px] text-muted-foreground leading-5 whitespace-pre-wrap break-words">
                           {JSON.stringify(historyDetail.fullPayload, null, 2)}
                         </pre>
