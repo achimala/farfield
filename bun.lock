@@ -18,6 +18,7 @@
         "@farfield/api": "workspace:*",
         "@farfield/opencode-api": "workspace:*",
         "@farfield/protocol": "workspace:*",
+        "@farfield/unified-surface": "workspace:*",
         "pino": "^9.5.0",
         "zod": "^3.24.1",
       },
