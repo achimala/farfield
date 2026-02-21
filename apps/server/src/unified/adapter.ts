@@ -255,12 +255,11 @@ function createHandlerTable(provider: UnifiedProviderId, adapter: AgentAdapter):
     },
 
     listModels: async (command) => {
-      const listModels = adapter.listModels;
-      if (!listModels) {
+      if (!adapter.listModels) {
         throw new UnifiedBackendFeatureError(provider, "listModels", "unsupportedByProvider");
       }
 
-      const result = await listModels(command.limit);
+      const result = await adapter.listModels(command.limit);
       return {
         kind: "listModels",
         data: result.data.map((model) => ({
@@ -276,12 +275,11 @@ function createHandlerTable(provider: UnifiedProviderId, adapter: AgentAdapter):
     },
 
     listCollaborationModes: async () => {
-      const listCollaborationModes = adapter.listCollaborationModes;
-      if (!listCollaborationModes) {
+      if (!adapter.listCollaborationModes) {
         throw new UnifiedBackendFeatureError(provider, "listCollaborationModes", "unsupportedByProvider");
       }
 
-      const result = await listCollaborationModes();
+      const result = await adapter.listCollaborationModes();
       return {
         kind: "listCollaborationModes",
         data: result.data.map((mode) => ({
@@ -297,12 +295,11 @@ function createHandlerTable(provider: UnifiedProviderId, adapter: AgentAdapter):
     },
 
     setCollaborationMode: async (command) => {
-      const setCollaborationMode = adapter.setCollaborationMode;
-      if (!setCollaborationMode) {
+      if (!adapter.setCollaborationMode) {
         throw new UnifiedBackendFeatureError(provider, "setCollaborationMode", "unsupportedByProvider");
       }
 
-      const result = await setCollaborationMode({
+      const result = await adapter.setCollaborationMode({
         threadId: command.threadId,
         ...(command.ownerClientId ? { ownerClientId: command.ownerClientId } : {}),
         collaborationMode: {
@@ -328,12 +325,11 @@ function createHandlerTable(provider: UnifiedProviderId, adapter: AgentAdapter):
     },
 
     submitUserInput: async (command) => {
-      const submitUserInput = adapter.submitUserInput;
-      if (!submitUserInput) {
+      if (!adapter.submitUserInput) {
         throw new UnifiedBackendFeatureError(provider, "submitUserInput", "unsupportedByProvider");
       }
 
-      const result = await submitUserInput({
+      const result = await adapter.submitUserInput({
         threadId: command.threadId,
         ...(command.ownerClientId ? { ownerClientId: command.ownerClientId } : {}),
         requestId: command.requestId,
@@ -348,12 +344,11 @@ function createHandlerTable(provider: UnifiedProviderId, adapter: AgentAdapter):
     },
 
     readLiveState: async (command) => {
-      const readLiveState = adapter.readLiveState;
-      if (!readLiveState) {
+      if (!adapter.readLiveState) {
         throw new UnifiedBackendFeatureError(provider, "readLiveState", "unsupportedByProvider");
       }
 
-      const liveState = await readLiveState(command.threadId);
+      const liveState = await adapter.readLiveState(command.threadId);
       return {
         kind: "readLiveState",
         threadId: command.threadId,
@@ -366,12 +361,11 @@ function createHandlerTable(provider: UnifiedProviderId, adapter: AgentAdapter):
     },
 
     readStreamEvents: async (command) => {
-      const readStreamEvents = adapter.readStreamEvents;
-      if (!readStreamEvents) {
+      if (!adapter.readStreamEvents) {
         throw new UnifiedBackendFeatureError(provider, "readStreamEvents", "unsupportedByProvider");
       }
 
-      const streamEvents = await readStreamEvents(command.threadId, command.limit);
+      const streamEvents = await adapter.readStreamEvents(command.threadId, command.limit);
       return {
         kind: "readStreamEvents",
         threadId: command.threadId,
@@ -381,12 +375,11 @@ function createHandlerTable(provider: UnifiedProviderId, adapter: AgentAdapter):
     },
 
     listProjectDirectories: async () => {
-      const listProjectDirectories = adapter.listProjectDirectories;
-      if (!listProjectDirectories) {
+      if (!adapter.listProjectDirectories) {
         throw new UnifiedBackendFeatureError(provider, "listProjectDirectories", "unsupportedByProvider");
       }
 
-      const directories = await listProjectDirectories();
+      const directories = await adapter.listProjectDirectories();
       return {
         kind: "listProjectDirectories",
         directories
