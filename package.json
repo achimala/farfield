@@ -13,6 +13,9 @@
     "test": "bun run --workspaces test",
     "lint": "bun run --workspaces lint",
     "typecheck": "bun run --workspaces typecheck",
+    "verify:no-cheats": "node scripts/verify-no-cheats.mjs",
+    "verify:no-provider-ui-imports": "node scripts/verify-no-provider-imports-in-ui.mjs",
+    "verify:strict": "bun run verify:no-cheats && bun run verify:no-provider-ui-imports && bun run typecheck && bun run test",
     "sanitize:traces": "node scripts/sanitize-traces.mjs",
     "generate:codex-schema": "node scripts/generate-codex-schema.mjs",
     "screenshot:codex": "node skills/codex-window-debug/tools/codex-window-screenshot.mjs"

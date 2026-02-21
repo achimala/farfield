@@ -45,10 +45,10 @@ describe("server request schemas", () => {
   it("rejects invalid request id type", () => {
     expect(() =>
       parseBody(SubmitUserInputBodySchema, {
-        requestId: "bad",
+        requestId: true,
         response: {}
       })
-    ).toThrowError(/Expected number/);
+    ).toThrowError(/Invalid input/);
   });
 
   it("validates replay body", () => {

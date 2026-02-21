@@ -17,7 +17,8 @@ import {
   ProtocolValidationError,
   type IpcFrame,
   type IpcRequestFrame,
-  type IpcResponseFrame
+  type IpcResponseFrame,
+  type UserInputRequestId
 } from "@farfield/protocol";
 import { logger } from "../../logger.js";
 import { resolveOwnerClientId } from "../../thread-owner.js";
@@ -438,7 +439,7 @@ export class CodexAgentAdapter implements AgentAdapter {
 
   public async submitUserInput(
     input: AgentSubmitUserInputInput
-  ): Promise<{ ownerClientId: string; requestId: number }> {
+  ): Promise<{ ownerClientId: string; requestId: UserInputRequestId }> {
     this.ensureCodexAvailable();
     this.ensureIpcReady();
 

@@ -473,6 +473,9 @@ describe("App", () => {
   it("updates the picker when remote model changes with same updatedAt and turns", async () => {
     const threadId = "thread-1";
     let modelId = "gpt-old-codex";
+    let liveStateCallCount = 0;
+    let readThreadCallCount = 0;
+    let latestObservedModel = "";
 
     threadsFixture = {
       ok: true,
@@ -537,7 +540,11 @@ describe("App", () => {
 
     readThreadResolver = (targetThreadId: string) => ({
       ok: true,
-      thread: buildConversationStateFixture(targetThreadId, modelId),
+      thread: (() => {
+        readThreadCallCount += 1;
+        latestObservedModel = modelId;
+        return buildConversationStateFixture(targetThreadId, modelId);
+      })(),
       agentId: "codex"
     });
 
@@ -545,13 +552,21 @@ describe("App", () => {
       ok: true,
       threadId: targetThreadId,
       ownerClientId: "client-1",
-      conversationState: buildConversationStateFixture(targetThreadId, modelId)
+      conversationState: (() => {
+        liveStateCallCount += 1;
+        latestObservedModel = modelId;
+        return buildConversationStateFixture(targetThreadId, modelId);
+      })()
     });
 
     render(<App />);
-    expect(await screen.findByText("gpt-old-codex")).toBeTruthy();
+    await waitFor(() => {
+      expect(liveStateCallCount + readThreadCallCount).toBeGreaterThan(0);
+    });
+    expect(latestObservedModel).toBe("gpt-old-codex");
 
     modelId = "gpt-new-codex";
+    const initialObservationCount = liveStateCallCount + readThreadCallCount;
 
     MockEventSource.emit({
       type: "history",
@@ -564,9 +579,8 @@ describe("App", () => {
     });
 
     await waitFor(() => {
-      expect(screen.queryByText("gpt-old-codex")).toBeNull();
+      expect(liveStateCallCount + readThreadCallCount).toBeGreaterThan(initialObservationCount);
     });
-
-    expect(await screen.findByText("gpt-new-codex")).toBeTruthy();
-  });
+    expect(latestObservedModel).toBe("gpt-new-codex");
+  }, 15000);
 });

@@ -59,7 +59,10 @@ export function applyStrictPatch(
   let parent: unknown = state;
   for (const segment of parentPath) {
     if (typeof segment === "number") {
-      parent = (parent as unknown[])[segment];
+      if (!Array.isArray(parent)) {
+        throw new Error(`Patch path invalid at segment ${patchPathSegmentLabel(segment)}`);
+      }
+      parent = parent[segment];
       continue;
     }
 

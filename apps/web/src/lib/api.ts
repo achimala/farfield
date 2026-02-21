@@ -6,6 +6,7 @@ import {
   AppServerStartThreadResponseSchema,
   type CollaborationMode,
   ThreadConversationStateSchema,
+  type UserInputRequestId,
   UserInputRequestSchema,
   UserInputResponsePayloadSchema
 } from "@farfield/protocol";
@@ -138,7 +139,7 @@ const HistoryDetailSchema = z
 
 async function request(path: string, init?: RequestInit): Promise<unknown> {
   const response = await fetch(path, init);
-  const data = (await response.json()) as unknown;
+  const data = await response.json();
   const envelope = ApiEnvelopeSchema.parse(data);
 
   if (!response.ok || !envelope.ok) {
@@ -323,7 +324,7 @@ export async function setCollaborationMode(input: {
 export async function submitUserInput(input: {
   threadId: string;
   ownerClientId?: string;
-  requestId: number;
+  requestId: UserInputRequestId;
   response: z.infer<typeof UserInputResponsePayloadSchema>;
 }): Promise<void> {
   UserInputResponsePayloadSchema.parse(input.response);

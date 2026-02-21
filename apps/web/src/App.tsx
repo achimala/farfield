@@ -93,6 +93,7 @@ type TraceStatus = Awaited<ReturnType<typeof getTraceStatus>>;
 type HistoryResponse = Awaited<ReturnType<typeof listDebugHistory>>;
 type HistoryDetail = Awaited<ReturnType<typeof getHistoryEntry>>;
 type PendingRequest = ReturnType<typeof getPendingUserInputRequests>[number];
+type PendingRequestId = PendingRequest["id"];
 type Thread = ThreadsResponse["data"][number];
 type AgentDescriptor = AgentsResponse["agents"][number];
 type ConversationTurn = NonNullable<ReadThreadResponse["thread"]>["turns"][number];
@@ -400,7 +401,7 @@ function readSidebarCollapsedGroupsFromStorage(): Record<string, boolean> {
     if (!raw) {
       return {};
     }
-    const parsed = JSON.parse(raw) as unknown;
+    const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       return {};
     }
@@ -527,7 +528,7 @@ export function App(): React.JSX.Element {
   const [selectedHistoryId, setSelectedHistoryId] = useState("");
   const [historyDetail, setHistoryDetail] = useState<HistoryDetail | null>(null);
   const [waitForReplayResponse, setWaitForReplayResponse] = useState(false);
-  const [selectedRequestId, setSelectedRequestId] = useState<number | null>(null);
+  const [selectedRequestId, setSelectedRequestId] = useState<PendingRequestId | null>(null);
   const [answerDraft, setAnswerDraft] = useState<Record<string, { option: string; freeform: string }>>({});
   const [agentDescriptors, setAgentDescriptors] = useState<AgentDescriptor[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState<AgentId>("codex");

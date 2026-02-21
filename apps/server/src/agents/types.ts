@@ -6,6 +6,7 @@ import type {
   AppServerStartThreadResponse,
   CollaborationMode,
   IpcFrame,
+  UserInputRequestId,
   UserInputResponsePayload
 } from "@farfield/protocol";
 
@@ -84,7 +85,7 @@ export interface AgentSetCollaborationModeInput {
 export interface AgentSubmitUserInputInput {
   threadId: string;
   ownerClientId?: string;
-  requestId: number;
+  requestId: UserInputRequestId;
   response: UserInputResponsePayload;
 }
 
@@ -140,7 +141,7 @@ export interface AgentAdapter {
   setCollaborationMode?(input: AgentSetCollaborationModeInput): Promise<{ ownerClientId: string }>;
   submitUserInput?(
     input: AgentSubmitUserInputInput
-  ): Promise<{ ownerClientId: string; requestId: number }>;
+  ): Promise<{ ownerClientId: string; requestId: UserInputRequestId }>;
   readLiveState?(threadId: string): Promise<AgentThreadLiveState>;
   readStreamEvents?(threadId: string, limit: number): Promise<AgentThreadStreamEvents>;
   listProjectDirectories?(): Promise<string[]>;
