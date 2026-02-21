@@ -90,6 +90,12 @@ export function ChatComposer({
   }, [canSend, draft, isBusy, isGenerating, onInterrupt, onSend]);
 
   const disableSend = isGenerating ? !canSend || isBusy : !canSend || isBusy || !draft.trim();
+  const shouldSendOnEnter = useCallback(() => {
+    if (typeof window.matchMedia !== "function") {
+      return true;
+    }
+    return !window.matchMedia("(pointer: coarse)").matches;
+  }, []);
 
   return (
     <div className="flex items-end gap-2 rounded-[28px] border border-border bg-card pl-4 pr-2.5 py-2.5 focus-within:border-muted-foreground/40 transition-colors">
@@ -101,7 +107,12 @@ export function ChatComposer({
           resizeTextarea();
         }}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+          if (
+            e.key === "Enter"
+            && !e.shiftKey
+            && !e.nativeEvent.isComposing
+            && shouldSendOnEnter()
+          ) {
             e.preventDefault();
             void sendDraft();
           }
