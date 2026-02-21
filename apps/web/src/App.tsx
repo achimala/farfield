@@ -551,6 +551,7 @@ export function App(): React.JSX.Element {
     refreshSelectedThread: false
   });
   const coreRefreshIntervalRef = useRef<number | null>(null);
+  const selectedThreadRefreshIntervalRef = useRef<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const chatContentRef = useRef<HTMLDivElement>(null);
   const isChatAtBottomRef = useRef(true);
@@ -652,7 +653,7 @@ export function App(): React.JSX.Element {
     if (!readConversationState) return liveConversationState;
     const liveUpdatedAt = getConversationStateUpdatedAt(liveConversationState);
     const readUpdatedAt = getConversationStateUpdatedAt(readConversationState);
-    return liveUpdatedAt > readUpdatedAt ? liveConversationState : readConversationState;
+    return liveUpdatedAt >= readUpdatedAt ? liveConversationState : readConversationState;
   }, [liveState?.conversationState, readThreadState?.thread]);
 
   const pendingRequests = useMemo(() => {
@@ -1101,6 +1102,60 @@ export function App(): React.JSX.Element {
   }, [loadCoreData]);
 
   useEffect(() => {
+    const stopSelectedThreadRefresh = () => {
+      if (selectedThreadRefreshIntervalRef.current === null) {
+        return;
+      }
+      window.clearInterval(selectedThreadRefreshIntervalRef.current);
+      selectedThreadRefreshIntervalRef.current = null;
+    };
+
+    if (!selectedThreadId) {
+      stopSelectedThreadRefresh();
+      return;
+    }
+
+    const refreshSelectedThreadData = () => {
+      if (document.visibilityState === "hidden") {
+        return;
+      }
+      void loadSelectedThread(selectedThreadId).catch((e) => setError(toErrorMessage(e)));
+    };
+
+    const startSelectedThreadRefresh = () => {
+      if (selectedThreadRefreshIntervalRef.current !== null) {
+        return;
+      }
+      selectedThreadRefreshIntervalRef.current = window.setInterval(refreshSelectedThreadData, 3000);
+    };
+
+    startSelectedThreadRefresh();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        stopSelectedThreadRefresh();
+        return;
+      }
+      startSelectedThreadRefresh();
+    };
+    const onPageHide = () => {
+      stopSelectedThreadRefresh();
+    };
+    const onPageShow = () => {
+      startSelectedThreadRefresh();
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      stopSelectedThreadRefresh();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("pageshow", onPageShow);
+    };
+  }, [loadSelectedThread, selectedThreadId]);
+
+  useEffect(() => {
     if (!selectedThreadId) {
       setLiveState(null);
       setReadThreadState(null);
@@ -1310,6 +1365,11 @@ export function App(): React.JSX.Element {
     const cs = conversationState;
     if (!cs) return;
     const remoteSelection = readModeSelectionFromConversationState(cs);
+    const remoteHasExplicitSelection = (
+      remoteSelection.modeKey.length > 0
+      || remoteSelection.modelId.length > 0
+      || remoteSelection.reasoningEffort.length > 0
+    );
     const remoteModeKey = remoteSelection.modeKey || selectedModeKey || defaultModeOption?.mode || "";
     const remoteSignature = buildModeSignature(
       remoteModeKey,
@@ -1323,6 +1383,13 @@ export function App(): React.JSX.Element {
       setSelectedReasoningEffort(remoteSelection.reasoningEffort);
       lastAppliedModeSignatureRef.current = remoteSignature;
       setHasHydratedModeFromLiveState(true);
+      return;
+    }
+
+    if (!remoteHasExplicitSelection) {
+      if (!selectedModeKey && remoteModeKey) {
+        setSelectedModeKey(remoteModeKey);
+      }
       return;
     }
 

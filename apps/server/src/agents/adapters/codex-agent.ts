@@ -11,12 +11,15 @@ import {
   type SendRequestOptions
 } from "@farfield/api";
 import {
+  parseThreadConversationState,
   parseThreadStreamStateChangedBroadcast,
   parseUserInputResponsePayload,
   ProtocolValidationError,
   type IpcFrame,
   type IpcRequestFrame,
   type IpcResponseFrame,
+  type ThreadConversationState,
+  type ThreadStreamStateChangedBroadcast,
   type UserInputRequestId
 } from "@farfield/protocol";
 import { logger } from "../../logger.js";
@@ -86,7 +89,9 @@ export class CodexAgentAdapter implements AgentAdapter {
 
   private readonly threadOwnerById = new Map<string, string>();
   private readonly streamEventsByThreadId = new Map<string, IpcFrame[]>();
+  private readonly streamSnapshotByThreadId = new Map<string, ThreadConversationState>();
   private readonly ipcFrameListeners = new Set<(event: CodexIpcFrameEvent) => void>();
+  private lastKnownOwnerClientId: string | null = null;
 
   private runtimeState: CodexAgentRuntimeState = {
     appReady: false,
@@ -146,6 +151,18 @@ export class CodexAgentAdapter implements AgentAdapter {
           ? frame.method ?? "response"
           : frame.type;
 
+      const sourceClientIdRaw = (
+        frame.type === "request" || frame.type === "broadcast"
+      )
+        ? frame.sourceClientId
+        : undefined;
+      const sourceClientId = typeof sourceClientIdRaw === "string"
+        ? sourceClientIdRaw.trim()
+        : "";
+      if (sourceClientId) {
+        this.lastKnownOwnerClientId = sourceClientId;
+      }
+
       this.emitIpcFrame({
         direction: "in",
         frame,
@@ -167,8 +184,8 @@ export class CodexAgentAdapter implements AgentAdapter {
         return;
       }
 
-      if (frame.sourceClientId && frame.sourceClientId.trim()) {
-        this.threadOwnerById.set(conversationId, frame.sourceClientId.trim());
+      if (sourceClientId) {
+        this.threadOwnerById.set(conversationId, sourceClientId);
       }
 
       const current = this.streamEventsByThreadId.get(conversationId) ?? [];
@@ -326,8 +343,10 @@ export class CodexAgentAdapter implements AgentAdapter {
     const result = await this.runAppServerCall(() =>
       this.appClient.readThread(input.threadId, input.includeTurns)
     );
+    const parsedThread = parseThreadConversationState(result.thread);
+    this.streamSnapshotByThreadId.set(input.threadId, parsedThread);
     return {
-      thread: result.thread
+      thread: parsedThread
     };
   }
 
@@ -419,7 +438,8 @@ export class CodexAgentAdapter implements AgentAdapter {
     const ownerClientId = resolveOwnerClientId(
       this.threadOwnerById,
       input.threadId,
-      input.ownerClientId
+      input.ownerClientId,
+      this.lastKnownOwnerClientId ?? undefined
     );
 
     await this.service.setCollaborationMode({
@@ -442,7 +462,8 @@ export class CodexAgentAdapter implements AgentAdapter {
     const ownerClientId = resolveOwnerClientId(
       this.threadOwnerById,
       input.threadId,
-      input.ownerClientId
+      input.ownerClientId,
+      this.lastKnownOwnerClientId ?? undefined
     );
 
     await this.service.submitUserInput({
@@ -459,11 +480,15 @@ export class CodexAgentAdapter implements AgentAdapter {
   }
 
   public async readLiveState(threadId: string): Promise<AgentThreadLiveState> {
+    const snapshotState = this.streamSnapshotByThreadId.get(threadId) ?? null;
+    const ownerClientId = this.threadOwnerById.get(threadId)
+      ?? this.lastKnownOwnerClientId
+      ?? null;
     const rawEvents = this.streamEventsByThreadId.get(threadId) ?? [];
     if (rawEvents.length === 0) {
       return {
-        ownerClientId: this.threadOwnerById.get(threadId) ?? null,
-        conversationState: null,
+        ownerClientId,
+        conversationState: snapshotState,
         liveStateError: null
       };
     }
@@ -516,18 +541,23 @@ export class CodexAgentAdapter implements AgentAdapter {
 
     if (events.length === 0) {
       return {
-        ownerClientId: this.threadOwnerById.get(threadId) ?? null,
-        conversationState: null,
+        ownerClientId,
+        conversationState: snapshotState,
         liveStateError: null
       };
     }
 
     try {
-      const reduced = reduceThreadStreamEvents(events);
+      const reductionInput = snapshotState
+        ? [buildSyntheticSnapshotEvent(threadId, ownerClientId ?? "farfield", snapshotState), ...events]
+        : events;
+      const reduced = reduceThreadStreamEvents(reductionInput);
       const state = reduced.get(threadId);
       return {
-        ownerClientId: state?.ownerClientId ?? this.threadOwnerById.get(threadId) ?? null,
-        conversationState: state?.conversationState ?? null,
+        ownerClientId: state?.ownerClientId
+          ?? ownerClientId
+          ?? null,
+        conversationState: state?.conversationState ?? snapshotState,
         liveStateError: null
       };
     } catch (error) {
@@ -549,8 +579,8 @@ export class CodexAgentAdapter implements AgentAdapter {
         "codex-thread-stream-reduction-failed"
       );
       return {
-        ownerClientId: this.threadOwnerById.get(threadId) ?? null,
-        conversationState: null,
+        ownerClientId,
+        conversationState: snapshotState,
         liveStateError: {
           kind: "reductionFailed",
           message: toErrorMessage(error),
@@ -563,7 +593,9 @@ export class CodexAgentAdapter implements AgentAdapter {
 
   public async readStreamEvents(threadId: string, limit: number): Promise<AgentThreadStreamEvents> {
     return {
-      ownerClientId: this.threadOwnerById.get(threadId) ?? null,
+      ownerClientId: this.threadOwnerById.get(threadId)
+        ?? this.lastKnownOwnerClientId
+        ?? null,
       events: (this.streamEventsByThreadId.get(threadId) ?? []).slice(-limit)
     };
   }
@@ -800,6 +832,28 @@ function toErrorMessage(error: Error | string | unknown): string {
 
 function normalizeStderrLine(line: string): string {
   return line.replace(ANSI_ESCAPE_REGEX, "").trim();
+}
+
+function buildSyntheticSnapshotEvent(
+  threadId: string,
+  sourceClientId: string,
+  conversationState: ThreadConversationState
+): ThreadStreamStateChangedBroadcast {
+  return {
+    type: "broadcast",
+    method: "thread-stream-state-changed",
+    sourceClientId,
+    version: 0,
+    params: {
+      conversationId: threadId,
+      change: {
+        type: "snapshot",
+        conversationState
+      },
+      version: 0,
+      type: "thread-stream-state-changed"
+    }
+  };
 }
 
 function isKnownBenignAppServerStderr(line: string): boolean {
