@@ -8,6 +8,11 @@ import { AppServerRpcError, type SendRequestOptions } from "@farfield/api";
 import type { IpcFrame, IpcRequestFrame } from "@farfield/protocol";
 import { z } from "zod";
 import {
+  UnifiedCommandSchema,
+  type UnifiedEvent,
+  type UnifiedProviderId
+} from "@farfield/unified-surface";
+import {
   InterruptBodySchema,
   parseBody,
   ReplayBodySchema,
@@ -28,6 +33,11 @@ import { ThreadIndex } from "./agents/thread-index.js";
 import { CodexAgentAdapter } from "./agents/adapters/codex-agent.js";
 import { OpenCodeAgentAdapter } from "./agents/adapters/opencode-agent.js";
 import type { AgentAdapter, AgentDescriptor, AgentId } from "./agents/types.js";
+import {
+  UnifiedBackendFeatureError,
+  buildUnifiedFeatureMatrix,
+  createUnifiedProviderAdapters
+} from "./unified/adapter.js";
 
 const HOST = process.env["HOST"] ?? "127.0.0.1";
 const PORT = Number(process.env["PORT"] ?? 4311);
@@ -268,6 +278,7 @@ const gitCommit = resolveGitCommitHash();
 const history: HistoryEntry[] = [];
 const historyById = new Map<string, unknown>();
 const sseClients = new Set<ServerResponse>();
+const unifiedSseClients = new Set<ServerResponse>();
 const SSE_KEEPALIVE_INTERVAL_MS = 15_000;
 const threadIndex = new ThreadIndex();
 
@@ -408,6 +419,10 @@ for (const agentId of configuredAgentIds) {
 }
 
 const registry = new AgentRegistry(adapters);
+const unifiedAdapters = createUnifiedProviderAdapters({
+  codex: codexAdapter,
+  opencode: openCodeAdapter
+});
 
 function buildAgentDescriptor(
   adapter: AgentAdapter,
@@ -443,9 +458,41 @@ function getRuntimeStateSnapshot(): Record<string, unknown> {
   };
 }
 
+function resolveUnifiedAdapter(provider: UnifiedProviderId) {
+  return unifiedAdapters[provider];
+}
+
+function listUnifiedProviders(): UnifiedProviderId[] {
+  return ["codex", "opencode"];
+}
+
+function buildUnifiedProviderStateEvents(): UnifiedEvent[] {
+  return listUnifiedProviders().map((provider) => {
+    const adapter = resolveUnifiedAdapter(provider);
+    const connected = adapter ? registry.getAdapter(provider)?.isConnected() ?? false : false;
+    const enabled = adapter ? registry.getAdapter(provider)?.isEnabled() ?? false : false;
+
+    return {
+      kind: "providerStateChanged",
+      provider,
+      enabled,
+      connected,
+      lastError: provider === "codex"
+        ? runtimeLastError ?? codexAdapter?.getRuntimeState().lastError ?? null
+        : runtimeLastError ?? null
+    };
+  });
+}
+
 function broadcastSse(payload: unknown): void {
   for (const client of sseClients) {
     eventResponse(client, payload);
+  }
+}
+
+function broadcastUnifiedEvent(event: UnifiedEvent): void {
+  for (const client of unifiedSseClients) {
+    eventResponse(client, event);
   }
 }
 
@@ -457,6 +504,14 @@ function writeSseKeepalive(): void {
       sseClients.delete(client);
     }
   }
+
+  for (const client of unifiedSseClients) {
+    try {
+      client.write(": keepalive\n\n");
+    } catch {
+      unifiedSseClients.delete(client);
+    }
+  }
 }
 
 function broadcastRuntimeState(): void {
@@ -464,6 +519,10 @@ function broadcastRuntimeState(): void {
     type: "state",
     state: getRuntimeStateSnapshot()
   });
+
+  for (const event of buildUnifiedProviderStateEvents()) {
+    broadcastUnifiedEvent(event);
+  }
 }
 
 setInterval(() => {
@@ -528,6 +587,13 @@ function resolveAdapterForThread(threadId: string):
   };
 }
 
+function parseUnifiedProviderId(value: string | null): UnifiedProviderId | null {
+  if (value === "codex" || value === "opencode") {
+    return value;
+  }
+  return null;
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     if (!req.url) {
@@ -571,6 +637,219 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         state: getRuntimeStateSnapshot()
       });
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/unified/events") {
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
+        "Access-Control-Allow-Origin": "*"
+      });
+      res.write("retry: 1000\n\n");
+
+      unifiedSseClients.add(res);
+      for (const event of buildUnifiedProviderStateEvents()) {
+        eventResponse(res, event);
+      }
+
+      req.on("close", () => {
+        unifiedSseClients.delete(res);
+      });
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/unified/features") {
+      const features = buildUnifiedFeatureMatrix({
+        codex: codexAdapter,
+        opencode: openCodeAdapter
+      });
+
+      jsonResponse(res, 200, {
+        ok: true,
+        features
+      });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/unified/command") {
+      const command = UnifiedCommandSchema.parse(await readJsonBody(req));
+      const adapter = resolveUnifiedAdapter(command.provider);
+
+      if (!adapter) {
+        jsonResponse(res, 503, {
+          ok: false,
+          error: {
+            code: "providerDisabled",
+            message: `Provider ${command.provider} is not available`
+          }
+        });
+        return;
+      }
+
+      try {
+        const result = await adapter.execute(command);
+
+        if (result.kind === "listThreads") {
+          for (const thread of result.data) {
+            threadIndex.register(thread.id, thread.provider);
+          }
+        }
+
+        if (result.kind === "readThread" || result.kind === "createThread") {
+          threadIndex.register(result.thread.id, result.thread.provider);
+          broadcastUnifiedEvent({
+            kind: "threadUpdated",
+            threadId: result.thread.id,
+            provider: result.thread.provider,
+            thread: result.thread
+          });
+        }
+
+        jsonResponse(res, 200, {
+          ok: true,
+          result
+        });
+      } catch (error) {
+        if (error instanceof UnifiedBackendFeatureError) {
+          jsonResponse(res, 200, {
+            ok: false,
+            error: {
+              code: error.reason,
+              message: error.message,
+              details: {
+                provider: error.provider,
+                featureId: error.featureId,
+                reason: error.reason
+              }
+            }
+          });
+          return;
+        }
+
+        const message = toErrorMessage(error);
+        broadcastUnifiedEvent({
+          kind: "error",
+          message,
+          code: "internalError"
+        });
+        jsonResponse(res, 500, {
+          ok: false,
+          error: {
+            code: "internalError",
+            message
+          }
+        });
+      }
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/unified/threads") {
+      const limit = parseInteger(url.searchParams.get("limit"), 80);
+      const archived = parseBoolean(url.searchParams.get("archived"), false);
+      const all = parseBoolean(url.searchParams.get("all"), false);
+      const maxPages = parseInteger(url.searchParams.get("maxPages"), 20);
+      const cursor = url.searchParams.get("cursor") ?? null;
+
+      const data: Array<{
+        id: string;
+        provider: UnifiedProviderId;
+        preview: string;
+        createdAt: number;
+        updatedAt: number;
+        cwd?: string | undefined;
+        source?: string | undefined;
+      }> = [];
+      const cursors: Record<UnifiedProviderId, string | null> = {
+        codex: null,
+        opencode: null
+      };
+
+      for (const provider of listUnifiedProviders()) {
+        const adapter = resolveUnifiedAdapter(provider);
+        if (!adapter) {
+          continue;
+        }
+
+        try {
+          const result = await adapter.execute({
+            kind: "listThreads",
+            provider,
+            limit,
+            archived,
+            all,
+            maxPages,
+            cursor
+          });
+
+          cursors[provider] = result.nextCursor ?? null;
+          for (const thread of result.data) {
+            threadIndex.register(thread.id, thread.provider);
+            data.push(thread);
+          }
+        } catch (error) {
+          logger.warn(
+            {
+              provider,
+              error: toErrorMessage(error)
+            },
+            "unified-list-threads-failed"
+          );
+        }
+      }
+
+      jsonResponse(res, 200, {
+        ok: true,
+        data,
+        cursors
+      });
+      return;
+    }
+
+    if (req.method === "GET" && segments[0] === "api" && segments[1] === "unified" && segments[2] === "thread" && segments[3]) {
+      const threadId = decodeURIComponent(segments[3]);
+      const providerFromQuery = parseUnifiedProviderId(url.searchParams.get("provider"));
+      const provider = providerFromQuery ?? parseUnifiedProviderId(threadIndex.resolve(threadId));
+
+      if (!provider) {
+        jsonResponse(res, 404, {
+          ok: false,
+          error: `Thread ${threadId} is not registered`
+        });
+        return;
+      }
+
+      const adapter = resolveUnifiedAdapter(provider);
+      if (!adapter) {
+        jsonResponse(res, 503, {
+          ok: false,
+          error: `Provider ${provider} is not available`
+        });
+        return;
+      }
+
+      try {
+        const result = await adapter.execute({
+          kind: "readThread",
+          provider,
+          threadId,
+          includeTurns: true
+        });
+
+        threadIndex.register(result.thread.id, result.thread.provider);
+        jsonResponse(res, 200, {
+          ok: true,
+          thread: result.thread
+        });
+      } catch (error) {
+        const message = toErrorMessage(error);
+        jsonResponse(res, 500, {
+          ok: false,
+          error: message
+        });
+      }
       return;
     }
 

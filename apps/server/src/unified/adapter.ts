@@ -100,7 +100,9 @@ export interface UnifiedProviderAdapter {
   readonly handlers: UnifiedCommandHandlerTable;
 
   getFeatureAvailability(): Record<UnifiedFeatureId, UnifiedFeatureAvailability>;
-  execute(command: UnifiedCommand): Promise<UnifiedCommandResult>;
+  execute<K extends UnifiedCommandKind>(
+    command: UnifiedCommandByKind<K>
+  ): Promise<UnifiedCommandResultByKind<K>>;
 }
 
 export class AgentUnifiedProviderAdapter implements UnifiedProviderAdapter {
@@ -119,7 +121,9 @@ export class AgentUnifiedProviderAdapter implements UnifiedProviderAdapter {
     return buildProviderFeatureAvailability(this.provider, this.adapter);
   }
 
-  public async execute(command: UnifiedCommand): Promise<UnifiedCommandResult> {
+  public async execute<K extends UnifiedCommandKind>(
+    command: UnifiedCommandByKind<K>
+  ): Promise<UnifiedCommandResultByKind<K>> {
     if (command.provider !== this.provider) {
       throw new Error(`Command provider ${command.provider} does not match adapter ${this.provider}`);
     }
