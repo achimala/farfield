@@ -252,6 +252,74 @@ function getConversationStateUpdatedAt(
   return state.updatedAt;
 }
 
+function hasExplicitModeSelectionInState(
+  state: NonNullable<ReadThreadResponse["thread"]> | null | undefined
+): boolean {
+  if (!state) {
+    return false;
+  }
+
+  const mode = state.latestCollaborationMode;
+  if (mode) {
+    const modeKey = normalizeNullableModeValue(mode.mode);
+    const model = normalizeNullableModeValue(mode.settings.model);
+    const effort = normalizeNullableModeValue(mode.settings.reasoningEffort);
+    if (modeKey.length > 0 || model.length > 0 || effort.length > 0) {
+      return true;
+    }
+  }
+
+  const latestModel = normalizeNullableModeValue(state.latestModel);
+  const latestEffort = normalizeNullableModeValue(state.latestReasoningEffort);
+  return latestModel.length > 0 || latestEffort.length > 0;
+}
+
+function countConversationItems(
+  state: NonNullable<ReadThreadResponse["thread"]> | null | undefined
+): number {
+  if (!state) {
+    return -1;
+  }
+  let count = 0;
+  for (const turn of state.turns) {
+    count += turn.items.length;
+  }
+  return count;
+}
+
+function pickPreferredConversationState(
+  liveState: NonNullable<ReadThreadResponse["thread"]>,
+  readState: NonNullable<ReadThreadResponse["thread"]>
+): NonNullable<ReadThreadResponse["thread"]> {
+  const liveUpdatedAt = getConversationStateUpdatedAt(liveState);
+  const readUpdatedAt = getConversationStateUpdatedAt(readState);
+
+  if (liveUpdatedAt > readUpdatedAt) {
+    return liveState;
+  }
+  if (readUpdatedAt > liveUpdatedAt) {
+    return readState;
+  }
+
+  const liveHasModeSelection = hasExplicitModeSelectionInState(liveState);
+  const readHasModeSelection = hasExplicitModeSelectionInState(readState);
+  if (liveHasModeSelection !== readHasModeSelection) {
+    return liveHasModeSelection ? liveState : readState;
+  }
+
+  if (liveState.turns.length !== readState.turns.length) {
+    return liveState.turns.length > readState.turns.length ? liveState : readState;
+  }
+
+  const liveItemCount = countConversationItems(liveState);
+  const readItemCount = countConversationItems(readState);
+  if (liveItemCount !== readItemCount) {
+    return liveItemCount > readItemCount ? liveState : readState;
+  }
+
+  return readState;
+}
+
 function buildModeSignature(modeKey: string, modelId: string, effort: string): string {
   return `${modeKey}|${modelId}|${effort}`;
 }
@@ -651,9 +719,7 @@ export function App(): React.JSX.Element {
     const readConversationState = readThreadState?.thread ?? null;
     if (!liveConversationState) return readConversationState;
     if (!readConversationState) return liveConversationState;
-    const liveUpdatedAt = getConversationStateUpdatedAt(liveConversationState);
-    const readUpdatedAt = getConversationStateUpdatedAt(readConversationState);
-    return liveUpdatedAt >= readUpdatedAt ? liveConversationState : readConversationState;
+    return pickPreferredConversationState(liveConversationState, readConversationState);
   }, [liveState?.conversationState, readThreadState?.thread]);
 
   const pendingRequests = useMemo(() => {
