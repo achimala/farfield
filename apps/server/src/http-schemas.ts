@@ -1,4 +1,8 @@
-import { CollaborationModeSchema, UserInputResponsePayloadSchema } from "@farfield/protocol";
+import {
+  CollaborationModeSchema,
+  UserInputRequestIdSchema,
+  UserInputResponsePayloadSchema
+} from "@farfield/protocol";
 import { z } from "zod";
 
 export const SetModeBodySchema = z
@@ -33,7 +37,7 @@ export const SendMessageBodySchema = z
 export const SubmitUserInputBodySchema = z
   .object({
     ownerClientId: z.string().optional(),
-    requestId: z.number().int().nonnegative(),
+    requestId: UserInputRequestIdSchema,
     response: UserInputResponsePayloadSchema
   })
   .strict();

@@ -154,7 +154,7 @@ export const UserInputResponseItemSchema = z
   .object({
     id: NonEmptyStringSchema,
     type: z.literal("userInputResponse"),
-    requestId: NonNegativeIntSchema,
+    requestId: z.union([NonNegativeIntSchema, NonEmptyStringSchema]),
     turnId: NonEmptyStringSchema,
     questions: z.array(UserInputAnsweredQuestionSchema),
     answers: z.record(z.array(z.string())),
@@ -365,14 +365,22 @@ export const UserInputOptionSchema = z
   })
   .passthrough();
 
+export const UserInputRequestIdSchema = z.union([
+  NonNegativeIntSchema,
+  NonEmptyStringSchema
+]);
+
 export const UserInputQuestionSchema = z
   .object({
     id: NonEmptyStringSchema,
     header: z.string(),
     question: z.string(),
-    isOther: z.boolean(),
-    isSecret: z.boolean(),
-    options: z.array(UserInputOptionSchema)
+    isOther: z.boolean().optional().default(false),
+    isSecret: z.boolean().optional().default(false),
+    options: z
+      .union([z.array(UserInputOptionSchema), z.null()])
+      .optional()
+      .transform((value) => value ?? [])
   })
   .passthrough();
 
@@ -388,7 +396,7 @@ export const UserInputRequestParamsSchema = z
 export const UserInputRequestSchema = z
   .object({
     method: z.literal("item/tool/requestUserInput"),
-    id: NonNegativeIntSchema,
+    id: UserInputRequestIdSchema,
     params: UserInputRequestParamsSchema,
     completed: z.boolean().optional()
   })
@@ -509,6 +517,7 @@ export const ThreadStreamStateChangedParamsSchema: z.ZodObject<
 
 export type CollaborationMode = z.infer<typeof CollaborationModeSchema>;
 export type TurnStartParams = z.infer<typeof TurnStartParamsSchema>;
+export type UserInputRequestId = z.infer<typeof UserInputRequestIdSchema>;
 export type UserInputRequest = z.infer<typeof UserInputRequestSchema>;
 export type ThreadConversationState = z.infer<typeof ThreadConversationStateSchema>;
 export type ThreadStreamPatch = z.infer<typeof ThreadStreamPatchSchema>;
