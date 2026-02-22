@@ -39,7 +39,35 @@ bun run dev:remote                           # network-accessible (codex)
 bun run dev:remote -- --agents=opencode      # network-accessible (opencode)
 ```
 
-> **Warning:** `dev:remote` exposes Farfield with no authentication. Only use on trusted networks.
+## Cloudflare Access (Recommended for iPhone)
+
+Farfield can enforce Cloudflare Access JWTs at the server layer.
+
+Set these environment variables before starting the server:
+
+```bash
+export FARFIELD_AUTH_MODE=cloudflare-access
+export CF_ACCESS_TEAM_DOMAIN=your-team.cloudflareaccess.com
+export CF_ACCESS_AUDIENCE=<cloudflare-access-aud-tag>
+export FARFIELD_CORS_ORIGIN=https://farfield.example.com
+export FARFIELD_DEBUG_API_ENABLED=false
+```
+
+Run in remote mode:
+
+```bash
+bun run dev:remote
+```
+
+Create a Cloudflare Tunnel and route `https://farfield.example.com` to `http://127.0.0.1:4312`.
+
+Create a Cloudflare Access self-hosted app for the same hostname and require login (and optionally WARP/device posture).
+
+Notes:
+
+- `FARFIELD_AUTH_MODE=cloudflare-access` requires a valid `cf-access-jwt-assertion` header on `/api/*` and `/events`.
+- Debug endpoints (`/api/debug/*`) are disabled by default in this mode.
+- In local mode (`FARFIELD_AUTH_MODE=none`), debug endpoints stay enabled by default.
 
 ## Requirements
 

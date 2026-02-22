@@ -27,6 +27,7 @@ import { ThreadIndex } from "./agents/thread-index.js";
 import { CodexAgentAdapter } from "./agents/adapters/codex-agent.js";
 import { OpenCodeAgentAdapter } from "./agents/adapters/opencode-agent.js";
 import type { AgentAdapter, AgentDescriptor, AgentId } from "./agents/types.js";
+import { createSecurityPolicy } from "./auth.js";
 
 const HOST = process.env["HOST"] ?? "127.0.0.1";
 const PORT = Number(process.env["PORT"] ?? 4311);
@@ -140,8 +141,8 @@ function jsonResponse(res: ServerResponse, statusCode: number, body: unknown): v
   res.writeHead(statusCode, {
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": encoded.length,
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "content-type",
+    "Access-Control-Allow-Origin": security.corsOrigin,
+    "Access-Control-Allow-Headers": "content-type,cf-access-jwt-assertion",
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS"
   });
   res.end(encoded);
@@ -241,6 +242,7 @@ const historyById = new Map<string, unknown>();
 const sseClients = new Set<ServerResponse>();
 const SSE_KEEPALIVE_INTERVAL_MS = 15_000;
 const threadIndex = new ThreadIndex();
+const security = createSecurityPolicy();
 
 let activeTrace: ActiveTrace | null = null;
 const recentTraces: TraceSummary[] = [];
@@ -509,6 +511,18 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${HOST}:${PORT}`);
     const pathname = url.pathname;
     const segments = pathname.split("/").filter(Boolean);
+    const requiresApiAuth = pathname === "/events" || pathname.startsWith("/api/");
+
+    if (requiresApiAuth) {
+      const authResult = await security.authenticate(req);
+      if (!authResult.ok) {
+        jsonResponse(res, authResult.status, {
+          ok: false,
+          error: authResult.error
+        });
+        return;
+      }
+    }
 
     if (req.method === "GET" && pathname === "/events") {
       res.writeHead(200, {
@@ -516,7 +530,7 @@ const server = http.createServer(async (req, res) => {
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
         "X-Accel-Buffering": "no",
-        "Access-Control-Allow-Origin": "*"
+        "Access-Control-Allow-Origin": security.corsOrigin
       });
       res.write("retry: 1000\n\n");
 
@@ -980,6 +994,11 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (segments[0] === "api" && segments[1] === "debug") {
+      if (!security.debugApiEnabled) {
+        jsonResponse(res, 404, { ok: false, error: "Not found" });
+        return;
+      }
+
       if (req.method === "GET" && segments[2] === "history") {
         const limit = parseInteger(url.searchParams.get("limit"), 120);
         const data = history.slice(-limit);
@@ -1191,7 +1210,7 @@ const server = http.createServer(async (req, res) => {
           "Content-Type": "application/x-ndjson",
           "Content-Length": data.length,
           "Content-Disposition": `attachment; filename="${trace.id}.ndjson"`,
-          "Access-Control-Allow-Origin": "*"
+          "Access-Control-Allow-Origin": security.corsOrigin
         });
         res.end(data);
         return;
@@ -1228,7 +1247,10 @@ async function start(): Promise<void> {
   pushSystem("Starting Farfield monitor server", {
     appExecutable: codexExecutable,
     socketPath: ipcSocketPath,
-    agentIds: configuredAgentIds
+    agentIds: configuredAgentIds,
+    authMode: security.authMode,
+    debugApiEnabled: security.debugApiEnabled,
+    cloudflareTeamDomain: security.cloudflareTeamDomain
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -1247,7 +1269,10 @@ async function start(): Promise<void> {
     url: `http://${HOST}:${PORT}`,
     appExecutable: codexExecutable,
     socketPath: ipcSocketPath,
-    agentIds: configuredAgentIds
+    agentIds: configuredAgentIds,
+    authMode: security.authMode,
+    debugApiEnabled: security.debugApiEnabled,
+    cloudflareTeamDomain: security.cloudflareTeamDomain
   });
 
   for (const adapter of registry.listAdapters()) {

@@ -11,6 +11,16 @@ import {
 } from "@farfield/protocol";
 import { z } from "zod";
 
+export class ApiRequestError extends Error {
+  readonly statusCode: number;
+
+  constructor(statusCode: number, message: string) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.statusCode = statusCode;
+  }
+}
+
 const ApiEnvelopeSchema = z
   .object({
     ok: z.boolean(),
@@ -142,7 +152,10 @@ async function request(path: string, init?: RequestInit): Promise<unknown> {
   const envelope = ApiEnvelopeSchema.parse(data);
 
   if (!response.ok || !envelope.ok) {
-    throw new Error(typeof envelope.error === "string" ? envelope.error : "Request failed");
+    throw new ApiRequestError(
+      response.status,
+      typeof envelope.error === "string" ? envelope.error : "Request failed"
+    );
   }
 
   return data;

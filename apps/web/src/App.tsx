@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  ApiRequestError,
   createThread,
   getHealth,
   getHistoryEntry,
@@ -800,15 +801,24 @@ export function App(): React.JSX.Element {
     : !openCodeConnected;
   /* Data loading */
   const loadCoreData = useCallback(async () => {
-    const [nh, nt, nm, nmo, ntr, nhist, nag] = await Promise.all([
+    const [nh, nt, nm, nmo, nag] = await Promise.all([
       getHealth(),
       listThreads({ limit: 80, archived: false, all: true, maxPages: 20 }),
       listCollaborationModes(),
       listModels(),
-      getTraceStatus(),
-      listDebugHistory(120),
       listAgents().catch(() => null)
     ]);
+    let nextTraceStatus: TraceStatus | null = null;
+    let nextHistory: HistoryResponse["history"] = [];
+    try {
+      const [ntr, nhist] = await Promise.all([getTraceStatus(), listDebugHistory(120)]);
+      nextTraceStatus = ntr;
+      nextHistory = nhist.history;
+    } catch (error) {
+      if (!(error instanceof ApiRequestError) || error.statusCode !== 404) {
+        throw error;
+      }
+    }
     let preferredAgentId: AgentId | null = null;
     const nextThreadsSignature = nt.data.map((thread) =>
       [
@@ -856,26 +866,29 @@ export function App(): React.JSX.Element {
         setModels(nmo.data);
       }
       setTraceStatus((prev) => {
+        if (nextTraceStatus === null) {
+          return null;
+        }
         if (
           prev &&
-          prev.active?.id === ntr.active?.id &&
-          prev.active?.eventCount === ntr.active?.eventCount &&
-          prev.recent.length === ntr.recent.length &&
-          prev.recent[0]?.id === ntr.recent[0]?.id &&
-          prev.recent[0]?.eventCount === ntr.recent[0]?.eventCount
+          prev.active?.id === nextTraceStatus.active?.id &&
+          prev.active?.eventCount === nextTraceStatus.active?.eventCount &&
+          prev.recent.length === nextTraceStatus.recent.length &&
+          prev.recent[0]?.id === nextTraceStatus.recent[0]?.id &&
+          prev.recent[0]?.eventCount === nextTraceStatus.recent[0]?.eventCount
         ) {
           return prev;
         }
-        return ntr;
+        return nextTraceStatus;
       });
       setHistory((prev) => {
         if (
-          prev.length === nhist.history.length &&
-          prev[prev.length - 1]?.id === nhist.history[nhist.history.length - 1]?.id
+          prev.length === nextHistory.length &&
+          prev[prev.length - 1]?.id === nextHistory[nextHistory.length - 1]?.id
         ) {
           return prev;
         }
-        return nhist.history;
+        return nextHistory;
       });
       if (nag) {
         setAgentDescriptors((prev) => {
@@ -1074,18 +1087,28 @@ export function App(): React.JSX.Element {
             if (flags.refreshCore) {
               await loadCoreData();
             } else if (flags.refreshHistory && activeTabRef.current === "debug") {
-              const nextHistory = await listDebugHistory(120);
-              startTransition(() => {
-                setHistory((prev) => {
-                  if (
-                    prev.length === nextHistory.history.length &&
-                    prev[prev.length - 1]?.id === nextHistory.history[nextHistory.history.length - 1]?.id
-                  ) {
-                    return prev;
-                  }
-                  return nextHistory.history;
+              try {
+                const nextHistory = await listDebugHistory(120);
+                startTransition(() => {
+                  setHistory((prev) => {
+                    if (
+                      prev.length === nextHistory.history.length &&
+                      prev[prev.length - 1]?.id === nextHistory.history[nextHistory.history.length - 1]?.id
+                    ) {
+                      return prev;
+                    }
+                    return nextHistory.history;
+                  });
                 });
-              });
+              } catch (error) {
+                if (!(error instanceof ApiRequestError) || error.statusCode !== 404) {
+                  throw error;
+                }
+                startTransition(() => {
+                  setHistory((prev) => (prev.length === 0 ? prev : []));
+                  setTraceStatus(null);
+                });
+              }
             }
             if (flags.refreshSelectedThread && selectedThreadIdRef.current) {
               await loadSelectedThread(selectedThreadIdRef.current);
