@@ -185,7 +185,8 @@ const AgentsResponseSchema = z
         enabled: z.boolean(),
         connected: z.boolean(),
         capabilities: AgentCapabilitiesSchema,
-        projectDirectories: z.array(z.string())
+        projectDirectories: z.array(z.string()),
+        projectLabels: z.record(z.string()).default({})
       })
     ),
     defaultAgentId: AgentIdSchema

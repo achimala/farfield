@@ -87,6 +87,7 @@ let agentsFixture: {
     connected: boolean;
     capabilities: CapabilityFixture;
     projectDirectories: string[];
+    projectLabels?: Record<string, string>;
   }>;
   defaultAgentId: "codex" | "opencode";
 };
@@ -466,6 +467,47 @@ describe("App", () => {
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: /selected site thread label/i })).toBeNull();
     });
+  });
+
+  it("shows Codex workspace labels for project groups when present", async () => {
+    agentsFixture = {
+      ok: true,
+      agents: [
+        {
+          id: "codex",
+          label: "Codex",
+          enabled: true,
+          connected: true,
+          capabilities: codexCapabilities,
+          projectDirectories: [],
+          projectLabels: {
+            "/tmp/site": "renamed-site"
+          }
+        }
+      ],
+      defaultAgentId: "codex"
+    };
+
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: "thread-site",
+          preview: "thread in renamed project",
+          createdAt: 1700000000,
+          updatedAt: 1700000001,
+          cwd: "/tmp/site",
+          source: "opencode",
+          agentId: "codex"
+        }
+      ],
+      nextCursor: null,
+      pages: 1,
+      truncated: false
+    };
+
+    render(<App />);
+    expect(await screen.findByRole("button", { name: "renamed-site" })).toBeTruthy();
   });
 
   it("updates the picker when remote model changes with same updatedAt and turns", async () => {

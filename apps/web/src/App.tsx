@@ -586,6 +586,17 @@ export function App(): React.JSX.Element {
   );
   const selectedAgentLabel = selectedAgentDescriptor?.label ?? "Agent";
   const selectedAgentCapabilities = selectedAgentDescriptor?.capabilities ?? null;
+  const projectLabelsByPath = useMemo(() => {
+    const labels = new Map<string, string>();
+    for (const descriptor of agentDescriptors) {
+      for (const [projectPath, label] of Object.entries(descriptor.projectLabels)) {
+        if (!labels.has(projectPath)) {
+          labels.set(projectPath, label);
+        }
+      }
+    }
+    return labels;
+  }, [agentDescriptors]);
   const groupedThreads = useMemo(() => {
     type Group = {
       key: string;
@@ -602,7 +613,9 @@ export function App(): React.JSX.Element {
       const path = typeof thread.path === "string" && thread.path.trim() ? thread.path.trim() : null;
       const projectPath = cwd ?? path;
       const key = projectPath ? `project:${projectPath}` : "project:unknown";
-      const label = projectPath ? basenameFromPath(projectPath) : "Unknown";
+      const label = projectPath
+        ? (projectLabelsByPath.get(projectPath) ?? basenameFromPath(projectPath))
+        : "Unknown";
       const updatedAt = typeof thread.updatedAt === "number" ? thread.updatedAt : 0;
       const threadAgentId = thread.agentId;
 
@@ -639,7 +652,7 @@ export function App(): React.JSX.Element {
         }
         groups.set(key, {
           key,
-          label: basenameFromPath(normalized),
+          label: projectLabelsByPath.get(normalized) ?? basenameFromPath(normalized),
           projectPath: normalized,
           latestUpdatedAt: 0,
           preferredAgentId: descriptor.id,
@@ -649,7 +662,7 @@ export function App(): React.JSX.Element {
     }
 
     return Array.from(groups.values()).sort((left, right) => right.latestUpdatedAt - left.latestUpdatedAt);
-  }, [agentDescriptors, threads]);
+  }, [agentDescriptors, projectLabelsByPath, threads]);
   const conversationState = useMemo(() => {
     const liveConversationState = liveState?.conversationState ?? null;
     const readConversationState = readThreadState?.thread ?? null;
