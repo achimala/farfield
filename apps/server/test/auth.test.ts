@@ -50,6 +50,10 @@ function buildSignedAccessToken(
     privateKey: KeyObject;
     includeExtendedClaims: boolean;
     includeObjectCertFields: boolean;
+    expiresOffsetSeconds?: number;
+    issuer?: string;
+    audience?: string;
+    signingPrivateKey?: KeyObject;
   }
 ): TestJwtMaterial {
   const now = Math.floor(Date.now() / 1000);
@@ -59,10 +63,10 @@ function buildSignedAccessToken(
     typ: "JWT"
   };
   const payload = {
-    aud: ["test-audience"],
-    exp: now + 3600,
+    aud: [options.audience ?? "test-audience"],
+    exp: now + (options.expiresOffsetSeconds ?? 3600),
     iat: now - 60,
-    iss: "https://example.cloudflareaccess.com",
+    iss: options.issuer ?? "https://example.cloudflareaccess.com",
     sub: "user-123",
     email: "user@example.com",
     ...(options.includeExtendedClaims
@@ -83,7 +87,7 @@ function buildSignedAccessToken(
   const signer = createSign("RSA-SHA256");
   signer.update(input);
   signer.end();
-  const signature = signer.sign(options.privateKey).toString("base64url");
+  const signature = signer.sign(options.signingPrivateKey ?? options.privateKey).toString("base64url");
 
   const exportedPublicJwk = options.publicKey.export({ format: "jwk" }) as JsonWebKey;
   const certBody = {
@@ -216,5 +220,117 @@ describe("createSecurityPolicy", () => {
       return;
     }
     expect(result.identity.subject).toBe("user-123");
+  });
+
+  it("rejects expired access assertions", async () => {
+    clearSecurityEnv();
+    configureCloudflareSecurityEnv();
+
+    const { publicKey, privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const authFixture = buildSignedAccessToken({
+      kid: "kid-expired",
+      publicKey,
+      privateKey,
+      includeExtendedClaims: false,
+      includeObjectCertFields: false,
+      expiresOffsetSeconds: -120
+    });
+    stubAccessCertFetch(authFixture.certResponseJson);
+
+    const policy = createSecurityPolicy();
+    const result = await policy.authenticate(buildRequestWithAssertion(authFixture.token));
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      return;
+    }
+    expect(result.status).toBe(401);
+    expect(result.error).toBe("Access token has expired");
+  });
+
+  it("rejects assertions with invalid signatures", async () => {
+    clearSecurityEnv();
+    configureCloudflareSecurityEnv();
+
+    const { publicKey, privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const { privateKey: wrongPrivateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const authFixture = buildSignedAccessToken({
+      kid: "kid-bad-signature",
+      publicKey,
+      privateKey,
+      signingPrivateKey: wrongPrivateKey,
+      includeExtendedClaims: false,
+      includeObjectCertFields: false
+    });
+    stubAccessCertFetch(authFixture.certResponseJson);
+
+    const policy = createSecurityPolicy();
+    const result = await policy.authenticate(buildRequestWithAssertion(authFixture.token));
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      return;
+    }
+    expect(result.status).toBe(401);
+    expect(result.error).toBe("Access token signature is invalid");
+  });
+
+  it("rejects assertions with issuer and audience mismatches", async () => {
+    clearSecurityEnv();
+    configureCloudflareSecurityEnv();
+
+    const { publicKey, privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const issuerMismatchFixture = buildSignedAccessToken({
+      kid: "kid-issuer-mismatch",
+      publicKey,
+      privateKey,
+      issuer: "https://other.cloudflareaccess.com",
+      includeExtendedClaims: false,
+      includeObjectCertFields: false
+    });
+    stubAccessCertFetch(issuerMismatchFixture.certResponseJson);
+
+    const policy = createSecurityPolicy();
+    const issuerMismatchResult = await policy.authenticate(
+      buildRequestWithAssertion(issuerMismatchFixture.token)
+    );
+    expect(issuerMismatchResult.ok).toBe(false);
+    if (issuerMismatchResult.ok) {
+      return;
+    }
+    expect(issuerMismatchResult.status).toBe(401);
+    expect(issuerMismatchResult.error).toBe("Access token issuer mismatch");
+
+    const audienceMismatchFixture = buildSignedAccessToken({
+      kid: "kid-audience-mismatch",
+      publicKey,
+      privateKey,
+      audience: "other-audience",
+      includeExtendedClaims: false,
+      includeObjectCertFields: false
+    });
+    stubAccessCertFetch(audienceMismatchFixture.certResponseJson);
+
+    const audienceMismatchResult = await policy.authenticate(
+      buildRequestWithAssertion(audienceMismatchFixture.token)
+    );
+    expect(audienceMismatchResult.ok).toBe(false);
+    if (audienceMismatchResult.ok) {
+      return;
+    }
+    expect(audienceMismatchResult.status).toBe(401);
+    expect(audienceMismatchResult.error).toBe("Access token audience mismatch");
+  });
+
+  it("rejects malformed non-JWT assertions", async () => {
+    clearSecurityEnv();
+    configureCloudflareSecurityEnv();
+
+    const policy = createSecurityPolicy();
+    const result = await policy.authenticate(buildRequestWithAssertion("not-a-jwt"));
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      return;
+    }
+    expect(result.status).toBe(401);
+    expect(result.error).toBe("Invalid access token format");
   });
 });

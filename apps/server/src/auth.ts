@@ -3,6 +3,8 @@ import type { IncomingMessage } from "node:http";
 import { z } from "zod";
 
 const BooleanStringSchema = z.enum(["0", "1", "false", "true"]);
+const ACCESS_TOKEN_CLOCK_SKEW_SECONDS = 60;
+const ACCESS_CERT_FETCH_TIMEOUT_MS = 5_000;
 
 const RawSecurityEnvSchema = z
   .object({
@@ -114,7 +116,7 @@ function decodeJwtPart<T extends z.ZodTypeAny>(encoded: string, schema: T, label
     throw new Error(`Invalid ${label} encoding`);
   }
 
-  let parsedValue: ReturnType<typeof JSON.parse>;
+  let parsedValue: z.input<T>;
   try {
     parsedValue = JSON.parse(decodedText);
   } catch {
@@ -166,7 +168,7 @@ function assertClaimSet(
   }
 
   const now = Math.floor(Date.now() / 1000);
-  if (payload.exp <= now) {
+  if (payload.exp <= now - ACCESS_TOKEN_CLOCK_SKEW_SECONDS) {
     throw new Error("Access token has expired");
   }
 }
@@ -199,18 +201,41 @@ class AccessCertificateStore {
   }
 
   private async refresh(): Promise<void> {
-    const response = await fetch(this.certsUrl, {
-      method: "GET",
-      headers: {
-        "User-Agent": "farfield-access-auth/1.0"
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, ACCESS_CERT_FETCH_TIMEOUT_MS);
+
+    let response: Response;
+    try {
+      response = await fetch(this.certsUrl, {
+        method: "GET",
+        headers: {
+          "User-Agent": "farfield-access-auth/1.0"
+        },
+        signal: controller.signal
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new Error(`Failed to fetch access certs: timeout after ${ACCESS_CERT_FETCH_TIMEOUT_MS}ms`);
       }
-    });
+      throw new Error(
+        `Failed to fetch access certs: ${error instanceof Error ? error.message : String(error)}`
+      );
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     if (!response.ok) {
       throw new Error(`Failed to fetch access certs: HTTP ${response.status}`);
     }
 
-    const body: ReturnType<typeof JSON.parse> = JSON.parse(await response.text());
+    let body: z.input<typeof AccessCertResponseSchema>;
+    try {
+      body = JSON.parse(await response.text());
+    } catch {
+      throw new Error("Failed to parse access certs JSON");
+    }
     const parsed = AccessCertResponseSchema.parse(body);
 
     this.keyById.clear();
