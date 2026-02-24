@@ -60,12 +60,10 @@ import {
   writeSidebarOrder,
   readCollapseMap,
   writeCollapseMap,
-  readProjectGroupAssignments,
-  writeProjectGroupAssignments,
-  readGroupMeta,
-  writeGroupMeta,
+  readProjectColors,
+  writeProjectColors,
   groupColors,
-  type GroupMetaEntry
+  type GroupColor
 } from "@/lib/sidebar-prefs";
 import { useTheme } from "@/hooks/useTheme";
 import { ConversationItem } from "@/components/ConversationItem";
@@ -152,6 +150,46 @@ const SseHistoryEventSchema = z
   .passthrough();
 
 const SseEventSchema = z.union([SseStateEventSchema, SseHistoryEventSchema]);
+
+/* ── Token usage schemas (two known wire formats) ──────────── */
+
+const TokenUsageSnakeCaseSchema = z.object({
+  total_token_usage: z.object({ total_tokens: z.number() }).passthrough(),
+  last_token_usage: z.object({ total_tokens: z.number() }).passthrough(),
+  model_context_window: z.number().nullable()
+}).passthrough();
+
+const TokenUsageCamelCaseSchema = z.object({
+  total: z.object({ totalTokens: z.number() }).passthrough(),
+  last: z.object({ totalTokens: z.number() }).passthrough(),
+  modelContextWindow: z.number().nullable()
+}).passthrough();
+
+interface NormalizedTokenUsage {
+  contextTokens: number;
+  sessionTotalTokens: number;
+  contextWindow: number | null;
+}
+
+function parseTokenUsageInfo(raw: string | number | boolean | object | null | undefined): NormalizedTokenUsage | null {
+  const snake = TokenUsageSnakeCaseSchema.safeParse(raw);
+  if (snake.success) {
+    return {
+      contextTokens: snake.data.last_token_usage.total_tokens,
+      sessionTotalTokens: snake.data.total_token_usage.total_tokens,
+      contextWindow: snake.data.model_context_window
+    };
+  }
+  const camel = TokenUsageCamelCaseSchema.safeParse(raw);
+  if (camel.success) {
+    return {
+      contextTokens: camel.data.last.totalTokens,
+      sessionTotalTokens: camel.data.total.totalTokens,
+      contextWindow: camel.data.modelContextWindow
+    };
+  }
+  return null;
+}
 
 interface RefreshFlags {
   refreshCore: boolean;
@@ -517,11 +555,8 @@ export function App(): React.JSX.Element {
     () => readCollapseMap()
   );
   const [sidebarOrder, setSidebarOrder] = useState<string[]>(() => readSidebarOrder());
-  const [projectGroupAssignments, setProjectGroupAssignments] = useState<Record<string, string>>(
-    () => readProjectGroupAssignments()
-  );
-  const [groupMeta, setGroupMeta] = useState<Record<string, GroupMetaEntry>>(
-    () => readGroupMeta()
+  const [projectColors, setProjectColors] = useState<Record<string, GroupColor>>(
+    () => readProjectColors()
   );
   const [rateLimits, setRateLimits] = useState<AppServerGetAccountRateLimitsResponse | null>(null);
   const [diffPanelOpen, setDiffPanelOpen] = useState(false);
@@ -578,7 +613,6 @@ export function App(): React.JSX.Element {
       latestUpdatedAt: number;
       preferredAgentId: AgentId | null;
       threads: Thread[];
-      userGroup: string | null;
       userColor: string | null;
     };
     const groups = new Map<string, Group>();
@@ -591,8 +625,7 @@ export function App(): React.JSX.Element {
       const label = projectPath ? basenameFromPath(projectPath) : "Unknown";
       const updatedAt = typeof thread.updatedAt === "number" ? thread.updatedAt : 0;
       const threadAgentId = thread.agentId;
-      const assignedGroup = projectGroupAssignments[key] ?? null;
-      const meta = assignedGroup ? groupMeta[assignedGroup] ?? null : null;
+      const projectColor = projectColors[key] ?? null;
 
       const existing = groups.get(key);
       if (existing) {
@@ -611,8 +644,7 @@ export function App(): React.JSX.Element {
           latestUpdatedAt: updatedAt,
           preferredAgentId: threadAgentId,
           threads: [thread],
-          userGroup: assignedGroup,
-          userColor: meta?.color ?? null
+          userColor: projectColor
         });
       }
     }
@@ -627,8 +659,6 @@ export function App(): React.JSX.Element {
         if (groups.has(key)) {
           continue;
         }
-        const assignedGroup = projectGroupAssignments[key] ?? null;
-        const meta = assignedGroup ? groupMeta[assignedGroup] ?? null : null;
         groups.set(key, {
           key,
           label: basenameFromPath(normalized),
@@ -636,8 +666,7 @@ export function App(): React.JSX.Element {
           latestUpdatedAt: 0,
           preferredAgentId: descriptor.id,
           threads: [],
-          userGroup: assignedGroup,
-          userColor: meta?.color ?? null
+          userColor: projectColors[key] ?? null
         });
       }
     }
@@ -653,7 +682,7 @@ export function App(): React.JSX.Element {
       return b.latestUpdatedAt - a.latestUpdatedAt;
     });
     return allGroups;
-  }, [agentDescriptors, threads, sidebarOrder, projectGroupAssignments, groupMeta]);
+  }, [agentDescriptors, threads, sidebarOrder, projectColors]);
   const conversationState = useMemo(() => {
     const liveConversationState = liveState?.conversationState ?? null;
     const readConversationState = readThreadState?.thread ?? null;
@@ -668,6 +697,12 @@ export function App(): React.JSX.Element {
     if (!conversationState) return [] as PendingRequest[];
     return getPendingUserInputRequests(conversationState);
   }, [conversationState]);
+
+  const sessionTokenUsage = useMemo(
+    () => parseTokenUsageInfo(conversationState?.latestTokenUsageInfo),
+    [conversationState?.latestTokenUsageInfo]
+  );
+
   const liveStateReductionError = useMemo(() => {
     const errorState = liveState?.liveStateError;
     if (!errorState || errorState.kind !== "reductionFailed") {
@@ -1278,12 +1313,8 @@ export function App(): React.JSX.Element {
   }, [sidebarOrder]);
 
   useEffect(() => {
-    writeProjectGroupAssignments(projectGroupAssignments);
-  }, [projectGroupAssignments]);
-
-  useEffect(() => {
-    writeGroupMeta(groupMeta);
-  }, [groupMeta]);
+    writeProjectColors(projectColors);
+  }, [projectColors]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -1735,9 +1766,7 @@ export function App(): React.JSX.Element {
                         <FolderOpen size={13} className="shrink-0" />
                       )}
                       <span className="min-w-0 truncate">
-                        {group.userGroup && groupMeta[group.userGroup]
-                          ? `${groupMeta[group.userGroup]!.name} / ${group.label}`
-                          : group.label}
+                        {group.label}
                       </span>
                     </Button>
                     <DropdownMenu>
@@ -1752,21 +1781,16 @@ export function App(): React.JSX.Element {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" sideOffset={6} className="w-48">
-                        <div className="px-2 py-1.5 text-[11px] text-muted-foreground font-medium">Group color</div>
+                        <div className="px-2 py-1.5 text-[11px] text-muted-foreground font-medium">Project color</div>
                         <div className="flex gap-1 px-2 pb-1.5">
                           {groupColors.map((color) => (
                             <button
                               key={color}
                               type="button"
                               onClick={() => {
-                                const gid = group.userGroup ?? group.key;
-                                setGroupMeta((prev) => ({
+                                setProjectColors((prev) => ({
                                   ...prev,
-                                  [gid]: { name: prev[gid]?.name ?? group.label, color: color as GroupMetaEntry["color"] }
-                                }));
-                                setProjectGroupAssignments((prev) => ({
-                                  ...prev,
-                                  [group.key]: gid
+                                  [group.key]: color as GroupColor
                                 }));
                               }}
                               className="w-5 h-5 rounded-full ring-1 ring-border/40 hover:ring-2 hover:ring-foreground/50 transition-all"
@@ -1777,7 +1801,7 @@ export function App(): React.JSX.Element {
                         {colorAccent && (
                           <DropdownMenuItem
                             onSelect={() => {
-                              setProjectGroupAssignments((prev) => {
+                              setProjectColors((prev) => {
                                 const next = { ...prev };
                                 delete next[group.key];
                                 return next;
@@ -2083,14 +2107,14 @@ export function App(): React.JSX.Element {
               const windows: Array<{ label: string; usedPct: number; resetAt: number | null }> = [];
               if (rl.primary) {
                 windows.push({
-                  label: rl.limitName ?? "Primary",
+                  label: "Session",
                   usedPct: rl.primary.usedPercent,
                   resetAt: rl.primary.resetsAt ?? null
                 });
               }
               if (rl.secondary) {
                 windows.push({
-                  label: "Secondary",
+                  label: "Week",
                   usedPct: rl.secondary.usedPercent,
                   resetAt: rl.secondary.resetsAt ?? null
                 });
@@ -2126,6 +2150,59 @@ export function App(): React.JSX.Element {
                       </Tooltip>
                     );
                   })}
+                </div>
+              );
+            })()}
+            {sessionTokenUsage && (() => {
+              const { contextTokens, sessionTotalTokens, contextWindow } = sessionTokenUsage;
+              const usedPct = contextWindow && contextWindow > 0
+                ? Math.round(contextTokens / contextWindow * 100)
+                : null;
+              const color = usedPct !== null && usedPct > 85
+                ? "text-danger"
+                : usedPct !== null && usedPct > 60
+                  ? "text-amber-500 dark:text-amber-400"
+                  : "text-muted-foreground/60";
+              const contextLabel = contextTokens >= 1000
+                ? `${(contextTokens / 1000).toFixed(0)}k`
+                : String(contextTokens);
+              const windowLabel = contextWindow
+                ? contextWindow >= 1000
+                  ? `${(contextWindow / 1000).toFixed(0)}k`
+                  : String(contextWindow)
+                : null;
+              const sessionTotalLabel = sessionTotalTokens >= 1000
+                ? `${(sessionTotalTokens / 1000).toFixed(0)}k`
+                : String(sessionTotalTokens);
+              return (
+                <div className="hidden sm:flex items-center gap-1.5 mr-1.5">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className={`inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-muted/50 ${color}`}>
+                        <Activity size={9} />
+                        {windowLabel ? `${contextLabel}/${windowLabel}` : contextLabel}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <div className="text-xs space-y-0.5">
+                        <div className="font-medium">Context</div>
+                        <div>{contextLabel} tokens in current context</div>
+                        {windowLabel && (
+                          <div className="text-muted-foreground">
+                            {windowLabel} token context window
+                          </div>
+                        )}
+                        {usedPct !== null && (
+                          <div className="text-muted-foreground">
+                            {usedPct}% of context used
+                          </div>
+                        )}
+                        <div className="text-muted-foreground">
+                          Session total: {sessionTotalLabel} tokens
+                        </div>
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
                 </div>
               );
             })()}

@@ -13,28 +13,19 @@ const GROUP_COLORS = [
 export type GroupColor = (typeof GROUP_COLORS)[number];
 export const groupColors: readonly string[] = GROUP_COLORS;
 
-const ProjectGroupAssignmentSchema = z.record(z.string(), z.string());
+const ProjectColorMapSchema = z.record(z.string(), z.enum(GROUP_COLORS));
 
-const GroupMetaEntrySchema = z.object({
-  name: z.string().min(1),
-  color: z.enum(GROUP_COLORS)
-}).strict();
-
-const GroupMetaMapSchema = z.record(z.string(), GroupMetaEntrySchema);
-
-export type GroupMetaEntry = z.infer<typeof GroupMetaEntrySchema>;
-
-function readStorage<T>(key: string, schema: z.ZodType<T>, fallback: T): T {
+function readStorage<T>(key: string, schema: z.ZodType<T>, defaultValue: T): T {
   try {
     const raw = localStorage.getItem(`${STORAGE_PREFIX}.${key}`);
-    if (!raw) return fallback;
+    if (!raw) return defaultValue;
     return schema.parse(JSON.parse(raw));
   } catch {
-    return fallback;
+    return defaultValue;
   }
 }
 
-function writeStorage(key: string, value: unknown): void {
+function writeStorage<T>(key: string, value: T): void {
   try {
     localStorage.setItem(`${STORAGE_PREFIX}.${key}`, JSON.stringify(value));
   } catch {
@@ -58,18 +49,10 @@ export function writeCollapseMap(map: Record<string, boolean>): void {
   writeStorage("collapsed-groups.v1", map);
 }
 
-export function readProjectGroupAssignments(): Record<string, string> {
-  return readStorage("project-groups.v1", ProjectGroupAssignmentSchema, {});
+export function readProjectColors(): Record<string, GroupColor> {
+  return readStorage("project-colors.v1", ProjectColorMapSchema, {});
 }
 
-export function writeProjectGroupAssignments(map: Record<string, string>): void {
-  writeStorage("project-groups.v1", map);
-}
-
-export function readGroupMeta(): Record<string, GroupMetaEntry> {
-  return readStorage("group-meta.v1", GroupMetaMapSchema, {});
-}
-
-export function writeGroupMeta(map: Record<string, GroupMetaEntry>): void {
-  writeStorage("group-meta.v1", map);
+export function writeProjectColors(map: Record<string, GroupColor>): void {
+  writeStorage("project-colors.v1", map);
 }
