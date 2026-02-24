@@ -13,21 +13,26 @@ import {
   Bug,
   Circle,
   CircleDot,
+  Columns2,
   Folder,
   FolderOpen,
   Github,
+  GripVertical,
   Loader2,
   Menu,
   Moon,
+  Palette,
   PanelLeft,
   Plus,
   RefreshCcw,
   Sun,
-  X
+  X,
+  Zap
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   createThread,
+  getAccountRateLimits,
   getHealth,
   getHistoryEntry,
   getLiveState,
@@ -50,6 +55,18 @@ import {
   submitUserInput,
   type AgentId
 } from "@/lib/api";
+import {
+  readSidebarOrder,
+  writeSidebarOrder,
+  readCollapseMap,
+  writeCollapseMap,
+  readProjectGroupAssignments,
+  writeProjectGroupAssignments,
+  readGroupMeta,
+  writeGroupMeta,
+  groupColors,
+  type GroupMetaEntry
+} from "@/lib/sidebar-prefs";
 import { useTheme } from "@/hooks/useTheme";
 import { ConversationItem } from "@/components/ConversationItem";
 import { ChatComposer } from "@/components/ChatComposer";
@@ -78,6 +95,7 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
+import type { AppServerGetAccountRateLimitsResponse } from "@farfield/protocol";
 import { z } from "zod";
 
 /* ── Types ─────────────────────────────────────────────────── */
@@ -198,7 +216,6 @@ const VISIBLE_CHAT_ITEMS_STEP = 80;
 const APP_DEFAULT_VALUE = "__app_default__";
 const ASSUMED_APP_DEFAULT_MODEL = "gpt-5.3-codex";
 const ASSUMED_APP_DEFAULT_EFFORT = "medium";
-const SIDEBAR_COLLAPSED_GROUPS_STORAGE_KEY = "farfield.sidebar.collapsed-groups.v1";
 const AGENT_FAVICON_BY_ID: Record<AgentId, string> = {
   codex: "https://openai.com/favicon.ico",
   opencode: "https://opencode.ai/favicon.ico"
@@ -387,50 +404,6 @@ function basenameFromPath(value: string): string {
   return parts[parts.length - 1] ?? normalized;
 }
 
-function readSidebarCollapsedGroupsFromStorage(): Record<string, boolean> {
-  if (typeof window === "undefined") {
-    return {};
-  }
-  try {
-    const storage = window.localStorage as Partial<Storage> | undefined;
-    if (!storage || typeof storage.getItem !== "function") {
-      return {};
-    }
-    const raw = storage.getItem(SIDEBAR_COLLAPSED_GROUPS_STORAGE_KEY);
-    if (!raw) {
-      return {};
-    }
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return {};
-    }
-    const collapsed: Record<string, boolean> = {};
-    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
-      if (typeof value === "boolean") {
-        collapsed[key] = value;
-      }
-    }
-    return collapsed;
-  } catch {
-    return {};
-  }
-}
-
-function writeSidebarCollapsedGroupsToStorage(value: Record<string, boolean>): void {
-  if (typeof window === "undefined") {
-    return;
-  }
-  try {
-    const storage = window.localStorage as Partial<Storage> | undefined;
-    if (!storage || typeof storage.setItem !== "function") {
-      return;
-    }
-    storage.setItem(SIDEBAR_COLLAPSED_GROUPS_STORAGE_KEY, JSON.stringify(value));
-  } catch {
-    // Ignore storage errors.
-  }
-}
-
 function parseUiStateFromPath(pathname: string): { threadId: string | null; tab: "chat" | "debug" } {
   const segments = pathname.split("/").filter((segment) => segment.length > 0);
   if (segments.length === 0) {
@@ -541,8 +514,19 @@ export function App(): React.JSX.Element {
   const [hasHydratedModeFromLiveState, setHasHydratedModeFromLiveState] = useState(false);
   const [isModeSyncing, setIsModeSyncing] = useState(false);
   const [sidebarCollapsedGroups, setSidebarCollapsedGroups] = useState<Record<string, boolean>>(
-    () => readSidebarCollapsedGroupsFromStorage()
+    () => readCollapseMap()
   );
+  const [sidebarOrder, setSidebarOrder] = useState<string[]>(() => readSidebarOrder());
+  const [projectGroupAssignments, setProjectGroupAssignments] = useState<Record<string, string>>(
+    () => readProjectGroupAssignments()
+  );
+  const [groupMeta, setGroupMeta] = useState<Record<string, GroupMetaEntry>>(
+    () => readGroupMeta()
+  );
+  const [rateLimits, setRateLimits] = useState<AppServerGetAccountRateLimitsResponse | null>(null);
+  const [diffPanelOpen, setDiffPanelOpen] = useState(false);
+  const [dragOverGroupKey, setDragOverGroupKey] = useState<string | null>(null);
+  const [draggedGroupKey, setDraggedGroupKey] = useState<string | null>(null);
 
   /* Refs */
   const selectedThreadIdRef = useRef<string | null>(null);
@@ -594,6 +578,8 @@ export function App(): React.JSX.Element {
       latestUpdatedAt: number;
       preferredAgentId: AgentId | null;
       threads: Thread[];
+      userGroup: string | null;
+      userColor: string | null;
     };
     const groups = new Map<string, Group>();
 
@@ -605,6 +591,8 @@ export function App(): React.JSX.Element {
       const label = projectPath ? basenameFromPath(projectPath) : "Unknown";
       const updatedAt = typeof thread.updatedAt === "number" ? thread.updatedAt : 0;
       const threadAgentId = thread.agentId;
+      const assignedGroup = projectGroupAssignments[key] ?? null;
+      const meta = assignedGroup ? groupMeta[assignedGroup] ?? null : null;
 
       const existing = groups.get(key);
       if (existing) {
@@ -622,7 +610,9 @@ export function App(): React.JSX.Element {
           projectPath,
           latestUpdatedAt: updatedAt,
           preferredAgentId: threadAgentId,
-          threads: [thread]
+          threads: [thread],
+          userGroup: assignedGroup,
+          userColor: meta?.color ?? null
         });
       }
     }
@@ -637,19 +627,33 @@ export function App(): React.JSX.Element {
         if (groups.has(key)) {
           continue;
         }
+        const assignedGroup = projectGroupAssignments[key] ?? null;
+        const meta = assignedGroup ? groupMeta[assignedGroup] ?? null : null;
         groups.set(key, {
           key,
           label: basenameFromPath(normalized),
           projectPath: normalized,
           latestUpdatedAt: 0,
           preferredAgentId: descriptor.id,
-          threads: []
+          threads: [],
+          userGroup: assignedGroup,
+          userColor: meta?.color ?? null
         });
       }
     }
 
-    return Array.from(groups.values()).sort((left, right) => right.latestUpdatedAt - left.latestUpdatedAt);
-  }, [agentDescriptors, threads]);
+    const allGroups = Array.from(groups.values());
+    const orderIndex = new Map(sidebarOrder.map((k, i) => [k, i]));
+    allGroups.sort((a, b) => {
+      const ai = orderIndex.get(a.key);
+      const bi = orderIndex.get(b.key);
+      if (ai !== undefined && bi !== undefined) return ai - bi;
+      if (ai !== undefined) return -1;
+      if (bi !== undefined) return 1;
+      return b.latestUpdatedAt - a.latestUpdatedAt;
+    });
+    return allGroups;
+  }, [agentDescriptors, threads, sidebarOrder, projectGroupAssignments, groupMeta]);
   const conversationState = useMemo(() => {
     const liveConversationState = liveState?.conversationState ?? null;
     const readConversationState = readThreadState?.thread ?? null;
@@ -800,14 +804,15 @@ export function App(): React.JSX.Element {
     : !openCodeConnected;
   /* Data loading */
   const loadCoreData = useCallback(async () => {
-    const [nh, nt, nm, nmo, ntr, nhist, nag] = await Promise.all([
+    const [nh, nt, nm, nmo, ntr, nhist, nag, nrl] = await Promise.all([
       getHealth(),
       listThreads({ limit: 80, archived: false, all: true, maxPages: 20 }),
       listCollaborationModes(),
       listModels(),
       getTraceStatus(),
       listDebugHistory(120),
-      listAgents().catch(() => null)
+      listAgents().catch(() => null),
+      getAccountRateLimits().catch(() => null)
     ]);
     let preferredAgentId: AgentId | null = null;
     const nextThreadsSignature = nt.data.map((thread) =>
@@ -877,6 +882,9 @@ export function App(): React.JSX.Element {
         }
         return nhist.history;
       });
+      if (nrl) {
+        setRateLimits(nrl);
+      }
       if (nag) {
         setAgentDescriptors((prev) => {
           if (
@@ -1262,8 +1270,29 @@ export function App(): React.JSX.Element {
   }, [selectedThreadId]);
 
   useEffect(() => {
-    writeSidebarCollapsedGroupsToStorage(sidebarCollapsedGroups);
+    writeCollapseMap(sidebarCollapsedGroups);
   }, [sidebarCollapsedGroups]);
+
+  useEffect(() => {
+    writeSidebarOrder(sidebarOrder);
+  }, [sidebarOrder]);
+
+  useEffect(() => {
+    writeProjectGroupAssignments(projectGroupAssignments);
+  }, [projectGroupAssignments]);
+
+  useEffect(() => {
+    writeGroupMeta(groupMeta);
+  }, [groupMeta]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      void getAccountRateLimits()
+        .then((rl) => setRateLimits(rl))
+        .catch(() => {});
+    }, 30_000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     isChatAtBottomRef.current = isChatAtBottom;
@@ -1627,12 +1656,68 @@ export function App(): React.JSX.Element {
           <div className="space-y-2 pr-2">
             {groupedThreads.map((group) => {
               const hasSelectedThread = group.threads.some((thread) => thread.id === selectedThreadId);
-              const isCollapsed = hasSelectedThread ? false : Boolean(sidebarCollapsedGroups[group.key]);
+              const hasExplicitState = group.key in sidebarCollapsedGroups;
+              const isCollapsed = hasSelectedThread
+                ? false
+                : hasExplicitState
+                  ? Boolean(sidebarCollapsedGroups[group.key])
+                  : true;
               const nextAgentId = group.preferredAgentId ?? selectedAgentId;
               const nextAgentLabel = agentsById[nextAgentId]?.label ?? nextAgentId;
+              const colorAccent = group.userColor;
               return (
-                <div key={group.key} className="space-y-1">
-                  <div className="flex items-center gap-1">
+                <div
+                  key={group.key}
+                  className={`space-y-1 ${dragOverGroupKey === group.key ? "ring-1 ring-primary/40 rounded-lg" : ""}`}
+                  draggable
+                  onDragStart={(e) => {
+                    setDraggedGroupKey(group.key);
+                    e.dataTransfer.effectAllowed = "move";
+                    e.dataTransfer.setData("text/plain", group.key);
+                  }}
+                  onDragEnd={() => {
+                    setDraggedGroupKey(null);
+                    setDragOverGroupKey(null);
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    if (draggedGroupKey && draggedGroupKey !== group.key) {
+                      setDragOverGroupKey(group.key);
+                    }
+                  }}
+                  onDragLeave={() => setDragOverGroupKey(null)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setDragOverGroupKey(null);
+                    const sourceKey = draggedGroupKey;
+                    if (!sourceKey || sourceKey === group.key) return;
+                    setSidebarOrder((prev) => {
+                      const keys = prev.length > 0
+                        ? [...prev]
+                        : groupedThreads.map((g) => g.key);
+                      const srcIdx = keys.indexOf(sourceKey);
+                      const tgtIdx = keys.indexOf(group.key);
+                      if (srcIdx === -1) keys.push(sourceKey);
+                      if (tgtIdx === -1) keys.push(group.key);
+                      const si = keys.indexOf(sourceKey);
+                      keys.splice(si, 1);
+                      const ti = keys.indexOf(group.key);
+                      keys.splice(ti, 0, sourceKey);
+                      return keys;
+                    });
+                  }}
+                >
+                  <div className="flex items-center gap-0.5">
+                    <span className="shrink-0 cursor-grab text-muted-foreground/30 hover:text-muted-foreground/60">
+                      <GripVertical size={11} />
+                    </span>
+                    {colorAccent && (
+                      <span
+                        className="shrink-0 w-1.5 h-4 rounded-full"
+                        style={{ backgroundColor: colorAccent }}
+                      />
+                    )}
                     <Button
                       type="button"
                       onClick={() =>
@@ -1642,15 +1727,68 @@ export function App(): React.JSX.Element {
                         }))
                       }
                       variant="ghost"
-                      className="h-6 flex-1 justify-start gap-2 rounded-lg px-2 py-1 text-left text-[13px] tracking-tight font-normal text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                      className="h-6 flex-1 justify-start gap-1.5 rounded-lg px-1.5 py-1 text-left text-[13px] tracking-tight font-normal text-muted-foreground hover:bg-muted/60 hover:text-foreground"
                     >
                       {isCollapsed ? (
                         <Folder size={13} className="shrink-0" />
                       ) : (
                         <FolderOpen size={13} className="shrink-0" />
                       )}
-                      <span className="min-w-0 truncate">{group.label}</span>
+                      <span className="min-w-0 truncate">
+                        {group.userGroup && groupMeta[group.userGroup]
+                          ? `${groupMeta[group.userGroup]!.name} / ${group.label}`
+                          : group.label}
+                      </span>
                     </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 rounded-lg text-muted-foreground/40 hover:text-foreground hover:bg-muted"
+                        >
+                          <Palette size={11} />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" sideOffset={6} className="w-48">
+                        <div className="px-2 py-1.5 text-[11px] text-muted-foreground font-medium">Group color</div>
+                        <div className="flex gap-1 px-2 pb-1.5">
+                          {groupColors.map((color) => (
+                            <button
+                              key={color}
+                              type="button"
+                              onClick={() => {
+                                const gid = group.userGroup ?? group.key;
+                                setGroupMeta((prev) => ({
+                                  ...prev,
+                                  [gid]: { name: prev[gid]?.name ?? group.label, color: color as GroupMetaEntry["color"] }
+                                }));
+                                setProjectGroupAssignments((prev) => ({
+                                  ...prev,
+                                  [group.key]: gid
+                                }));
+                              }}
+                              className="w-5 h-5 rounded-full ring-1 ring-border/40 hover:ring-2 hover:ring-foreground/50 transition-all"
+                              style={{ backgroundColor: color }}
+                            />
+                          ))}
+                        </div>
+                        {colorAccent && (
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              setProjectGroupAssignments((prev) => {
+                                const next = { ...prev };
+                                delete next[group.key];
+                                return next;
+                              });
+                            }}
+                          >
+                            Remove color
+                          </DropdownMenuItem>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                     {availableAgentIds.length <= 1 ? (
                       <IconBtn
                         onClick={() => {
@@ -1712,7 +1850,7 @@ export function App(): React.JSX.Element {
                     )}
                   </div>
                   {!isCollapsed && (
-                    <div className="space-y-1 pl-4 pt-0.5">
+                    <div className="space-y-1 pl-5 pt-0.5">
                       {group.threads.length === 0 && (
                         <div className="px-2.5 py-1 text-[11px] text-muted-foreground/70">
                           No threads yet
@@ -1735,8 +1873,14 @@ export function App(): React.JSX.Element {
                                 ? "bg-muted/90 text-foreground shadow-sm"
                                 : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
                             }`}
-                            >
-                              <span className="min-w-0 flex-1 flex items-center gap-1.5 truncate leading-5">
+                          >
+                            <span className="min-w-0 flex-1 flex items-center gap-1.5 truncate leading-5">
+                              {colorAccent && (
+                                <span
+                                  className="shrink-0 w-1 h-3.5 rounded-full"
+                                  style={{ backgroundColor: colorAccent }}
+                                />
+                              )}
                               {thread.agentId && (
                                 <span className="shrink-0 h-4 w-4 rounded-sm bg-muted/30 ring-1 ring-border/60 flex items-center justify-center overflow-hidden">
                                   <AgentFavicon
@@ -1746,8 +1890,8 @@ export function App(): React.JSX.Element {
                                   />
                                 </span>
                               )}
-                                <span className="truncate">{threadLabel(thread)}</span>
-                              </span>
+                              <span className="truncate">{threadLabel(thread)}</span>
+                            </span>
                             <span className="shrink-0 flex items-center gap-1.5">
                               {threadIsGenerating && (
                                 <Loader2 size={11} className="animate-spin text-muted-foreground/70" />
@@ -1934,6 +2078,66 @@ export function App(): React.JSX.Element {
           </div>
 
           <div className="flex items-center gap-0.5 shrink-0">
+            {rateLimits && (() => {
+              const rl = rateLimits.rateLimits;
+              const windows: Array<{ label: string; usedPct: number; resetAt: number | null }> = [];
+              if (rl.primary) {
+                windows.push({
+                  label: rl.limitName ?? "Primary",
+                  usedPct: rl.primary.usedPercent,
+                  resetAt: rl.primary.resetsAt ?? null
+                });
+              }
+              if (rl.secondary) {
+                windows.push({
+                  label: "Secondary",
+                  usedPct: rl.secondary.usedPercent,
+                  resetAt: rl.secondary.resetsAt ?? null
+                });
+              }
+              if (windows.length === 0) return null;
+              return (
+                <div className="hidden sm:flex items-center gap-1.5 mr-1.5">
+                  {windows.map((w) => {
+                    const color = w.usedPct > 85
+                      ? "text-danger"
+                      : w.usedPct > 60
+                        ? "text-amber-500 dark:text-amber-400"
+                        : "text-muted-foreground/60";
+                    return (
+                      <Tooltip key={w.label}>
+                        <TooltipTrigger asChild>
+                          <span className={`inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-muted/50 ${color}`}>
+                            <Zap size={9} />
+                            {w.usedPct}%
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <div className="text-xs space-y-0.5">
+                            <div className="font-medium">{w.label}</div>
+                            <div>{w.usedPct}% used</div>
+                            {w.resetAt && (
+                              <div className="text-muted-foreground">
+                                Resets {new Date(w.resetAt * 1000).toLocaleTimeString()}
+                              </div>
+                            )}
+                          </div>
+                        </TooltipContent>
+                      </Tooltip>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+            {activeTab === "chat" && selectedThread?.agentId === "codex" && (
+              <IconBtn
+                onClick={() => setDiffPanelOpen((v) => !v)}
+                active={diffPanelOpen}
+                title="Diff panel"
+              >
+                <Columns2 size={14} />
+              </IconBtn>
+            )}
             <IconBtn
               onClick={() => void refreshAll()}
               disabled={isBusy}
@@ -2005,7 +2209,8 @@ export function App(): React.JSX.Element {
 
         {/* ── Chat tab ──────────────────────────────────────── */}
         {activeTab === "chat" && (
-          <div className="relative flex-1 flex flex-col min-h-0">
+          <div className="relative flex-1 flex min-h-0">
+            <div className={`relative flex-1 flex flex-col min-h-0 ${diffPanelOpen && selectedThread?.agentId === "codex" ? "md:w-[60%]" : "w-full"}`}>
             <div
               aria-hidden="true"
               className="pointer-events-none absolute inset-x-0 -top-4 z-10 h-[5.5rem] bg-gradient-to-b from-background from-52% via-background/78 via-82% to-transparent to-100%"
@@ -2246,6 +2451,86 @@ export function App(): React.JSX.Element {
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Diff panel */}
+            {diffPanelOpen && selectedThread?.agentId === "codex" && (
+              <div className="hidden md:flex w-[40%] border-l border-border flex-col min-h-0 overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-2.5 border-b border-border shrink-0">
+                  <span className="text-xs font-medium">Changes</span>
+                  <Button
+                    type="button"
+                    onClick={() => setDiffPanelOpen(false)}
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                  >
+                    <X size={12} />
+                  </Button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-3">
+                  {(() => {
+                    const allChanges: Array<{ path: string; kindType: string; diff: string | undefined }> = [];
+                    for (const turn of turns) {
+                      for (const item of turn.items ?? []) {
+                        if (item.type === "fileChange") {
+                          for (const change of item.changes) {
+                            allChanges.push({
+                              path: change.path,
+                              kindType: change.kind.type,
+                              diff: change.diff
+                            });
+                          }
+                        }
+                      }
+                    }
+                    if (allChanges.length === 0) {
+                      return (
+                        <div className="text-xs text-muted-foreground text-center py-8">
+                          No file changes in this thread
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="space-y-1.5">
+                        {allChanges.map((change, i) => {
+                          const fileName = change.path.split("/").pop() ?? change.path;
+                          const isCreate = change.kindType === "create";
+                          const isDelete = change.kindType === "delete";
+                          return (
+                            <div
+                              key={`${change.path}-${i}`}
+                              className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs hover:bg-muted/60 transition-colors"
+                            >
+                              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                                isCreate ? "bg-success" : isDelete ? "bg-danger" : "bg-blue-400"
+                              }`} />
+                              <span className="font-mono truncate text-foreground/80">{fileName}</span>
+                              {change.diff && (
+                                <span className="ml-auto text-[10px] text-muted-foreground/50">
+                                  {change.diff.split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++")).length}+
+                                  {" "}
+                                  {change.diff.split("\n").filter((l) => l.startsWith("-") && !l.startsWith("---")).length}−
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
+
+            {/* OpenCode diff-not-available */}
+            {diffPanelOpen && selectedThread && selectedThread.agentId !== "codex" && (
+              <div className="hidden md:flex w-[40%] border-l border-border items-center justify-center">
+                <div className="text-xs text-muted-foreground text-center px-6">
+                  Diff panel is not available for this agent yet
+                </div>
+              </div>
+            )}
           </div>
         )}
 

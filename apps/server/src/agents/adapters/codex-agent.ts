@@ -75,7 +75,8 @@ export class CodexAgentAdapter implements AgentAdapter {
     canSetCollaborationMode: true,
     canSubmitUserInput: true,
     canReadLiveState: true,
-    canReadStreamEvents: true
+    canReadStreamEvents: true,
+    canReadRateLimits: true
   };
 
   private readonly appClient: AppServerClient;
@@ -569,6 +570,10 @@ export class CodexAgentAdapter implements AgentAdapter {
       ownerClientId: this.threadOwnerById.get(threadId) ?? null,
       events: (this.streamEventsByThreadId.get(threadId) ?? []).slice(-limit)
     };
+  }
+
+  public async readRateLimits(): Promise<import("@farfield/protocol").AppServerGetAccountRateLimitsResponse> {
+    return this.runAppServerCall(() => this.appClient.readAccountRateLimits());
   }
 
   public async replayRequest(

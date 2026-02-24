@@ -5,6 +5,7 @@ import type {
   AppServerReadThreadResponse,
   AppServerStartThreadResponse,
   CollaborationMode,
+  AppServerGetAccountRateLimitsResponse,
   IpcFrame,
   UserInputResponsePayload
 } from "@farfield/protocol";
@@ -18,6 +19,7 @@ export interface AgentCapabilities {
   canSubmitUserInput: boolean;
   canReadLiveState: boolean;
   canReadStreamEvents: boolean;
+  canReadRateLimits: boolean;
 }
 
 export interface AgentListThreadsInput {
@@ -143,4 +145,5 @@ export interface AgentAdapter {
   readLiveState?(threadId: string): Promise<AgentThreadLiveState>;
   readStreamEvents?(threadId: string, limit: number): Promise<AgentThreadStreamEvents>;
   listProjectDirectories?(): Promise<string[]>;
+  readRateLimits?(): Promise<AppServerGetAccountRateLimitsResponse>;
 }

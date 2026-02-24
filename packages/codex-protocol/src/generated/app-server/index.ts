@@ -8,3 +8,4 @@ export { SendUserMessageParamsSchema } from "./SendUserMessageParamsSchema.js";
 export { SendUserMessageResponseSchema } from "./SendUserMessageResponseSchema.js";
 export { ToolRequestUserInputResponseSchema } from "./ToolRequestUserInputResponseSchema.js";
 export { CollaborationModeListResponseSchema } from "./CollaborationModeListResponseSchema.js";
+export { GetAccountRateLimitsResponseSchema } from "./GetAccountRateLimitsResponseSchema.js";

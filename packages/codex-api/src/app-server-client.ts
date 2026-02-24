@@ -11,7 +11,9 @@ import {
   AppServerSendUserMessageResponseSchema,
   type AppServerStartThreadResponse,
   AppServerStartThreadRequestSchema,
-  AppServerStartThreadResponseSchema
+  AppServerStartThreadResponseSchema,
+  type AppServerGetAccountRateLimitsResponse,
+  AppServerGetAccountRateLimitsResponseSchema
 } from "@farfield/protocol";
 import { ProtocolValidationError } from "@farfield/protocol";
 import { z } from "zod";
@@ -188,5 +190,14 @@ export class AppServerClient {
     });
     const result = await this.transport.request("thread/resume", request);
     return parseWithSchema(AppServerReadThreadResponseSchema, result, "AppServerResumeThreadResponse");
+  }
+
+  public async readAccountRateLimits(): Promise<AppServerGetAccountRateLimitsResponse> {
+    const result = await this.transport.request("account/rateLimits/read", {});
+    return parseWithSchema(
+      AppServerGetAccountRateLimitsResponseSchema,
+      result,
+      "AppServerGetAccountRateLimitsResponse"
+    );
   }
 }

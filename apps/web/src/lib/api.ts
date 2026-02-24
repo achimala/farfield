@@ -5,6 +5,7 @@ import {
   AppServerReadThreadResponseSchema,
   AppServerStartThreadResponseSchema,
   type CollaborationMode,
+  AppServerGetAccountRateLimitsResponseSchema,
   ThreadConversationStateSchema,
   UserInputRequestSchema,
   UserInputResponsePayloadSchema
@@ -171,7 +172,8 @@ const AgentCapabilitiesSchema = z
     canSetCollaborationMode: z.boolean(),
     canSubmitUserInput: z.boolean(),
     canReadLiveState: z.boolean(),
-    canReadStreamEvents: z.boolean()
+    canReadStreamEvents: z.boolean(),
+    canReadRateLimits: z.boolean()
   })
   .strict();
 
@@ -400,6 +402,22 @@ export async function replayHistoryEntry(input: {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input)
+  });
+}
+
+const AccountRateLimitsResponseSchema = z
+  .object({
+    ok: z.literal(true)
+  })
+  .merge(AppServerGetAccountRateLimitsResponseSchema)
+  .passthrough();
+
+export async function getAccountRateLimits(): Promise<z.infer<typeof AppServerGetAccountRateLimitsResponseSchema>> {
+  const data = await request("/api/account/rate-limits");
+  const parsed = AccountRateLimitsResponseSchema.parse(data);
+  return AppServerGetAccountRateLimitsResponseSchema.parse({
+    rateLimits: parsed.rateLimits,
+    rateLimitsByLimitId: parsed.rateLimitsByLimitId
   });
 }
 

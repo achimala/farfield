@@ -3,6 +3,7 @@ import { ProtocolValidationError } from "./errors.js";
 import { CollaborationModeSchema, ThreadConversationStateSchema } from "./thread.js";
 import {
   CollaborationModeListResponseSchema as GeneratedCollaborationModeListResponseSchema,
+  GetAccountRateLimitsResponseSchema as GeneratedGetAccountRateLimitsResponseSchema,
   ModelListResponseSchema as GeneratedModelListResponseSchema,
   SendUserMessageParamsSchema as GeneratedSendUserMessageParamsSchema,
   SendUserMessageResponseSchema as GeneratedSendUserMessageResponseSchema,
@@ -159,4 +160,24 @@ export function parseAppServerStartThreadResponse(
   value: z.input<typeof AppServerStartThreadResponseSchema>
 ): AppServerStartThreadResponse {
   return parseWithSchema(AppServerStartThreadResponseSchema, value, "AppServerStartThreadResponse");
+}
+
+const AppServerGetAccountRateLimitsResponseBaseSchema =
+  GeneratedGetAccountRateLimitsResponseSchema.passthrough();
+
+export const AppServerGetAccountRateLimitsResponseSchema =
+  AppServerGetAccountRateLimitsResponseBaseSchema;
+
+export type AppServerGetAccountRateLimitsResponse = z.infer<
+  typeof AppServerGetAccountRateLimitsResponseSchema
+>;
+
+export function parseAppServerGetAccountRateLimitsResponse(
+  value: z.input<typeof AppServerGetAccountRateLimitsResponseSchema>
+): AppServerGetAccountRateLimitsResponse {
+  return parseWithSchema(
+    AppServerGetAccountRateLimitsResponseSchema,
+    value,
+    "AppServerGetAccountRateLimitsResponse"
+  );
 }

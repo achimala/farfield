@@ -57,7 +57,8 @@ const codexCapabilities = {
   canSetCollaborationMode: true,
   canSubmitUserInput: true,
   canReadLiveState: true,
-  canReadStreamEvents: true
+  canReadStreamEvents: true,
+  canReadRateLimits: true
 };
 
 const opencodeCapabilities = {
@@ -66,7 +67,8 @@ const opencodeCapabilities = {
   canSetCollaborationMode: false,
   canSubmitUserInput: false,
   canReadLiveState: false,
-  canReadStreamEvents: false
+  canReadStreamEvents: false,
+  canReadRateLimits: false
 };
 
 type CapabilityFixture = {
@@ -76,6 +78,7 @@ type CapabilityFixture = {
   canSubmitUserInput: boolean;
   canReadLiveState: boolean;
   canReadStreamEvents: boolean;
+  canReadRateLimits: boolean;
 };
 
 let agentsFixture: {
@@ -380,6 +383,14 @@ vi.stubGlobal(
       return {
         ok: true,
         json: async () => agentsFixture
+      } as Response;
+    }
+
+    if (pathname === "/api/account/rate-limits") {
+      return {
+        ok: false,
+        status: 400,
+        json: async () => ({ ok: false, error: "No agent supports rate limit reading" })
       } as Response;
     }
 

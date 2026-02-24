@@ -32,7 +32,8 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
     canSetCollaborationMode: false,
     canSubmitUserInput: false,
     canReadLiveState: false,
-    canReadStreamEvents: false
+    canReadStreamEvents: false,
+    canReadRateLimits: false
   };
 
   private readonly connection: OpenCodeConnection;
