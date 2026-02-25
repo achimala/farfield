@@ -75,8 +75,8 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
     const directories = await this.listProjectDirectories();
 
     if (directories.length > 0) {
-      await Promise.all(
-        directories.map(async (directory) => {
+      for (const directory of directories) {
+        try {
           const result = await this.service.listSessions({ directory });
           for (const item of result.data) {
             sessions.set(item.id, item);
@@ -84,8 +84,10 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
               this.threadDirectoryById.set(item.id, path.resolve(item.cwd));
             }
           }
-        })
-      );
+        } catch {
+          continue;
+        }
+      }
     } else {
       const result = await this.service.listSessions();
       for (const item of result.data) {
