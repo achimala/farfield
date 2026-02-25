@@ -269,12 +269,34 @@ export async function createThread(input?: {
 export async function listCollaborationModes(): Promise<
   z.infer<typeof AppServerCollaborationModeListResponseSchema>
 > {
-  const data = await request("/api/collaboration-modes");
+  return listCollaborationModesForAgent();
+}
+
+export async function listCollaborationModesForAgent(options?: {
+  agentId?: AgentId;
+}): Promise<z.infer<typeof AppServerCollaborationModeListResponseSchema>> {
+  const params = new URLSearchParams();
+  if (options?.agentId) {
+    params.set("agentId", options.agentId);
+  }
+  const query = params.toString();
+  const data = await request(`/api/collaboration-modes${query ? `?${query}` : ""}`);
   return AppServerCollaborationModeListResponseSchema.parse(stripOk(data));
 }
 
 export async function listModels(): Promise<z.infer<typeof AppServerListModelsResponseSchema>> {
-  const data = await request("/api/models?limit=200");
+  return listModelsForAgent();
+}
+
+export async function listModelsForAgent(options?: {
+  agentId?: AgentId;
+}): Promise<z.infer<typeof AppServerListModelsResponseSchema>> {
+  const params = new URLSearchParams();
+  params.set("limit", "200");
+  if (options?.agentId) {
+    params.set("agentId", options.agentId);
+  }
+  const data = await request(`/api/models?${params.toString()}`);
   return AppServerListModelsResponseSchema.parse(stripOk(data));
 }
 

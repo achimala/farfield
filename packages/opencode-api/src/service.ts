@@ -2,7 +2,8 @@ import type {
   Session,
   Message,
   Part,
-  Project
+  Project,
+  Agent
 } from "@opencode-ai/sdk";
 import type { OpenCodeConnection } from "./client.js";
 import {
@@ -16,11 +17,37 @@ export interface OpenCodeSendMessageInput {
   sessionId: string;
   text: string;
   directory?: string;
+  agent?: string;
+  model?: {
+    providerID: string;
+    modelID: string;
+  };
 }
 
 export interface OpenCodeCreateSessionInput {
   title?: string;
   directory?: string;
+}
+
+export interface OpenCodeProviderModel {
+  id: string;
+  name: string;
+  reasoning: boolean;
+  modalities?: {
+    input: Array<"text" | "audio" | "image" | "video" | "pdf">;
+    output: Array<"text" | "audio" | "image" | "video" | "pdf">;
+  };
+  limit: {
+    context: number;
+    output: number;
+  };
+  status?: "alpha" | "beta" | "deprecated";
+}
+
+export interface OpenCodeProviderSummary {
+  id: string;
+  name: string;
+  models: Record<string, OpenCodeProviderModel>;
 }
 
 export class OpenCodeMonitorService {
@@ -68,6 +95,55 @@ export class OpenCodeMonitorService {
     return projects
       .map((project) => project.worktree)
       .filter((directory) => directory.trim().length > 0);
+  }
+
+  public async listProviders(input?: {
+    directory?: string;
+  }): Promise<{
+    all: OpenCodeProviderSummary[];
+    defaults: Record<string, string>;
+    connected: string[];
+  }> {
+    const client = this.connection.getClient();
+    const directory = input?.directory?.trim();
+    const result = await client.provider.list(
+      directory
+        ? {
+            query: {
+              directory
+            }
+          }
+        : {}
+    );
+
+    const payload = result.data as {
+      all?: OpenCodeProviderSummary[];
+      default?: Record<string, string>;
+      connected?: string[];
+    };
+
+    return {
+      all: payload.all ?? [],
+      defaults: payload.default ?? {},
+      connected: payload.connected ?? []
+    };
+  }
+
+  public async listAgents(input?: {
+    directory?: string;
+  }): Promise<Agent[]> {
+    const client = this.connection.getClient();
+    const directory = input?.directory?.trim();
+    const result = await client.app.agents(
+      directory
+        ? {
+            query: {
+              directory
+            }
+          }
+        : {}
+    );
+    return (result.data ?? []) as Agent[];
   }
 
   public async createSession(input?: OpenCodeCreateSessionInput): Promise<{
@@ -181,6 +257,19 @@ export class OpenCodeMonitorService {
           }
         : {}),
       body: {
+        ...(input.model
+          ? {
+              model: {
+                providerID: input.model.providerID,
+                modelID: input.model.modelID
+              }
+            }
+          : {}),
+        ...(input.agent
+          ? {
+              agent: input.agent
+            }
+          : {}),
         parts: [
           { type: "text", text }
         ]

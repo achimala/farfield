@@ -2,6 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { OpenCodeConnection, OpenCodeMonitorService } from "@farfield/opencode-api";
 import {
+  AppServerCollaborationModeListResponseSchema,
+  AppServerListModelsResponseSchema,
   AppServerThreadListItemSchema,
   parseThreadConversationState
 } from "@farfield/protocol";
@@ -27,9 +29,9 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
   public readonly id = "opencode";
   public readonly label = "OpenCode";
   public readonly capabilities: AgentCapabilities = {
-    canListModels: false,
-    canListCollaborationModes: false,
-    canSetCollaborationMode: false,
+    canListModels: true,
+    canListCollaborationModes: true,
+    canSetCollaborationMode: true,
     canSubmitUserInput: false,
     canReadLiveState: false,
     canReadStreamEvents: false,
@@ -39,6 +41,14 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
   private readonly connection: OpenCodeConnection;
   private readonly service: OpenCodeMonitorService;
   private readonly threadDirectoryById = new Map<string, string>();
+  private readonly threadModeById = new Map<
+    string,
+    {
+      mode: string;
+      model: string | null;
+      reasoningEffort: string | null;
+    }
+  >();
 
   public constructor(options: OpenCodeAgentOptions = {}) {
     this.connection = new OpenCodeConnection({
@@ -154,9 +164,22 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
       ? normalizeDirectoryInput(input.cwd)
       : this.resolveThreadDirectory(input.threadId);
 
+    const selectedMode = this.threadModeById.get(input.threadId);
+    const modelSelection = selectedMode?.model ? parseModelSelection(selectedMode.model) : null;
+
     await this.service.sendMessage({
       sessionId: input.threadId,
       text: input.text,
+      ...(selectedMode
+        ? {
+            agent: selectedMode.mode
+          }
+        : {}),
+      ...(modelSelection
+        ? {
+            model: modelSelection
+          }
+        : {}),
       ...(directory ? { directory } : {})
     });
   }
@@ -172,6 +195,102 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
     return normalizeDirectoryList(await this.service.listProjectDirectories());
   }
 
+  public async listModels(limit: number) {
+    this.ensureConnected();
+
+    const providers = await this.service.listProviders();
+    const models: Array<{
+      id: string;
+      model: string;
+      displayName: string;
+      description: string;
+      hidden: boolean;
+      isDefault: boolean;
+      inputModalities: Array<"text" | "image">;
+      supportedReasoningEfforts: Array<{
+        reasoningEffort: "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+        description: string;
+      }>;
+      defaultReasoningEffort: "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+      supportsPersonality: boolean;
+      upgrade?: string | null;
+    }> = [];
+
+    for (const provider of providers.all) {
+      const defaultModelId = providers.defaults[provider.id] ?? null;
+      for (const model of Object.values(provider.models)) {
+        const id = `${provider.id}/${model.id}`;
+        const supportsReasoning = model.reasoning;
+        const inputModalities = mapInputModalities(model.modalities?.input ?? []);
+        models.push({
+          id,
+          model: id,
+          displayName: `${provider.name} ${model.name}`,
+          description: `${provider.name} model from OpenCode provider registry`,
+          hidden: model.status === "deprecated",
+          isDefault: model.id === defaultModelId,
+          inputModalities,
+          supportedReasoningEfforts: supportsReasoning
+            ? [
+                { reasoningEffort: "minimal", description: "Minimal reasoning" },
+                { reasoningEffort: "low", description: "Low reasoning" },
+                { reasoningEffort: "medium", description: "Medium reasoning" },
+                { reasoningEffort: "high", description: "High reasoning" }
+              ]
+            : [{ reasoningEffort: "none", description: "Reasoning disabled" }],
+          defaultReasoningEffort: supportsReasoning ? "medium" : "none",
+          supportsPersonality: false,
+          upgrade: null
+        });
+      }
+    }
+
+    models.sort((left, right) => left.displayName.localeCompare(right.displayName));
+
+    return AppServerListModelsResponseSchema.parse({
+      data: models.slice(0, Math.max(1, limit)),
+      nextCursor: null
+    });
+  }
+
+  public async listCollaborationModes() {
+    this.ensureConnected();
+
+    const agents = await this.service.listAgents();
+    const data = agents.map((agent) => {
+      return {
+        name: agent.name,
+        mode: agent.name,
+        model: agent.model ? `${agent.model.providerID}/${agent.model.modelID}` : null,
+        reasoning_effort: null,
+        developer_instructions: agent.prompt ?? null
+      };
+    });
+
+    return AppServerCollaborationModeListResponseSchema.parse({ data });
+  }
+
+  public async setCollaborationMode(input: {
+    threadId: string;
+    collaborationMode: {
+      mode: string;
+      settings: {
+        model?: string | null;
+        reasoning_effort?: string | null;
+      };
+    };
+  }): Promise<{ ownerClientId: string }> {
+    this.ensureConnected();
+    this.threadModeById.set(input.threadId, {
+      mode: input.collaborationMode.mode,
+      model: input.collaborationMode.settings.model ?? null,
+      reasoningEffort: input.collaborationMode.settings.reasoning_effort ?? null
+    });
+    return {
+      ownerClientId: "opencode"
+    };
+  }
+
   private ensureConnected(): void {
     if (!this.connection.isConnected()) {
       throw new Error("OpenCode backend is not connected");
@@ -185,6 +304,46 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
     }
     return path.resolve(directory);
   }
+}
+
+function parseModelSelection(model: string): { providerID: string; modelID: string } | null {
+  const trimmed = model.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const separatorIndex = trimmed.indexOf("/");
+  if (separatorIndex <= 0 || separatorIndex >= trimmed.length - 1) {
+    return null;
+  }
+
+  const providerID = trimmed.slice(0, separatorIndex).trim();
+  const modelID = trimmed.slice(separatorIndex + 1).trim();
+  if (!providerID || !modelID) {
+    return null;
+  }
+
+  return {
+    providerID,
+    modelID
+  };
+}
+
+function mapInputModalities(
+  modalities: Array<"text" | "audio" | "image" | "video" | "pdf">
+): Array<"text" | "image"> {
+  const mapped = new Set<"text" | "image">();
+  for (const modality of modalities) {
+    if (modality === "text" || modality === "image") {
+      mapped.add(modality);
+    }
+  }
+
+  if (mapped.size === 0) {
+    mapped.add("text");
+  }
+
+  return Array.from(mapped);
 }
 
 function normalizeDirectoryInput(directory: string): string {

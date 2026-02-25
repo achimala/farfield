@@ -8,7 +8,9 @@ import { AppServerRpcError, type SendRequestOptions } from "@farfield/api";
 import type { IpcFrame, IpcRequestFrame } from "@farfield/protocol";
 import {
   InterruptBodySchema,
+  AgentScopedQuerySchema,
   parseBody,
+  parseQuery,
   ReplayBodySchema,
   SendMessageBodySchema,
   StartThreadBodySchema,
@@ -458,6 +460,24 @@ function resolveCreateThreadAdapter(
   return registry.getAdapter(defaultAgentId);
 }
 
+function resolveCapabilityAdapter(
+  capability: keyof AgentAdapter["capabilities"],
+  requestedAgentId: AgentId | undefined
+): AgentAdapter | null {
+  if (requestedAgentId) {
+    const adapter = registry.getAdapter(requestedAgentId);
+    if (!adapter || !adapter.isEnabled() || !adapter.isConnected()) {
+      return null;
+    }
+    if (!adapter.capabilities[capability]) {
+      return null;
+    }
+    return adapter;
+  }
+
+  return registry.resolveFirstWithCapability(capability);
+}
+
 function resolveAdapterForThread(threadId: string):
   | { ok: true; adapter: AgentAdapter; agentId: AgentId }
   | { ok: false; status: number; error: string } {
@@ -685,7 +705,10 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && pathname === "/api/models") {
-      const adapter = registry.resolveFirstWithCapability("canListModels");
+      const query = parseQuery(AgentScopedQuerySchema, {
+        agentId: url.searchParams.get("agentId") ?? undefined
+      });
+      const adapter = resolveCapabilityAdapter("canListModels", query.agentId);
       if (!adapter || !adapter.listModels) {
         jsonResponse(res, 200, {
           ok: true,
@@ -702,7 +725,10 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && pathname === "/api/collaboration-modes") {
-      const adapter = registry.resolveFirstWithCapability("canListCollaborationModes");
+      const query = parseQuery(AgentScopedQuerySchema, {
+        agentId: url.searchParams.get("agentId") ?? undefined
+      });
+      const adapter = resolveCapabilityAdapter("canListCollaborationModes", query.agentId);
       if (!adapter || !adapter.listCollaborationModes) {
         jsonResponse(res, 200, {
           ok: true,

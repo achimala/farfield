@@ -42,8 +42,8 @@ import {
   getTraceStatus,
   interruptThread,
   listAgents,
-  listCollaborationModes,
-  listModels,
+  listCollaborationModesForAgent,
+  listModelsForAgent,
   listDebugHistory,
   listThreads,
   markTrace,
@@ -99,8 +99,8 @@ import { z } from "zod";
 /* ── Types ─────────────────────────────────────────────────── */
 type Health = Awaited<ReturnType<typeof getHealth>>;
 type ThreadsResponse = Awaited<ReturnType<typeof listThreads>>;
-type ModesResponse = Awaited<ReturnType<typeof listCollaborationModes>>;
-type ModelsResponse = Awaited<ReturnType<typeof listModels>>;
+type ModesResponse = Awaited<ReturnType<typeof listCollaborationModesForAgent>>;
+type ModelsResponse = Awaited<ReturnType<typeof listModelsForAgent>>;
 type LiveStateResponse = Awaited<ReturnType<typeof getLiveState>>;
 type StreamEventsResponse = Awaited<ReturnType<typeof getStreamEvents>>;
 type ReadThreadResponse = Awaited<ReturnType<typeof readThread>>;
@@ -605,6 +605,7 @@ export function App(): React.JSX.Element {
   );
   const selectedAgentLabel = selectedAgentDescriptor?.label ?? "Agent";
   const selectedAgentCapabilities = selectedAgentDescriptor?.capabilities ?? null;
+  const activeAgentForSettings: AgentId = selectedThread?.agentId ?? selectedAgentId;
   const groupedThreads = useMemo(() => {
     type Group = {
       key: string;
@@ -842,8 +843,8 @@ export function App(): React.JSX.Element {
     const [nh, nt, nm, nmo, ntr, nhist, nag, nrl] = await Promise.all([
       getHealth(),
       listThreads({ limit: 80, archived: false, all: true, maxPages: 20 }),
-      listCollaborationModes(),
-      listModels(),
+      listCollaborationModesForAgent({ agentId: activeAgentForSettings }),
+      listModelsForAgent({ agentId: activeAgentForSettings }),
       getTraceStatus(),
       listDebugHistory(120),
       listAgents().catch(() => null),
@@ -969,7 +970,7 @@ export function App(): React.JSX.Element {
         return nonPlanDefault?.mode ?? nm.data[0]?.mode ?? "";
       });
     });
-  }, []);
+  }, [activeAgentForSettings, selectedAgentId]);
 
   const loadSelectedThread = useCallback(async (threadId: string) => {
     const includeTurns = !pendingMaterializationThreadIdsRef.current.has(threadId);

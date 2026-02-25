@@ -66,11 +66,21 @@ export const AppServerModelReasoningEffortSchema =
 
 export const AppServerListModelsResponseSchema = AppServerModelListResponseBaseSchema;
 
-export const AppServerCollaborationModeListItemSchema =
-  AppServerCollaborationModeListResponseBaseSchema.shape.data.element;
+export const AppServerCollaborationModeListItemSchema = z
+  .object({
+    name: z.string(),
+    mode: z.union([z.string(), z.null()]).optional(),
+    model: z.union([z.string(), z.null()]).optional(),
+    reasoning_effort: z.union([z.string(), z.null()]).optional(),
+    developer_instructions: z.union([z.string(), z.null()]).optional()
+  })
+  .passthrough();
 
-export const AppServerCollaborationModeListResponseSchema =
-  AppServerCollaborationModeListResponseBaseSchema;
+export const AppServerCollaborationModeListResponseSchema = z
+  .object({
+    data: z.array(AppServerCollaborationModeListItemSchema)
+  })
+  .passthrough();
 
 export const AppServerStartThreadRequestSchema = AppServerStartThreadRequestBaseSchema;
 
