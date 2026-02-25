@@ -165,6 +165,15 @@ const TokenUsageCamelCaseSchema = z.object({
   modelContextWindow: z.number().nullable()
 }).passthrough();
 
+const StreamTokenUsageUpdatedEventSchema = z.object({
+  type: z.literal("broadcast"),
+  method: z.literal("thread/tokenUsage/updated"),
+  params: z.object({
+    threadId: z.string(),
+    tokenUsage: z.union([TokenUsageSnakeCaseSchema, TokenUsageCamelCaseSchema])
+  }).passthrough()
+}).passthrough();
+
 interface NormalizedTokenUsage {
   contextTokens: number;
   sessionTotalTokens: number;
@@ -188,6 +197,28 @@ function parseTokenUsageInfo(raw: string | number | boolean | object | null | un
       contextWindow: camel.data.modelContextWindow
     };
   }
+  return null;
+}
+
+function getLatestTokenUsageFromStreamEvents(
+  events: StreamEventsResponse["events"],
+  threadId: string | null
+): NormalizedTokenUsage | null {
+  if (!threadId) {
+    return null;
+  }
+
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const parsed = StreamTokenUsageUpdatedEventSchema.safeParse(events[i]);
+    if (!parsed.success) {
+      continue;
+    }
+    if (parsed.data.params.threadId !== threadId) {
+      continue;
+    }
+    return parseTokenUsageInfo(parsed.data.params.tokenUsage);
+  }
+
   return null;
 }
 
@@ -699,10 +730,13 @@ export function App(): React.JSX.Element {
     return getPendingUserInputRequests(conversationState);
   }, [conversationState]);
 
-  const sessionTokenUsage = useMemo(
-    () => parseTokenUsageInfo(conversationState?.latestTokenUsageInfo),
-    [conversationState?.latestTokenUsageInfo]
-  );
+  const sessionTokenUsage = useMemo(() => {
+    const fromConversationState = parseTokenUsageInfo(conversationState?.latestTokenUsageInfo);
+    if (fromConversationState) {
+      return fromConversationState;
+    }
+    return getLatestTokenUsageFromStreamEvents(streamEvents, selectedThreadId);
+  }, [conversationState?.latestTokenUsageInfo, selectedThreadId, streamEvents]);
 
   const liveStateReductionError = useMemo(() => {
     const errorState = liveState?.liveStateError;

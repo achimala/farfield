@@ -154,7 +154,14 @@ export class CodexAgentAdapter implements AgentAdapter {
         threadId
       });
 
-      if (frame.type !== "broadcast" || frame.method !== "thread-stream-state-changed") {
+      if (frame.type !== "broadcast") {
+        return;
+      }
+
+      if (
+        frame.method !== "thread-stream-state-changed" &&
+        frame.method !== "thread/tokenUsage/updated"
+      ) {
         return;
       }
 
@@ -163,7 +170,9 @@ export class CodexAgentAdapter implements AgentAdapter {
         return;
       }
 
-      const conversationId = (params as Record<string, string>)["conversationId"];
+      const conversationId = frame.method === "thread-stream-state-changed"
+        ? (params as Record<string, string>)["conversationId"]
+        : (params as Record<string, string>)["threadId"];
       if (!conversationId || !conversationId.trim()) {
         return;
       }
@@ -813,6 +822,20 @@ function extractThreadId(frame: IpcFrame): string | null {
     const conversationId = (params as Record<string, string>)["conversationId"];
     if (typeof conversationId === "string" && conversationId.trim()) {
       return conversationId.trim();
+    }
+
+    return null;
+  }
+
+  if (frame.type === "broadcast" && frame.method === "thread/tokenUsage/updated") {
+    const params = frame.params;
+    if (!params || typeof params !== "object") {
+      return null;
+    }
+
+    const threadId = (params as Record<string, string>)["threadId"];
+    if (typeof threadId === "string" && threadId.trim()) {
+      return threadId.trim();
     }
 
     return null;
