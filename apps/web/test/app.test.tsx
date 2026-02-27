@@ -233,7 +233,27 @@ type UnifiedThreadFixture = {
     status: string;
     items: [];
   }>;
-  requests: [];
+  requests: Array<{
+    id: string;
+    method: "item/tool/requestUserInput";
+    params: {
+      threadId: string;
+      turnId: string;
+      itemId: string;
+      questions: Array<{
+        id: string;
+        header: string;
+        question: string;
+        isOther?: boolean;
+        isSecret?: boolean;
+        options: Array<{
+          label: string;
+          description: string;
+        }>;
+      }>;
+    };
+    completed?: boolean;
+  }>;
   updatedAt: number;
   latestModel: string;
   latestReasoningEffort: string;
@@ -309,7 +329,10 @@ let liveStateResolver: (
 function buildConversationStateFixture(
   threadId: string,
   modelId: string,
+  options?: { updatedAt?: number; includePendingRequest?: boolean },
 ): UnifiedThreadFixture {
+  const includePendingRequest = options?.includePendingRequest ?? false;
+  const updatedAt = options?.updatedAt ?? 1700000000;
   return {
     id: threadId,
     provider: "codex",
@@ -320,8 +343,31 @@ function buildConversationStateFixture(
         items: [],
       },
     ],
-    requests: [],
-    updatedAt: 1700000000,
+    requests: includePendingRequest
+      ? [
+          {
+            id: "request-1",
+            method: "item/tool/requestUserInput",
+            params: {
+              threadId,
+              turnId: "turn-1",
+              itemId: "item-1",
+              questions: [
+                {
+                  id: "question-1",
+                  header: "Question",
+                  question: "Pick one option",
+                  options: [
+                    { label: "Option A", description: "Use option A" },
+                    { label: "Option B", description: "Use option B" },
+                  ],
+                },
+              ],
+            },
+          },
+        ]
+      : [],
+    updatedAt,
     latestModel: modelId,
     latestReasoningEffort: "medium",
     latestCollaborationMode: {
@@ -782,4 +828,56 @@ describe("App", () => {
     );
     expect(latestObservedModel).toBe("gpt-new-codex");
   }, 15000);
+
+  it("keeps pending user input visible when read state has request and live state does not", async () => {
+    const threadId = "thread-with-request";
+
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: threadId,
+          provider: "codex",
+          preview: "thread preview",
+          createdAt: 1700000000,
+          updatedAt: 1700000000,
+          cwd: "/tmp/project",
+          source: "codex",
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    readThreadResolver = (targetThreadId: string) => ({
+      ok: true,
+      thread: buildConversationStateFixture(targetThreadId, "gpt-old-codex", {
+        updatedAt: 1700000000,
+        includePendingRequest: true,
+      }),
+    });
+
+    liveStateResolver = (targetThreadId: string, _provider: ProviderId) => ({
+      kind: "readLiveState",
+      threadId: targetThreadId,
+      ownerClientId: "client-1",
+      conversationState: buildConversationStateFixture(
+        targetThreadId,
+        "gpt-old-codex",
+        {
+          updatedAt: 1700000500,
+          includePendingRequest: false,
+        },
+      ),
+      liveStateError: null,
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Pick one option")).toBeTruthy();
+    expect(screen.getByText("Option A")).toBeTruthy();
+    expect(screen.getByText("Option B")).toBeTruthy();
+  });
 });

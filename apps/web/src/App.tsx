@@ -406,6 +406,54 @@ function countConversationItems(
   return count;
 }
 
+function mergeUserInputRequests(
+  liveState: NonNullable<ReadThreadResponse["thread"]>,
+  readState: NonNullable<ReadThreadResponse["thread"]>,
+): NonNullable<ReadThreadResponse["thread"]>["requests"] {
+  type Request = NonNullable<ReadThreadResponse["thread"]>["requests"][number];
+  const merged = new Map<string, Request>();
+
+  for (const request of liveState.requests) {
+    const key = `${typeof request.id}:${String(request.id)}:${request.method}`;
+    merged.set(key, request);
+  }
+
+  for (const request of readState.requests) {
+    const key = `${typeof request.id}:${String(request.id)}:${request.method}`;
+    const existing = merged.get(key);
+    if (!existing) {
+      merged.set(key, request);
+      continue;
+    }
+    if (request.completed === true || existing.completed !== true) {
+      merged.set(key, request);
+    }
+  }
+
+  return Array.from(merged.values());
+}
+
+function withMergedRequests(
+  baseState: NonNullable<ReadThreadResponse["thread"]>,
+  liveState: NonNullable<ReadThreadResponse["thread"]>,
+  readState: NonNullable<ReadThreadResponse["thread"]>,
+): NonNullable<ReadThreadResponse["thread"]> {
+  const mergedRequests = mergeUserInputRequests(liveState, readState);
+  if (baseState.requests.length === mergedRequests.length) {
+    const allMatch = baseState.requests.every((request, index) => {
+      const mergedRequest = mergedRequests[index];
+      return mergedRequest !== undefined && mergedRequest === request;
+    });
+    if (allMatch) {
+      return baseState;
+    }
+  }
+  return {
+    ...baseState,
+    requests: mergedRequests,
+  };
+}
+
 function pickPreferredConversationState(
   liveState: NonNullable<ReadThreadResponse["thread"]>,
   readState: NonNullable<ReadThreadResponse["thread"]>,
@@ -414,31 +462,41 @@ function pickPreferredConversationState(
   const readUpdatedAt = getConversationStateUpdatedAt(readState);
 
   if (liveUpdatedAt > readUpdatedAt) {
-    return liveState;
+    return withMergedRequests(liveState, liveState, readState);
   }
   if (readUpdatedAt > liveUpdatedAt) {
-    return readState;
+    return withMergedRequests(readState, liveState, readState);
   }
 
   const liveHasModeSelection = hasExplicitModeSelectionInState(liveState);
   const readHasModeSelection = hasExplicitModeSelectionInState(readState);
   if (liveHasModeSelection !== readHasModeSelection) {
-    return liveHasModeSelection ? liveState : readState;
+    return withMergedRequests(
+      liveHasModeSelection ? liveState : readState,
+      liveState,
+      readState,
+    );
   }
 
   if (liveState.turns.length !== readState.turns.length) {
-    return liveState.turns.length > readState.turns.length
-      ? liveState
-      : readState;
+    return withMergedRequests(
+      liveState.turns.length > readState.turns.length ? liveState : readState,
+      liveState,
+      readState,
+    );
   }
 
   const liveItemCount = countConversationItems(liveState);
   const readItemCount = countConversationItems(readState);
   if (liveItemCount !== readItemCount) {
-    return liveItemCount > readItemCount ? liveState : readState;
+    return withMergedRequests(
+      liveItemCount > readItemCount ? liveState : readState,
+      liveState,
+      readState,
+    );
   }
 
-  return readState;
+  return withMergedRequests(readState, liveState, readState);
 }
 
 function buildModeSignature(
@@ -941,8 +999,17 @@ export function App(): React.JSX.Element {
   }, [pendingRequests, selectedRequestId]);
 
   const activeThreadAgentId: AgentId = useMemo(
-    () => selectedThread?.provider ?? selectedAgentId,
-    [selectedAgentId, selectedThread],
+    () =>
+      selectedThread?.provider ??
+      readThreadState?.thread.provider ??
+      liveState?.conversationState?.provider ??
+      selectedAgentId,
+    [
+      liveState?.conversationState?.provider,
+      readThreadState?.thread.provider,
+      selectedAgentId,
+      selectedThread?.provider,
+    ],
   );
   const activeAgentDescriptor = useMemo(
     () => agentsById[activeThreadAgentId] ?? selectedAgentDescriptor,
