@@ -970,6 +970,19 @@ describe("App", () => {
       },
     };
 
+    collaborationModesFixture = {
+      codex: [
+        {
+          name: "Default",
+          mode: "default",
+          model: null,
+          reasoningEffort: null,
+          developerInstructions: null,
+        },
+      ],
+      opencode: [],
+    };
+
     modelsFixture = {
       codex: [
         {
@@ -977,6 +990,84 @@ describe("App", () => {
           displayName: modelId,
           description: "Default model",
           defaultReasoningEffort: "xhigh",
+          supportedReasoningEfforts: ["minimal", "low", "medium", "high", "xhigh"],
+          hidden: false,
+          isDefault: true,
+        },
+      ],
+      opencode: [],
+    };
+
+    readThreadResolver = (targetThreadId: string) => ({
+      ok: true,
+      thread: buildConversationStateFixture(targetThreadId, modelId, {
+        latestReasoningEffort: null,
+        collaborationModeReasoningEffort: null,
+      }),
+    });
+
+    liveStateResolver = (targetThreadId: string, _provider: ProviderId) => ({
+      kind: "readLiveState",
+      threadId: targetThreadId,
+      ownerClientId: "client-1",
+      conversationState: buildConversationStateFixture(targetThreadId, modelId, {
+        latestReasoningEffort: null,
+        collaborationModeReasoningEffort: null,
+      }),
+      liveStateError: null,
+    });
+
+    render(<App />);
+    expect(await screen.findByText("xhigh")).toBeTruthy();
+  });
+
+  it("prefers selected mode default effort over model default when thread effort is unset", async () => {
+    const threadId = "thread-mode-default-effort";
+    const modelId = "gpt-5.3-codex";
+
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: threadId,
+          provider: "codex",
+          preview: "thread preview",
+          createdAt: 1700000000,
+          updatedAt: 1700000000,
+          cwd: "/tmp/project",
+          source: "codex",
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    collaborationModesFixture = {
+      codex: [
+        {
+          name: "Default",
+          mode: "default",
+          model: null,
+          reasoningEffort: "xhigh",
+          developerInstructions: null,
+        },
+      ],
+      opencode: [],
+    };
+
+    modelsFixture = {
+      codex: [
+        {
+          id: modelId,
+          displayName: modelId,
+          description: "Default model",
+          defaultReasoningEffort: "medium",
           supportedReasoningEfforts: ["minimal", "low", "medium", "high", "xhigh"],
           hidden: false,
           isDefault: true,

@@ -1167,6 +1167,15 @@ export function App(): React.JSX.Element {
     selectedReasoningEffort,
   ]);
   const appDefaultEffortLabel = useMemo(() => {
+    const activeModeKey = selectedModeKey || defaultModeOption?.mode || "";
+    const modeDefaultEffort = normalizeNullableModeValue(
+      modes.find((entry) => entry.mode === activeModeKey)?.reasoningEffort ??
+        null,
+    );
+    if (modeDefaultEffort.length > 0) {
+      return modeDefaultEffort;
+    }
+
     const activeModelId =
       selectedModelId ||
       normalizeNullableModeValue(conversationState?.latestModel) ||
@@ -1180,7 +1189,14 @@ export function App(): React.JSX.Element {
       return modelDefaultEffort;
     }
     return ASSUMED_APP_DEFAULT_EFFORT;
-  }, [conversationState?.latestModel, models, selectedModelId]);
+  }, [
+    conversationState?.latestModel,
+    defaultModeOption?.mode,
+    modes,
+    models,
+    selectedModeKey,
+    selectedModelId,
+  ]);
   const effortOptionsWithoutAppDefault = useMemo(
     () =>
       effortOptions.filter(
