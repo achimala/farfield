@@ -131,6 +131,29 @@ const ITEM_RENDERERS = {
     </div>
   ),
 
+  todoList: ({ item }) => (
+    <div className="my-4 rounded-xl border border-border/60 bg-muted/30 px-4 py-3">
+      <div className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">
+        Checklist
+      </div>
+      {item.explanation && (
+        <div className="mb-2 text-sm text-foreground whitespace-pre-wrap break-words leading-relaxed">
+          {item.explanation}
+        </div>
+      )}
+      <ul className="space-y-1">
+        {item.plan.map((entry, index) => (
+          <li key={`${entry.step}-${String(index)}`} className="text-sm text-foreground/90 flex items-start gap-2">
+            <span className="mt-[2px] text-muted-foreground">
+              {entry.status === "completed" ? "x" : "o"}
+            </span>
+            <span className="whitespace-pre-wrap break-words">{entry.step}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  ),
+
   planImplementation: ({ item }) => (
     <div className="my-4 rounded-xl border border-border/60 bg-muted/30 px-4 py-3">
       <div className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">
@@ -285,6 +308,8 @@ function renderItem(item: UnifiedItem, context: RendererContext): React.JSX.Elem
       return ITEM_RENDERERS.reasoning({ item, ...context });
     case "plan":
       return ITEM_RENDERERS.plan({ item, ...context });
+    case "todoList":
+      return ITEM_RENDERERS.todoList({ item, ...context });
     case "planImplementation":
       return ITEM_RENDERERS.planImplementation({ item, ...context });
     case "userInputResponse":

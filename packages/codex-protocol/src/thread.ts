@@ -132,6 +132,22 @@ export const PlanItemSchema = z
   })
   .passthrough();
 
+export const TodoListPlanStepSchema = z
+  .object({
+    step: z.string(),
+    status: NonEmptyStringSchema
+  })
+  .passthrough();
+
+export const TodoListItemSchema = z
+  .object({
+    id: NonEmptyStringSchema,
+    type: z.literal("todo-list"),
+    explanation: z.string().optional(),
+    plan: z.array(TodoListPlanStepSchema)
+  })
+  .passthrough();
+
 export const PlanImplementationItemSchema = z
   .object({
     id: NonEmptyStringSchema,
@@ -344,6 +360,7 @@ export const TurnItemSchema = z.discriminatedUnion("type", [
   ErrorItemSchema,
   ReasoningItemSchema,
   PlanItemSchema,
+  TodoListItemSchema,
   PlanImplementationItemSchema,
   UserInputResponseItemSchema,
   CommandExecutionItemSchema,
@@ -494,9 +511,10 @@ export const ThreadStreamPatchesChangeSchema: z.ZodObject<
   })
   .passthrough();
 
-export const ThreadStreamChangeSchema: z.ZodUnion<
-  [typeof ThreadStreamSnapshotChangeSchema, typeof ThreadStreamPatchesChangeSchema]
-> = z.union([ThreadStreamSnapshotChangeSchema, ThreadStreamPatchesChangeSchema]);
+export const ThreadStreamChangeSchema = z.discriminatedUnion("type", [
+  ThreadStreamSnapshotChangeSchema,
+  ThreadStreamPatchesChangeSchema
+]);
 
 export const ThreadStreamStateChangedParamsSchema: z.ZodObject<
   {

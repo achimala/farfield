@@ -525,6 +525,7 @@ export class CodexAgentAdapter implements AgentAdapter {
     const validRawEvents: IpcFrame[] = [];
     let invalidEventCount = 0;
     let firstInvalidEventError: string | null = null;
+    let firstInvalidEventMessage: string | null = null;
 
     for (const event of rawEvents) {
       try {
@@ -534,20 +535,13 @@ export class CodexAgentAdapter implements AgentAdapter {
         invalidEventCount += 1;
         if (!firstInvalidEventError) {
           firstInvalidEventError = toErrorMessage(error);
-          logger.warn(
-            {
-              threadId,
-              error: firstInvalidEventError,
-              ...(error instanceof ProtocolValidationError ? { issues: error.issues } : {}),
-              rawPayload: event
-            },
-            "codex-invalid-thread-stream-event-detail"
-          );
+          firstInvalidEventMessage = formatInvalidStreamEventMessage(threadId, event, error);
+          logger.warn(firstInvalidEventMessage);
           writeInvalidStreamEventDetail({
             threadId,
             error: firstInvalidEventError,
             ...(error instanceof ProtocolValidationError ? { issues: error.issues } : {}),
-            rawPayload: event,
+            frame: describeFrame(event),
             loggedAt: new Date().toISOString()
           });
         }
@@ -556,13 +550,7 @@ export class CodexAgentAdapter implements AgentAdapter {
 
     if (invalidEventCount > 0) {
       logger.warn(
-        {
-          threadId,
-          invalidEventCount,
-          eventCount: rawEvents.length,
-          error: firstInvalidEventError
-        },
-        "codex-invalid-thread-stream-events-pruned"
+        `[stream-mismatch-summary] thread=${threadId} pruned=${String(invalidEventCount)} total=${String(rawEvents.length)}${firstInvalidEventMessage ? ` first="${firstInvalidEventMessage}"` : ""}`
       );
       this.streamEventsByThreadId.set(threadId, validRawEvents);
     }
@@ -900,6 +888,40 @@ function toErrorMessage(error: Error | string | unknown): string {
 
 function normalizeStderrLine(line: string): string {
   return line.replace(ANSI_ESCAPE_REGEX, "").trim();
+}
+
+function describeFrame(frame: IpcFrame): string {
+  if (frame.type === "broadcast" || frame.type === "request") {
+    return `${frame.type}:${frame.method}`;
+  }
+  if (frame.type === "response") {
+    return `response:${frame.method ?? "unknown"}`;
+  }
+  return frame.type;
+}
+
+function formatInvalidStreamEventMessage(
+  threadId: string,
+  event: IpcFrame,
+  error: unknown
+): string {
+  const frame = describeFrame(event);
+  if (error instanceof ProtocolValidationError) {
+    return `[stream-mismatch] thread=${threadId} frame=${frame} issues=${formatIssueList(error.issues)}`;
+  }
+  return `[stream-mismatch] thread=${threadId} frame=${frame} error=${toErrorMessage(error)}`;
+}
+
+function formatIssueList(issues: string[]): string {
+  if (issues.length === 0) {
+    return "unknown";
+  }
+  const maxIssues = 4;
+  const visible = issues.slice(0, maxIssues).join(" | ");
+  if (issues.length <= maxIssues) {
+    return visible;
+  }
+  return `${visible} | +${String(issues.length - maxIssues)} more`;
 }
 
 function parseIncomingThreadStreamBroadcast(frame: IpcFrame): ThreadStreamStateChangedBroadcast | null {

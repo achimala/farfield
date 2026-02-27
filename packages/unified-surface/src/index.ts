@@ -204,6 +204,22 @@ const UnifiedPlanItemSchema = z
   })
   .strict();
 
+const UnifiedTodoListItemSchema = z
+  .object({
+    id: NonEmptyStringSchema,
+    type: z.literal("todoList"),
+    explanation: z.string().optional(),
+    plan: z.array(
+      z
+        .object({
+          step: z.string(),
+          status: NonEmptyStringSchema
+        })
+        .strict()
+    )
+  })
+  .strict();
+
 const UnifiedPlanImplementationItemSchema = z
   .object({
     id: NonEmptyStringSchema,
@@ -397,6 +413,7 @@ export const UnifiedItemSchema = z.discriminatedUnion("type", [
   UnifiedErrorItemSchema,
   UnifiedReasoningItemSchema,
   UnifiedPlanItemSchema,
+  UnifiedTodoListItemSchema,
   UnifiedPlanImplementationItemSchema,
   UnifiedUserInputResponseItemSchema,
   UnifiedCommandExecutionItemSchema,
@@ -421,6 +438,7 @@ export const UNIFIED_ITEM_KINDS = [
   "error",
   "reasoning",
   "plan",
+  "todoList",
   "planImplementation",
   "userInputResponse",
   "commandExecution",
@@ -913,6 +931,7 @@ const ITEM_KIND_COVERAGE: Record<UnifiedItemKind, true> = {
   error: true,
   reasoning: true,
   plan: true,
+  todoList: true,
   planImplementation: true,
   userInputResponse: true,
   commandExecution: true,

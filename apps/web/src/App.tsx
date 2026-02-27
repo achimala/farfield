@@ -137,6 +137,67 @@ function threadLabel(thread: Thread): string {
   return text;
 }
 
+function threadRecencyTimestamp(thread: Thread): number {
+  if (typeof thread.updatedAt === "number") {
+    return thread.updatedAt;
+  }
+  if (typeof thread.createdAt === "number") {
+    return thread.createdAt;
+  }
+  return 0;
+}
+
+function compareThreadsByRecency(left: Thread, right: Thread): number {
+  const recencyDelta = threadRecencyTimestamp(right) - threadRecencyTimestamp(left);
+  if (recencyDelta !== 0) {
+    return recencyDelta;
+  }
+
+  const createdDelta = right.createdAt - left.createdAt;
+  if (createdDelta !== 0) {
+    return createdDelta;
+  }
+
+  return right.id.localeCompare(left.id);
+}
+
+function sortThreadsByRecency(threads: Thread[]): Thread[] {
+  return [...threads].sort(compareThreadsByRecency);
+}
+
+function buildThreadSignature(thread: Thread): string {
+  return [
+    thread.id,
+    String(thread.updatedAt ?? 0),
+    String(thread.createdAt ?? 0),
+    thread.title ?? "",
+    thread.preview,
+    thread.provider,
+    thread.cwd ?? "",
+    thread.source ?? ""
+  ].join("|");
+}
+
+function buildThreadsSignature(threads: Thread[]): string[] {
+  return threads.map(buildThreadSignature);
+}
+
+function mergeIncomingThreads(nextThreads: Thread[], previousThreads: Thread[]): Thread[] {
+  const previousById = new Map(previousThreads.map((thread) => [thread.id, thread]));
+  const merged = nextThreads.map((thread) => {
+    const previous = previousById.get(thread.id);
+    if (thread.title !== undefined || previous?.title === undefined) {
+      return thread;
+    }
+    return {
+      ...thread,
+      title: previous.title
+    };
+  });
+
+  return sortThreadsByRecency(merged);
+}
+
 function toErrorMessage(err: unknown): string {
   if (err instanceof Error) {
     return err.message;
@@ -669,7 +730,7 @@ export function App(): React.JSX.Element {
       const projectPath = cwd;
       const key = projectPath ? `project:${projectPath}` : "project:unknown";
       const label = projectPath ? basenameFromPath(projectPath) : "Unknown";
-      const updatedAt = typeof thread.updatedAt === "number" ? thread.updatedAt : 0;
+      const updatedAt = threadRecencyTimestamp(thread);
       const threadAgentId = thread.provider;
 
       const existing = groups.get(key);
@@ -712,6 +773,10 @@ export function App(): React.JSX.Element {
           threads: []
         });
       }
+    }
+
+    for (const group of groups.values()) {
+      group.threads.sort(compareThreadsByRecency);
     }
 
     return Array.from(groups.values()).sort((left, right) => right.latestUpdatedAt - left.latestUpdatedAt);
@@ -884,12 +949,13 @@ export function App(): React.JSX.Element {
       listDebugHistory(120),
       listAgents()
     ]);
+    const incomingThreads = sortThreadsByRecency(nt.data);
 
     const enabledAgents = nag.agents.filter((agent) => agent.enabled).map((agent) => agent.id);
     const nextDefaultAgent = enabledAgents.includes(nag.defaultAgentId)
       ? nag.defaultAgentId
       : (enabledAgents[0] ?? nag.defaultAgentId);
-    const threadForActiveProvider = nt.data.find((thread) => thread.id === selectedThreadIdRef.current) ?? null;
+    const threadForActiveProvider = incomingThreads.find((thread) => thread.id === selectedThreadIdRef.current) ?? null;
     const activeProviderId = threadForActiveProvider?.provider ?? selectedAgentId;
     const activeDescriptor = nag.agents.find((agent) => agent.id === activeProviderId) ?? null;
 
@@ -903,16 +969,6 @@ export function App(): React.JSX.Element {
     ]);
 
     let preferredAgentId: AgentId | null = null;
-    const nextThreadsSignature = nt.data.map((thread) =>
-      [
-        thread.id,
-        String(thread.updatedAt ?? 0),
-        thread.title ?? "",
-        thread.preview,
-        thread.provider,
-        thread.cwd ?? ""
-      ].join("|")
-    );
     const nextModesSignature = nm.data.map((mode) =>
       [mode.mode, mode.name, mode.reasoningEffort ?? ""].join("|")
     );
@@ -936,10 +992,15 @@ export function App(): React.JSX.Element {
         }
         return nh;
       });
-      if (!signaturesMatch(threadsSignatureRef.current, nextThreadsSignature)) {
+      setThreads((previousThreads) => {
+        const nextThreads = mergeIncomingThreads(incomingThreads, previousThreads);
+        const nextThreadsSignature = buildThreadsSignature(nextThreads);
+        if (signaturesMatch(threadsSignatureRef.current, nextThreadsSignature)) {
+          return previousThreads;
+        }
         threadsSignatureRef.current = nextThreadsSignature;
-        setThreads(nt.data);
-      }
+        return nextThreads;
+      });
       if (!signaturesMatch(modesSignatureRef.current, nextModesSignature)) {
         modesSignatureRef.current = nextModesSignature;
         setModes(nm.data);
@@ -1009,12 +1070,12 @@ export function App(): React.JSX.Element {
       setSelectedThreadId((cur) => {
         if (cur) return cur;
         if (preferredAgentId) {
-          const preferredThread = nt.data.find((thread) => thread.provider === preferredAgentId);
+          const preferredThread = incomingThreads.find((thread) => thread.provider === preferredAgentId);
           if (preferredThread) {
             return preferredThread.id;
           }
         }
-        return nt.data[0]?.id ?? null;
+        return incomingThreads[0]?.id ?? null;
       });
       setSelectedModeKey((cur) => {
         if (cur) return cur;
@@ -1061,6 +1122,36 @@ export function App(): React.JSX.Element {
           return prev;
         }
         return live;
+      });
+      setThreads((previousThreads) => {
+        const nextThreads = previousThreads.map((threadSummary) => {
+          if (threadSummary.id !== read.thread.id) {
+            return threadSummary;
+          }
+
+          const nextUpdatedAt = typeof read.thread.updatedAt === "number"
+            ? Math.max(threadSummary.updatedAt, read.thread.updatedAt)
+            : threadSummary.updatedAt;
+          const nextTitle = read.thread.title !== undefined ? read.thread.title : threadSummary.title;
+
+          if (nextUpdatedAt === threadSummary.updatedAt && nextTitle === threadSummary.title) {
+            return threadSummary;
+          }
+
+          return {
+            ...threadSummary,
+            updatedAt: nextUpdatedAt,
+            ...(nextTitle !== undefined ? { title: nextTitle } : {})
+          };
+        });
+
+        const sortedThreads = sortThreadsByRecency(nextThreads);
+        const nextSignature = buildThreadsSignature(sortedThreads);
+        if (signaturesMatch(threadsSignatureRef.current, nextSignature)) {
+          return previousThreads;
+        }
+        threadsSignatureRef.current = nextSignature;
+        return sortedThreads;
       });
       setReadThreadState((prev) => {
         if (buildReadThreadSyncSignature(prev) === buildReadThreadSyncSignature(read)) {
@@ -2223,6 +2314,7 @@ export function App(): React.JSX.Element {
           </div>
         </header>
 
+        <div className={activeTab === "chat" ? "flex-1 min-h-0 flex flex-col pt-14" : "flex-1 min-h-0 flex flex-col"}>
         {/* Error bar */}
         <AnimatePresence>
           {error && (
@@ -2655,6 +2747,7 @@ export function App(): React.JSX.Element {
             </div>
           </div>
         )}
+        </div>
       </div>
       </div>
     </TooltipProvider>

@@ -582,6 +582,17 @@ function mapTurnItem(item: ThreadConversationState["turns"][number]["items"][num
         text: item.text
       };
 
+    case "todo-list":
+      return {
+        id: item.id,
+        type: "todoList",
+        ...(item.explanation !== undefined ? { explanation: item.explanation } : {}),
+        plan: item.plan.map((entry) => ({
+          step: entry.step,
+          status: entry.status
+        }))
+      };
+
     case "planImplementation":
       return {
         id: item.id,
