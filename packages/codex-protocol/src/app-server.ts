@@ -29,9 +29,11 @@ const AppServerSendUserMessageRequestBaseSchema = GeneratedSendUserMessageParams
 const AppServerSendUserMessageResponseBaseSchema = GeneratedSendUserMessageResponseSchema;
 
 const ThreadTitleSchema = z.union([z.string(), z.null()]).optional();
+const ThreadIsGeneratingSchema = z.boolean().optional();
 
 const AppServerGeneratedThreadListItemSchema = AppServerThreadListResponseBaseSchema.shape.data.element.extend({
-  title: ThreadTitleSchema
+  title: ThreadTitleSchema,
+  isGenerating: ThreadIsGeneratingSchema
 });
 
 const OpenCodeThreadListItemSchema = z
@@ -39,6 +41,7 @@ const OpenCodeThreadListItemSchema = z
     id: z.string().min(1),
     preview: z.string(),
     title: ThreadTitleSchema,
+    isGenerating: ThreadIsGeneratingSchema,
     createdAt: z.number().int().nonnegative(),
     updatedAt: z.number().int().nonnegative(),
     cwd: z.string().optional(),

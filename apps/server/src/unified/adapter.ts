@@ -435,6 +435,7 @@ function mapThreadSummary(provider: UnifiedProviderId, thread: {
   id: string;
   preview: string;
   title?: string | null | undefined;
+  isGenerating?: boolean | undefined;
   createdAt: number;
   updatedAt: number;
   cwd?: string | undefined;
@@ -445,6 +446,7 @@ function mapThreadSummary(provider: UnifiedProviderId, thread: {
     provider,
     preview: thread.preview,
     ...(thread.title !== undefined ? { title: thread.title } : {}),
+    ...(thread.isGenerating !== undefined ? { isGenerating: thread.isGenerating } : {}),
     createdAt: thread.createdAt,
     updatedAt: thread.updatedAt,
     ...(thread.cwd ? { cwd: thread.cwd } : {}),

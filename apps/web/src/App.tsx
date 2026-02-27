@@ -171,6 +171,7 @@ function buildThreadSignature(thread: Thread): string {
     String(thread.updatedAt ?? 0),
     String(thread.createdAt ?? 0),
     thread.title ?? "",
+    thread.isGenerating ? "1" : "0",
     thread.preview,
     thread.provider,
     thread.cwd ?? "",
@@ -186,12 +187,16 @@ function mergeIncomingThreads(nextThreads: Thread[], previousThreads: Thread[]):
   const previousById = new Map(previousThreads.map((thread) => [thread.id, thread]));
   const merged = nextThreads.map((thread) => {
     const previous = previousById.get(thread.id);
-    if (thread.title !== undefined || previous?.title === undefined) {
+    if ((thread.title !== undefined || previous?.title === undefined)
+      && (thread.isGenerating !== undefined || previous?.isGenerating === undefined)) {
       return thread;
     }
     return {
       ...thread,
-      title: previous.title
+      ...(thread.title !== undefined || previous?.title === undefined ? {} : { title: previous.title }),
+      ...(thread.isGenerating !== undefined || previous?.isGenerating === undefined
+        ? {}
+        : { isGenerating: previous.isGenerating })
     };
   });
 
@@ -244,6 +249,14 @@ function canUseFeature(
 
 function isTurnInProgressStatus(status: string | undefined): boolean {
   return status === "in-progress" || status === "inProgress";
+}
+
+function isThreadGeneratingState(state: NonNullable<ReadThreadResponse["thread"]> | null | undefined): boolean {
+  if (!state) {
+    return false;
+  }
+  const lastTurn = state.turns[state.turns.length - 1];
+  return isTurnInProgressStatus(lastTurn?.status);
 }
 
 function signaturesMatch(prev: string[], next: string[]): boolean {
@@ -942,12 +955,13 @@ export function App(): React.JSX.Element {
     : !openCodeConnected;
   /* Data loading */
   const loadCoreData = useCallback(async () => {
-    const [nh, nt, ntr, nhist, nag] = await Promise.all([
+    const shouldLoadDebugData = activeTabRef.current === "debug";
+    const [nh, nt, nag, ntr, nhist] = await Promise.all([
       getHealth(),
       listThreads({ limit: 80, archived: false, all: false, maxPages: 1 }),
-      getTraceStatus(),
-      listDebugHistory(120),
-      listAgents()
+      listAgents(),
+      shouldLoadDebugData ? getTraceStatus() : Promise.resolve<TraceStatus | null>(null),
+      shouldLoadDebugData ? listDebugHistory(120) : Promise.resolve<HistoryResponse | null>(null)
     ]);
     const incomingThreads = sortThreadsByRecency(nt.data);
 
@@ -1009,28 +1023,32 @@ export function App(): React.JSX.Element {
         modelsSignatureRef.current = nextModelsSignature;
         setModels(nmo.data);
       }
-      setTraceStatus((prev) => {
-        if (
-          prev &&
-          prev.active?.id === ntr.active?.id &&
-          prev.active?.eventCount === ntr.active?.eventCount &&
-          prev.recent.length === ntr.recent.length &&
-          prev.recent[0]?.id === ntr.recent[0]?.id &&
-          prev.recent[0]?.eventCount === ntr.recent[0]?.eventCount
-        ) {
-          return prev;
-        }
-        return ntr;
-      });
-      setHistory((prev) => {
-        if (
-          prev.length === nhist.history.length &&
-          prev[prev.length - 1]?.id === nhist.history[nhist.history.length - 1]?.id
-        ) {
-          return prev;
-        }
-        return nhist.history;
-      });
+      if (ntr) {
+        setTraceStatus((prev) => {
+          if (
+            prev &&
+            prev.active?.id === ntr.active?.id &&
+            prev.active?.eventCount === ntr.active?.eventCount &&
+            prev.recent.length === ntr.recent.length &&
+            prev.recent[0]?.id === ntr.recent[0]?.id &&
+            prev.recent[0]?.eventCount === ntr.recent[0]?.eventCount
+          ) {
+            return prev;
+          }
+          return ntr;
+        });
+      }
+      if (nhist) {
+        setHistory((prev) => {
+          if (
+            prev.length === nhist.history.length &&
+            prev[prev.length - 1]?.id === nhist.history[nhist.history.length - 1]?.id
+          ) {
+            return prev;
+          }
+          return nhist.history;
+        });
+      }
       if (nag) {
         setAgentDescriptors((prev) => {
           if (
@@ -1124,6 +1142,9 @@ export function App(): React.JSX.Element {
         return live;
       });
       setThreads((previousThreads) => {
+        const nextIsGenerating = live.conversationState
+          ? isThreadGeneratingState(live.conversationState)
+          : isThreadGeneratingState(read.thread);
         const nextThreads = previousThreads.map((threadSummary) => {
           if (threadSummary.id !== read.thread.id) {
             return threadSummary;
@@ -1133,14 +1154,20 @@ export function App(): React.JSX.Element {
             ? Math.max(threadSummary.updatedAt, read.thread.updatedAt)
             : threadSummary.updatedAt;
           const nextTitle = read.thread.title !== undefined ? read.thread.title : threadSummary.title;
+          const hadGenerating = threadSummary.isGenerating ?? false;
 
-          if (nextUpdatedAt === threadSummary.updatedAt && nextTitle === threadSummary.title) {
+          if (
+            nextUpdatedAt === threadSummary.updatedAt
+            && nextTitle === threadSummary.title
+            && hadGenerating === nextIsGenerating
+          ) {
             return threadSummary;
           }
 
           return {
             ...threadSummary,
             updatedAt: nextUpdatedAt,
+            isGenerating: nextIsGenerating,
             ...(nextTitle !== undefined ? { title: nextTitle } : {})
           };
         });
@@ -2082,7 +2109,7 @@ export function App(): React.JSX.Element {
                       )}
                       {group.threads.map((thread) => {
                         const isSelected = thread.id === selectedThreadId;
-                        const threadIsGenerating = isSelected && isGenerating;
+                        const threadIsGenerating = Boolean(thread.isGenerating) || (isSelected && isGenerating);
                         return (
                           <Button
                             key={thread.id}

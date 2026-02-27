@@ -314,13 +314,22 @@ export class CodexAgentAdapter implements AgentAdapter {
 
     const data = result.data.map((thread) => {
       const title = this.resolveThreadTitle(thread.id, thread.title);
+      const snapshot = this.streamSnapshotByThreadId.get(thread.id);
+      const isGenerating = snapshot ? isThreadStateGenerating(snapshot) : undefined;
       if (title === undefined) {
-        return thread;
+        if (isGenerating === undefined) {
+          return thread;
+        }
+        return {
+          ...thread,
+          isGenerating
+        };
       }
 
       return {
         ...thread,
-        title
+        title,
+        ...(isGenerating !== undefined ? { isGenerating } : {})
       };
     });
 
@@ -922,6 +931,30 @@ function formatIssueList(issues: string[]): string {
     return visible;
   }
   return `${visible} | +${String(issues.length - maxIssues)} more`;
+}
+
+function isThreadStateGenerating(state: ThreadConversationState): boolean {
+  for (let index = state.turns.length - 1; index >= 0; index -= 1) {
+    const turn = state.turns[index];
+    if (!turn) {
+      continue;
+    }
+
+    const status = turn.status.trim().toLowerCase();
+    const isTerminal = status === "completed"
+      || status === "failed"
+      || status === "error"
+      || status === "cancelled"
+      || status === "canceled"
+      || status === "interrupted"
+      || status === "aborted";
+    if (isTerminal) {
+      continue;
+    }
+    return true;
+  }
+
+  return false;
 }
 
 function parseIncomingThreadStreamBroadcast(frame: IpcFrame): ThreadStreamStateChangedBroadcast | null {

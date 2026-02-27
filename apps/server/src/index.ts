@@ -516,6 +516,7 @@ const server = http.createServer(async (req, res) => {
         provider: UnifiedProviderId;
         preview: string;
         title?: string | null | undefined;
+        isGenerating?: boolean | undefined;
         createdAt: number;
         updatedAt: number;
         cwd?: string | undefined;
@@ -526,38 +527,40 @@ const server = http.createServer(async (req, res) => {
         opencode: null
       };
 
-      for (const provider of listUnifiedProviders()) {
-        const adapter = resolveUnifiedAdapter(provider);
-        if (!adapter) {
-          continue;
-        }
-
-        try {
-          const result = await adapter.execute({
-            kind: "listThreads",
-            provider,
-            limit,
-            archived,
-            all,
-            maxPages,
-            cursor
-          });
-
-          cursors[provider] = result.nextCursor ?? null;
-          for (const thread of result.data) {
-            threadIndex.register(thread.id, thread.provider);
-            data.push(thread);
+      await Promise.all(
+        listUnifiedProviders().map(async (provider) => {
+          const adapter = resolveUnifiedAdapter(provider);
+          if (!adapter) {
+            return;
           }
-        } catch (error) {
-          logger.warn(
-            {
+
+          try {
+            const result = await adapter.execute({
+              kind: "listThreads",
               provider,
-              error: toErrorMessage(error)
-            },
-            "unified-list-threads-failed"
-          );
-        }
-      }
+              limit,
+              archived,
+              all,
+              maxPages,
+              cursor
+            });
+
+            cursors[provider] = result.nextCursor ?? null;
+            for (const thread of result.data) {
+              threadIndex.register(thread.id, thread.provider);
+              data.push(thread);
+            }
+          } catch (error) {
+            logger.warn(
+              {
+                provider,
+                error: toErrorMessage(error)
+              },
+              "unified-list-threads-failed"
+            );
+          }
+        })
+      );
 
       jsonResponse(res, 200, {
         ok: true,

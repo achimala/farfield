@@ -153,6 +153,7 @@ type ThreadSummary = {
   provider: ProviderId;
   preview: string;
   title?: string | null;
+  isGenerating?: boolean;
   createdAt: number;
   updatedAt: number;
   cwd?: string;
@@ -535,6 +536,52 @@ describe("App", () => {
     expect(await screen.findByText("Pretty Thread Name")).toBeTruthy();
   });
 
+  it("orders threads by recency and shows spinner for non-selected running thread", async () => {
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: "thread-old",
+          provider: "codex",
+          preview: "older thread",
+          createdAt: 1700000000,
+          updatedAt: 1700000001,
+          isGenerating: true,
+          cwd: "/tmp/project",
+          source: "codex"
+        },
+        {
+          id: "thread-new",
+          provider: "codex",
+          preview: "newer thread",
+          createdAt: 1700000000,
+          updatedAt: 1700000010,
+          cwd: "/tmp/project",
+          source: "codex"
+        }
+      ],
+      cursors: {
+        codex: null,
+        opencode: null
+      }
+    };
+
+    render(<App />);
+
+    const newer = await screen.findByText("newer thread");
+    const older = await screen.findByText("older thread");
+    const newerButton = newer.closest("button");
+    const olderButton = older.closest("button");
+
+    expect(newerButton).toBeTruthy();
+    expect(olderButton).toBeTruthy();
+    if (!newerButton || !olderButton) {
+      throw new Error("Missing thread buttons in sidebar");
+    }
+    expect(newerButton.compareDocumentPosition(olderButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(olderButton.querySelector("svg.animate-spin")).toBeTruthy();
+  });
+
   it("updates the picker when remote model changes with same updatedAt and turns", async () => {
     const threadId = "thread-1";
     let modelId = "gpt-old-codex";
@@ -624,7 +671,7 @@ describe("App", () => {
 
     await waitFor(() => {
       expect(liveStateCallCount + readThreadCallCount).toBeGreaterThan(initialObservationCount);
-    });
+    }, { timeout: 3000 });
     expect(latestObservedModel).toBe("gpt-new-codex");
   }, 15000);
 });
