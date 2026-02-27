@@ -617,18 +617,45 @@ const server = http.createServer(async (req, res) => {
       segments[3]
     ) {
       const threadId = decodeURIComponent(segments[3]);
-      const providerFromQuery = parseUnifiedProviderId(
-        url.searchParams.get("provider"),
-      );
+      const rawProvider = url.searchParams.get("provider");
+      const providerFromQuery = parseUnifiedProviderId(rawProvider);
+      if (rawProvider !== null && providerFromQuery === null) {
+        jsonResponse(res, 400, {
+          ok: false,
+          error: {
+            code: "invalidProvider",
+            message: `Provider ${rawProvider} is not supported`,
+            details: {
+              provider: rawProvider,
+            },
+          },
+        });
+        return;
+      }
       const includeTurns = parseBoolean(
         url.searchParams.get("includeTurns"),
         true,
       );
-      const provider =
-        providerFromQuery ??
-        parseUnifiedProviderId(threadIndex.resolve(threadId));
+      const knownProviders = threadIndex.providers(threadId);
+      const resolvedProvider = threadIndex.resolve(threadId);
+      const provider = providerFromQuery ?? resolvedProvider;
 
       if (!provider) {
+        if (knownProviders.length > 1) {
+          jsonResponse(res, 409, {
+            ok: false,
+            error: {
+              code: "threadProviderAmbiguous",
+              message: `Thread ${threadId} exists in multiple providers; provider query is required`,
+              details: {
+                threadId,
+                providers: knownProviders,
+              },
+            },
+          });
+          return;
+        }
+
         jsonResponse(res, 404, {
           ok: false,
           error: {
