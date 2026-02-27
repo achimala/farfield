@@ -4,7 +4,6 @@ import fs from "node:fs";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { AppServerRpcError } from "@farfield/api";
 import type { IpcFrame } from "@farfield/protocol";
 import {
   UnifiedCommandSchema,
@@ -673,16 +672,10 @@ const server = http.createServer(async (req, res) => {
         });
       } catch (error) {
         const message = toErrorMessage(error);
-        const statusCode =
-          error instanceof AppServerRpcError && error.code === -32600 ? 404 : 500;
-        const code =
-          error instanceof AppServerRpcError && error.code === -32600
-            ? "threadNotFound"
-            : "threadReadFailed";
-        jsonResponse(res, statusCode, {
+        jsonResponse(res, 500, {
           ok: false,
           error: {
-            code,
+            code: "threadReadFailed",
             message,
             details: {
               provider,
