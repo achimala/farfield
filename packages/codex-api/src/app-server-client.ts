@@ -41,6 +41,11 @@ export interface ListThreadsOptions {
   cursor?: string;
 }
 
+export interface ListLoadedThreadsOptions {
+  limit?: number;
+  cursor?: string;
+}
+
 export interface ListThreadsAllOptions {
   limit: number;
   archived: boolean;
@@ -86,6 +91,15 @@ const AppServerTurnSteerRequestSchema = z
   })
   .passthrough();
 
+const AppServerLoadedThreadListResponseSchema = z
+  .object({
+    data: z.array(z.string().min(1)),
+    nextCursor: z.union([z.string(), z.null()]).optional()
+  })
+  .passthrough();
+
+type AppServerLoadedThreadListResponse = z.infer<typeof AppServerLoadedThreadListResponseSchema>;
+
 export class AppServerClient {
   private readonly transport: AppServerTransport;
 
@@ -110,6 +124,21 @@ export class AppServerClient {
     });
 
     return parseWithSchema(AppServerListThreadsResponseSchema, result, "AppServerListThreadsResponse");
+  }
+
+  public async listLoadedThreads(
+    options: ListLoadedThreadsOptions = {}
+  ): Promise<AppServerLoadedThreadListResponse> {
+    const result = await this.transport.request("thread/loaded/list", {
+      limit: options.limit ?? null,
+      cursor: options.cursor ?? null
+    });
+
+    return parseWithSchema(
+      AppServerLoadedThreadListResponseSchema,
+      result,
+      "AppServerLoadedThreadListResponse"
+    );
   }
 
   public async listThreadsAll(options: ListThreadsAllOptions): Promise<AppServerListThreadsResponse> {

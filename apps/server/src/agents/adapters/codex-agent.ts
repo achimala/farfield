@@ -239,30 +239,6 @@ export class CodexAgentAdapter implements AgentAdapter {
     return this.threadOwnerById.size;
   }
 
-  public isThreadNotLoadedError(error: Error): boolean {
-    if (!(error instanceof AppServerRpcError)) {
-      return false;
-    }
-
-    if (error.code !== -32600) {
-      return false;
-    }
-
-    return error.message.includes("thread not loaded");
-  }
-
-  public isConversationNotFoundError(error: unknown): boolean {
-    if (!(error instanceof AppServerRpcError)) {
-      return false;
-    }
-
-    if (error.code !== -32600) {
-      return false;
-    }
-
-    return error.message.includes("conversation not found");
-  }
-
   public isEnabled(): boolean {
     return true;
   }
@@ -403,6 +379,9 @@ export class CodexAgentAdapter implements AgentAdapter {
     input: AgentReadThreadInput,
   ): Promise<AgentReadThreadResult> {
     this.ensureCodexAvailable();
+    if (input.includeTurns) {
+      await this.ensureThreadLoaded(input.threadId);
+    }
     const result = await this.runAppServerCall(() =>
       this.appClient.readThread(input.threadId, input.includeTurns),
     );
@@ -450,22 +429,7 @@ export class CodexAgentAdapter implements AgentAdapter {
         attachments: [],
       });
     };
-
-    try {
-      await this.runAppServerCall(sendTurn);
-      return;
-    } catch (error) {
-      if (!this.isConversationNotFoundError(error)) {
-        throw error;
-      }
-    }
-
-    await this.runAppServerCall(() =>
-      this.appClient.resumeThread(input.threadId, {
-        persistExtendedHistory: true,
-      }),
-    );
-    await this.runAppServerCall(sendTurn);
+    await this.runThreadOperationWithResumeRetry(input.threadId, sendTurn);
   }
 
   public async interrupt(input: AgentInterruptInput): Promise<void> {
@@ -478,22 +442,7 @@ export class CodexAgentAdapter implements AgentAdapter {
       }
       await this.appClient.interruptTurn(input.threadId, activeTurnId);
     };
-
-    try {
-      await this.runAppServerCall(interruptTurn);
-      return;
-    } catch (error) {
-      if (!this.isConversationNotFoundError(error)) {
-        throw error;
-      }
-    }
-
-    await this.runAppServerCall(() =>
-      this.appClient.resumeThread(input.threadId, {
-        persistExtendedHistory: true,
-      }),
-    );
-    await this.runAppServerCall(interruptTurn);
+    await this.runThreadOperationWithResumeRetry(input.threadId, interruptTurn);
   }
 
   public async listModels(limit: number) {
@@ -603,6 +552,15 @@ export class CodexAgentAdapter implements AgentAdapter {
       }
     }
 
+    const invalidEventsLiveStateError =
+      invalidEventCount > 0
+        ? buildLiveStateReductionError(
+            `Dropped ${String(invalidEventCount)} invalid stream event(s) while reconstructing live state`,
+            null,
+            null,
+          )
+        : null;
+
     if (invalidEventCount > 0) {
       logger.warn(
         `[stream-mismatch-summary] thread=${threadId} pruned=${String(invalidEventCount)} total=${String(rawEvents.length)}${firstInvalidEventMessage ? ` first="${firstInvalidEventMessage}"` : ""}`,
@@ -614,7 +572,7 @@ export class CodexAgentAdapter implements AgentAdapter {
       return {
         ownerClientId,
         conversationState: snapshotState,
-        liveStateError: null,
+        liveStateError: invalidEventsLiveStateError,
       };
     }
 
@@ -642,7 +600,7 @@ export class CodexAgentAdapter implements AgentAdapter {
       return {
         ownerClientId: state?.ownerClientId ?? ownerClientId ?? null,
         conversationState: state?.conversationState ?? snapshotState,
-        liveStateError: null,
+        liveStateError: invalidEventsLiveStateError,
       };
     } catch (error) {
       if (canUseSyntheticSnapshot) {
@@ -653,23 +611,31 @@ export class CodexAgentAdapter implements AgentAdapter {
           return {
             ownerClientId: state?.ownerClientId ?? ownerClientId ?? null,
             conversationState: state?.conversationState ?? snapshotState,
-            liveStateError: null,
+            liveStateError: invalidEventsLiveStateError,
           };
         } catch (secondaryError) {
-          this.logReductionFailure(threadId, reductionEvents.length, secondaryError);
+          const liveStateError = this.logReductionFailure(
+            threadId,
+            reductionEvents.length,
+            secondaryError,
+          );
           return {
             ownerClientId,
             conversationState: snapshotState,
-            liveStateError: null,
+            liveStateError,
           };
         }
       }
 
-      this.logReductionFailure(threadId, reductionEvents.length, error);
+      const liveStateError = this.logReductionFailure(
+        threadId,
+        reductionEvents.length,
+        error,
+      );
       return {
         ownerClientId,
         conversationState: snapshotState,
-        liveStateError: null,
+        liveStateError,
       };
     }
   }
@@ -678,7 +644,7 @@ export class CodexAgentAdapter implements AgentAdapter {
     threadId: string,
     eventCount: number,
     error: unknown,
-  ): void {
+  ): NonNullable<AgentThreadLiveState["liveStateError"]> {
       const details =
         error instanceof ThreadStreamReductionError
           ? {
@@ -692,19 +658,23 @@ export class CodexAgentAdapter implements AgentAdapter {
         ? `${details.threadId}:${String(details.eventIndex)}:${String(details.patchIndex)}:${toErrorMessage(error)}`
         : toErrorMessage(error);
       const previous = this.reductionErrorSignatureByThreadId.get(threadId);
-      if (previous === signature) {
-        return;
+      if (previous !== signature) {
+        this.reductionErrorSignatureByThreadId.set(threadId, signature);
+        logger.warn(
+          {
+            threadId,
+            eventCount,
+            error: toErrorMessage(error),
+            details,
+          },
+          "codex-thread-stream-reduction-skipped",
+        );
       }
-      this.reductionErrorSignatureByThreadId.set(threadId, signature);
 
-      logger.warn(
-        {
-          threadId,
-          eventCount,
-          error: toErrorMessage(error),
-          details,
-        },
-        "codex-thread-stream-reduction-skipped",
+      return buildLiveStateReductionError(
+        toErrorMessage(error),
+        details?.eventIndex ?? null,
+        details?.patchIndex ?? null,
       );
   }
 
@@ -922,7 +892,9 @@ export class CodexAgentAdapter implements AgentAdapter {
   }
 
   private async getActiveTurnId(threadId: string): Promise<string | null> {
-    const readResult = await this.appClient.readThread(threadId, true);
+    const readResult = await this.runAppServerCall(() =>
+      this.appClient.readThread(threadId, true),
+    );
     const turns = readResult.thread.turns;
 
     for (let index = turns.length - 1; index >= 0; index -= 1) {
@@ -952,6 +924,63 @@ export class CodexAgentAdapter implements AgentAdapter {
     }
 
     return null;
+  }
+
+  private async resumeThread(threadId: string): Promise<void> {
+    await this.runAppServerCall(() =>
+      this.appClient.resumeThread(threadId, {
+        persistExtendedHistory: true,
+      }),
+    );
+  }
+
+  private async isThreadLoaded(threadId: string): Promise<boolean> {
+    let cursor: string | null = null;
+
+    while (true) {
+      const response = await this.runAppServerCall(() =>
+        this.appClient.listLoadedThreads({
+          limit: 200,
+          ...(cursor ? { cursor } : {}),
+        }),
+      );
+      if (response.data.some((loadedThreadId) => loadedThreadId === threadId)) {
+        return true;
+      }
+
+      const nextCursor = response.nextCursor ?? null;
+      if (!nextCursor) {
+        return false;
+      }
+      cursor = nextCursor;
+    }
+  }
+
+  private async ensureThreadLoaded(threadId: string): Promise<void> {
+    if (await this.isThreadLoaded(threadId)) {
+      return;
+    }
+
+    await this.resumeThread(threadId);
+  }
+
+  private async runThreadOperationWithResumeRetry<T>(
+    threadId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    await this.ensureThreadLoaded(threadId);
+
+    try {
+      return await this.runAppServerCall(operation);
+    } catch (error) {
+      const typedError = error instanceof Error ? error : null;
+      if (!isInvalidRequestAppServerRpcError(typedError)) {
+        throw error;
+      }
+    }
+
+    await this.resumeThread(threadId);
+    return this.runAppServerCall(operation);
   }
 
   private resolveThreadTitle(
@@ -1006,6 +1035,30 @@ function toErrorMessage(error: Error | string | unknown): string {
     return error;
   }
   return String(error);
+}
+
+function buildLiveStateReductionError(
+  message: string,
+  eventIndex: number | null,
+  patchIndex: number | null,
+): NonNullable<AgentThreadLiveState["liveStateError"]> {
+  return {
+    kind: "reductionFailed",
+    message,
+    eventIndex,
+    patchIndex,
+  };
+}
+
+const INVALID_REQUEST_ERROR_CODE = -32600;
+
+export function isInvalidRequestAppServerRpcError(
+  error: Error | null,
+): boolean {
+  if (!(error instanceof AppServerRpcError)) {
+    return false;
+  }
+  return error.code === INVALID_REQUEST_ERROR_CODE;
 }
 
 function normalizeStderrLine(line: string): string {

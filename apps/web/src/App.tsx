@@ -46,6 +46,7 @@ import {
   startTrace,
   stopTrace,
   submitUserInput,
+  ApiRequestError,
   type AgentId,
 } from "@/lib/api";
 import {
@@ -96,6 +97,7 @@ type HistoryDetail = Awaited<ReturnType<typeof getHistoryEntry>>;
 type PendingRequest = ReturnType<typeof getPendingUserInputRequests>[number];
 type PendingRequestId = PendingRequest["id"];
 type Thread = ThreadsResponse["data"][number];
+type ThreadListProviderErrors = ThreadsResponse["errors"];
 type AgentDescriptor = AgentsResponse["agents"][number];
 type ConversationTurn = NonNullable<
   ReadThreadResponse["thread"]
@@ -243,18 +245,35 @@ function toErrorMessage(err: unknown): string {
   return String(err);
 }
 
-function isThreadNotFoundErrorMessage(message: string): boolean {
-  const normalized = message.trim().toLowerCase();
-  return (
-    normalized.includes("thread not found") ||
-    normalized.includes("thread is not registered") ||
-    normalized.includes("thread not loaded") ||
-    normalized.includes("conversation not found")
-  );
+function isThreadNotFoundError(error: Error | null): boolean {
+  return error instanceof ApiRequestError && error.code === "threadNotFound";
 }
 
-function isThreadNotFoundError(error: unknown): boolean {
-  return isThreadNotFoundErrorMessage(toErrorMessage(error));
+function buildThreadListErrorMessage(
+  errors: ThreadListProviderErrors,
+): string | null {
+  const messages: string[] = [];
+
+  if (errors.codex) {
+    messages.push(`Codex: ${errors.codex.message}`);
+  }
+
+  if (errors.opencode) {
+    messages.push(`OpenCode: ${errors.opencode.message}`);
+  }
+
+  if (messages.length === 0) {
+    return null;
+  }
+
+  return `Thread list sync failed for provider(s): ${messages.join(" | ")}`;
+}
+
+function hasSameThreadListErrors(
+  left: ThreadListProviderErrors,
+  right: ThreadListProviderErrors,
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function shouldRenderConversationItem(item: ConversationTurnItem): boolean {
@@ -832,6 +851,11 @@ export function App(): React.JSX.Element {
   const [error, setError] = useState("");
   const [health, setHealth] = useState<Health | null>(null);
   const [threads, setThreads] = useState<ThreadsResponse["data"]>([]);
+  const [threadListErrors, setThreadListErrors] =
+    useState<ThreadListProviderErrors>({
+      codex: null,
+      opencode: null,
+    });
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(
     initialUiState.threadId,
   );
@@ -929,6 +953,10 @@ export function App(): React.JSX.Element {
   const selectedAgentDescriptor = useMemo(
     () => agentsById[selectedAgentId] ?? null,
     [agentsById, selectedAgentId],
+  );
+  const threadListErrorMessage = useMemo(
+    () => buildThreadListErrorMessage(threadListErrors),
+    [threadListErrors],
   );
   const selectedAgentLabel = selectedAgentDescriptor?.label ?? "Agent";
   const groupedThreads = useMemo(() => {
@@ -1293,6 +1321,9 @@ export function App(): React.JSX.Element {
         }
         return nh;
       });
+      setThreadListErrors((prev) =>
+        hasSameThreadListErrors(prev, nt.errors) ? prev : nt.errors,
+      );
       setThreads((previousThreads) => {
         const nextThreads = mergeIncomingThreads(
           incomingThreads,
@@ -1428,7 +1459,8 @@ export function App(): React.JSX.Element {
           threadAgentId = provider;
           break;
         } catch (error) {
-          if (!isThreadNotFoundError(error)) {
+          const typedError = error instanceof Error ? error : null;
+          if (!isThreadNotFoundError(typedError)) {
             throw error;
           }
           notFoundError = error;
@@ -2932,6 +2964,20 @@ export function App(): React.JSX.Element {
                     >
                       <X size={13} />
                     </Button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+            <AnimatePresence>
+              {threadListErrorMessage && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden shrink-0"
+                >
+                  <div className="px-4 py-2 bg-amber-500/10 border-b border-amber-500/30 text-sm text-amber-200">
+                    {threadListErrorMessage}
                   </div>
                 </motion.div>
               )}

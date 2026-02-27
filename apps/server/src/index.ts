@@ -542,11 +542,26 @@ const server = http.createServer(async (req, res) => {
         codex: null,
         opencode: null,
       };
+      const errors: Record<
+        UnifiedProviderId,
+        {
+          code: string;
+          message: string;
+          details?: Record<string, string>;
+        } | null
+      > = {
+        codex: null,
+        opencode: null,
+      };
 
       await Promise.all(
         listUnifiedProviders().map(async (provider) => {
           const adapter = resolveUnifiedAdapter(provider);
           if (!adapter) {
+            errors[provider] = {
+              code: "providerDisabled",
+              message: `Provider ${provider} is not available`,
+            };
             return;
           }
 
@@ -567,10 +582,18 @@ const server = http.createServer(async (req, res) => {
               data.push(thread);
             }
           } catch (error) {
+            const message = toErrorMessage(error);
+            errors[provider] = {
+              code: "listThreadsFailed",
+              message,
+              details: {
+                provider,
+              },
+            };
             logger.warn(
               {
                 provider,
-                error: toErrorMessage(error),
+                error: message,
               },
               "unified-list-threads-failed",
             );
@@ -582,6 +605,7 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         data,
         cursors,
+        errors,
       });
       return;
     }
@@ -604,7 +628,13 @@ const server = http.createServer(async (req, res) => {
       if (!provider) {
         jsonResponse(res, 404, {
           ok: false,
-          error: `Thread ${threadId} is not registered`,
+          error: {
+            code: "threadNotFound",
+            message: `Thread ${threadId} is not registered`,
+            details: {
+              threadId,
+            },
+          },
         });
         return;
       }
@@ -613,7 +643,13 @@ const server = http.createServer(async (req, res) => {
       if (!adapter) {
         jsonResponse(res, 503, {
           ok: false,
-          error: `Provider ${provider} is not available`,
+          error: {
+            code: "providerDisabled",
+            message: `Provider ${provider} is not available`,
+            details: {
+              provider,
+            },
+          },
         });
         return;
       }
@@ -633,9 +669,22 @@ const server = http.createServer(async (req, res) => {
         });
       } catch (error) {
         const message = toErrorMessage(error);
-        jsonResponse(res, 500, {
+        const statusCode =
+          error instanceof AppServerRpcError && error.code === -32600 ? 404 : 500;
+        const code =
+          error instanceof AppServerRpcError && error.code === -32600
+            ? "threadNotFound"
+            : "threadReadFailed";
+        jsonResponse(res, statusCode, {
           ok: false,
-          error: message,
+          error: {
+            code,
+            message,
+            details: {
+              provider,
+              threadId,
+            },
+          },
         });
       }
       return;

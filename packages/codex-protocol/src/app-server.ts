@@ -105,6 +105,13 @@ export const AppServerSendUserMessageRequestSchema = AppServerSendUserMessageReq
 
 export const AppServerSendUserMessageResponseSchema = AppServerSendUserMessageResponseBaseSchema;
 
+export const AppServerLoadedThreadListResponseSchema = z
+  .object({
+    data: z.array(z.string().min(1)),
+    nextCursor: z.union([z.string(), z.null()]).optional()
+  })
+  .passthrough();
+
 export const AppServerSetModeRequestSchema = z
   .object({
     conversationId: z.string().min(1),
@@ -119,6 +126,7 @@ export type AppServerCollaborationModeListResponse = z.infer<
   typeof AppServerCollaborationModeListResponseSchema
 >;
 export type AppServerStartThreadResponse = z.infer<typeof AppServerStartThreadResponseSchema>;
+export type AppServerLoadedThreadListResponse = z.infer<typeof AppServerLoadedThreadListResponseSchema>;
 export {
   APP_SERVER_CLIENT_REQUEST_METHODS,
   APP_SERVER_CLIENT_NOTIFICATION_METHODS,

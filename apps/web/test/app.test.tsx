@@ -281,6 +281,10 @@ let threadsFixture: {
     codex: string | null;
     opencode: string | null;
   };
+  errors: {
+    codex: null;
+    opencode: null;
+  };
 };
 
 let collaborationModesFixture: Record<
@@ -440,6 +444,10 @@ beforeEach(() => {
       codex: null,
       opencode: null,
     },
+    errors: {
+      codex: null,
+      opencode: null,
+    },
   };
 
   collaborationModesFixture = {
@@ -537,7 +545,10 @@ vi.stubGlobal(
       }
       return jsonErrorResponse({
         ok: false,
-        error: `Thread ${threadId} is not registered`,
+        error: {
+          code: "threadNotFound",
+          message: `Thread ${threadId} is not registered`,
+        },
       });
     }
 
@@ -676,6 +687,10 @@ describe("App", () => {
         codex: null,
         opencode: null,
       },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
     };
 
     render(<App />);
@@ -698,6 +713,10 @@ describe("App", () => {
         },
       ],
       cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
         codex: null,
         opencode: null,
       },
@@ -733,6 +752,10 @@ describe("App", () => {
         },
       ],
       cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
         codex: null,
         opencode: null,
       },
@@ -781,6 +804,10 @@ describe("App", () => {
         },
       ],
       cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
         codex: null,
         opencode: null,
       },
@@ -872,6 +899,10 @@ describe("App", () => {
         },
       ],
       cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
         codex: null,
         opencode: null,
       },

@@ -45,6 +45,14 @@ const ApiFailureEnvelopeSchema = z
   })
   .passthrough();
 
+const UnifiedProviderErrorSchema = z
+  .object({
+    code: z.string(),
+    message: z.string(),
+    details: JsonValueSchema.optional(),
+  })
+  .strict();
+
 const HealthResponseSchema = z
   .object({
     ok: z.literal(true),
@@ -70,6 +78,12 @@ const UnifiedThreadsEnvelopeSchema = z
       .object({
         codex: z.string().nullable(),
         opencode: z.string().nullable(),
+      })
+      .strict(),
+    errors: z
+      .object({
+        codex: z.union([UnifiedProviderErrorSchema, z.null()]),
+        opencode: z.union([UnifiedProviderErrorSchema, z.null()]),
       })
       .strict(),
   })
@@ -233,6 +247,12 @@ const ThreadListResponseSchema = z
         opencode: z.string().nullable(),
       })
       .strict(),
+    errors: z
+      .object({
+        codex: z.union([UnifiedProviderErrorSchema, z.null()]),
+        opencode: z.union([UnifiedProviderErrorSchema, z.null()]),
+      })
+      .strict(),
   })
   .strict();
 
@@ -280,6 +300,23 @@ class UnifiedCommandApiError extends Error {
   }
 }
 
+export class ApiRequestError extends Error {
+  public readonly code: string | null;
+  public readonly details?: JsonValue;
+
+  public constructor(
+    message: string,
+    options?: { code?: string | null; details?: JsonValue },
+  ) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.code = options?.code ?? null;
+    if (options?.details !== undefined) {
+      this.details = options.details;
+    }
+  }
+}
+
 async function requestJson(
   path: string,
   init?: RequestInit,
@@ -292,19 +329,41 @@ async function requestJson(
   };
 }
 
-function readErrorMessage(payload: JsonValue): string {
+function readApiFailure(payload: JsonValue): {
+  code: string | null;
+  message: string;
+  details: JsonValue | undefined;
+} {
   const parsed = ApiFailureEnvelopeSchema.safeParse(payload);
   if (!parsed.success) {
-    return "Request failed";
+    return {
+      code: null,
+      message: "Request failed",
+      details: undefined,
+    };
   }
 
   if (typeof parsed.data.error === "string") {
-    return parsed.data.error;
+    return {
+      code: null,
+      message: parsed.data.error,
+      details: undefined,
+    };
   }
 
-  return (
-    parsed.data.error.message ?? parsed.data.error.code ?? "Request failed"
-  );
+  return {
+    code: parsed.data.error.code ?? null,
+    message: parsed.data.error.message ?? parsed.data.error.code ?? "Request failed",
+    details: parsed.data.error.details,
+  };
+}
+
+function buildApiRequestError(payload: JsonValue): ApiRequestError {
+  const failure = readApiFailure(payload);
+  return new ApiRequestError(failure.message, {
+    code: failure.code,
+    ...(failure.details !== undefined ? { details: failure.details } : {}),
+  });
 }
 
 async function requestEnvelope<T>(
@@ -315,12 +374,12 @@ async function requestEnvelope<T>(
   const { response, payload } = await requestJson(path, init);
 
   if (!response.ok) {
-    throw new Error(readErrorMessage(payload));
+    throw buildApiRequestError(payload);
   }
 
   const envelope = ApiEnvelopeSchema.parse(payload);
   if (!envelope.ok) {
-    throw new Error(readErrorMessage(payload));
+    throw buildApiRequestError(payload);
   }
 
   return schema.parse(payload);
@@ -339,7 +398,7 @@ async function runUnifiedCommand(
   });
 
   if (!response.ok) {
-    throw new Error(readErrorMessage(payload));
+    throw buildApiRequestError(payload);
   }
 
   const commandResponse = UnifiedCommandResponseSchema.parse(payload);
@@ -495,6 +554,7 @@ export async function listThreads(options: {
   return ThreadListResponseSchema.parse({
     data: payload.data,
     cursors: payload.cursors,
+    errors: payload.errors,
   });
 }
 
