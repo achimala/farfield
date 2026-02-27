@@ -152,6 +152,7 @@ type ThreadSummary = {
   id: string;
   provider: ProviderId;
   preview: string;
+  title?: string | null;
   createdAt: number;
   updatedAt: number;
   cwd?: string;
@@ -508,6 +509,32 @@ describe("App", () => {
     render(<App />);
     expect(await screen.findByRole("button", { name: "site" })).toBeTruthy();
   });
+
+  it("shows thread title when provided", async () => {
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: "thread-title",
+          provider: "codex",
+          preview: "preview text",
+          title: "Pretty Thread Name",
+          createdAt: 1700000000,
+          updatedAt: 1700000001,
+          cwd: "/tmp/project",
+          source: "codex"
+        }
+      ],
+      cursors: {
+        codex: null,
+        opencode: null
+      }
+    };
+
+    render(<App />);
+    expect(await screen.findByText("Pretty Thread Name")).toBeTruthy();
+  });
+
   it("updates the picker when remote model changes with same updatedAt and turns", async () => {
     const threadId = "thread-1";
     let modelId = "gpt-old-codex";

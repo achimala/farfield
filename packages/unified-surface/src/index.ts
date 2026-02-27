@@ -485,6 +485,7 @@ export const UnifiedThreadSummarySchema = z
     id: NonEmptyStringSchema,
     provider: UnifiedProviderIdSchema,
     preview: z.string(),
+    title: NullableStringSchema.optional(),
     createdAt: NonNegativeIntSchema,
     updatedAt: NonNegativeIntSchema,
     cwd: z.string().optional(),

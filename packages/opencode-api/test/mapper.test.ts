@@ -406,6 +406,7 @@ describe("sessionToThreadListItem", () => {
 
     expect(result.id).toBe("sess-1");
     expect(result.preview).toBe("Test Session");
+    expect(result.title).toBe("Test Session");
     expect(result.createdAt).toBe(1700000000);
     expect(result.updatedAt).toBe(1700001000);
     expect(result.cwd).toBe("/tmp/project");

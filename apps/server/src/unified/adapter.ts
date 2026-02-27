@@ -434,6 +434,7 @@ function unavailable(reason: UnifiedFeatureUnavailableReason, detail?: string): 
 function mapThreadSummary(provider: UnifiedProviderId, thread: {
   id: string;
   preview: string;
+  title?: string | null | undefined;
   createdAt: number;
   updatedAt: number;
   cwd?: string | undefined;
@@ -443,6 +444,7 @@ function mapThreadSummary(provider: UnifiedProviderId, thread: {
     id: thread.id,
     provider,
     preview: thread.preview,
+    ...(thread.title !== undefined ? { title: thread.title } : {}),
     createdAt: thread.createdAt,
     updatedAt: thread.updatedAt,
     ...(thread.cwd ? { cwd: thread.cwd } : {}),

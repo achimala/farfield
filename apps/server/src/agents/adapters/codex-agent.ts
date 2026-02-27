@@ -90,6 +90,7 @@ export class CodexAgentAdapter implements AgentAdapter {
   private readonly threadOwnerById = new Map<string, string>();
   private readonly streamEventsByThreadId = new Map<string, IpcFrame[]>();
   private readonly streamSnapshotByThreadId = new Map<string, ThreadConversationState>();
+  private readonly threadTitleById = new Map<string, string | null>();
   private readonly ipcFrameListeners = new Set<(event: CodexIpcFrameEvent) => void>();
   private lastKnownOwnerClientId: string | null = null;
 
@@ -194,6 +195,19 @@ export class CodexAgentAdapter implements AgentAdapter {
         current.splice(0, current.length - 400);
       }
       this.streamEventsByThreadId.set(conversationId, current);
+
+      const parsedBroadcast = parseIncomingThreadStreamBroadcast(frame);
+      if (!parsedBroadcast) {
+        return;
+      }
+
+      if (parsedBroadcast.params.change.type !== "snapshot") {
+        return;
+      }
+
+      const snapshot = parsedBroadcast.params.change.conversationState;
+      this.streamSnapshotByThreadId.set(conversationId, snapshot);
+      this.setThreadTitle(conversationId, snapshot.title);
     });
   }
 
@@ -298,8 +312,20 @@ export class CodexAgentAdapter implements AgentAdapter {
           )
     );
 
+    const data = result.data.map((thread) => {
+      const title = this.resolveThreadTitle(thread.id, thread.title);
+      if (title === undefined) {
+        return thread;
+      }
+
+      return {
+        ...thread,
+        title
+      };
+    });
+
     return {
-      data: result.data,
+      data,
       nextCursor: result.nextCursor ?? null,
       ...(typeof result.pages === "number" ? { pages: result.pages } : {}),
       ...(typeof result.truncated === "boolean" ? { truncated: result.truncated } : {})
@@ -325,6 +351,7 @@ export class CodexAgentAdapter implements AgentAdapter {
         ...(typeof input.ephemeral === "boolean" ? { ephemeral: input.ephemeral } : {})
       })
     );
+    this.setThreadTitle(result.thread.id, result.thread.title);
 
     return {
       threadId: result.thread.id,
@@ -345,6 +372,7 @@ export class CodexAgentAdapter implements AgentAdapter {
     );
     const parsedThread = parseThreadConversationState(result.thread);
     this.streamSnapshotByThreadId.set(input.threadId, parsedThread);
+    this.setThreadTitle(input.threadId, parsedThread.title);
     return {
       thread: parsedThread
     };
@@ -818,6 +846,46 @@ export class CodexAgentAdapter implements AgentAdapter {
 
     return null;
   }
+
+  private resolveThreadTitle(
+    threadId: string,
+    directTitle: string | null | undefined
+  ): string | null | undefined {
+    if (directTitle !== undefined) {
+      return directTitle;
+    }
+
+    if (this.threadTitleById.has(threadId)) {
+      return this.threadTitleById.get(threadId);
+    }
+
+    const snapshot = this.streamSnapshotByThreadId.get(threadId);
+    if (!snapshot) {
+      return undefined;
+    }
+
+    return snapshot.title;
+  }
+
+  private setThreadTitle(threadId: string, title: string | null | undefined): void {
+    if (title === undefined) {
+      this.threadTitleById.delete(threadId);
+      return;
+    }
+
+    if (title === null) {
+      this.threadTitleById.set(threadId, null);
+      return;
+    }
+
+    const normalized = title.trim();
+    if (normalized.length === 0) {
+      this.threadTitleById.set(threadId, null);
+      return;
+    }
+
+    this.threadTitleById.set(threadId, title);
+  }
 }
 
 function toErrorMessage(error: Error | string | unknown): string {
@@ -832,6 +900,14 @@ function toErrorMessage(error: Error | string | unknown): string {
 
 function normalizeStderrLine(line: string): string {
   return line.replace(ANSI_ESCAPE_REGEX, "").trim();
+}
+
+function parseIncomingThreadStreamBroadcast(frame: IpcFrame): ThreadStreamStateChangedBroadcast | null {
+  try {
+    return parseThreadStreamStateChangedBroadcast(frame);
+  } catch {
+    return null;
+  }
 }
 
 function buildSyntheticSnapshotEvent(

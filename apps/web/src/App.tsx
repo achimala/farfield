@@ -130,6 +130,8 @@ function formatDate(value: number | string | null | undefined): string {
 }
 
 function threadLabel(thread: Thread): string {
+  const title = thread.title?.trim();
+  if (title) return title;
   const text = thread.preview.trim();
   if (!text) return `thread ${thread.id.slice(0, 8)}`;
   return text;
@@ -905,6 +907,7 @@ export function App(): React.JSX.Element {
       [
         thread.id,
         String(thread.updatedAt ?? 0),
+        thread.title ?? "",
         thread.preview,
         thread.provider,
         thread.cwd ?? ""

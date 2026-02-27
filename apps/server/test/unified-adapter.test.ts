@@ -29,6 +29,7 @@ const SAMPLE_THREAD: ThreadConversationState = {
 const SAMPLE_THREAD_LIST_ITEM = {
   id: "thread-1",
   preview: "Thread",
+  title: "Named Thread",
   createdAt: 1700000000,
   updatedAt: 1700000100,
   source: "codex"
@@ -325,6 +326,9 @@ describe("unified provider adapters", () => {
       if (codexAvailability.status === "available") {
         const codexResult = await codexUnified.execute(createCommand(kind, "codex"));
         expect(codexResult.kind).toBe(kind);
+        if (codexResult.kind === "listThreads") {
+          expect(codexResult.data[0]?.title).toBe("Named Thread");
+        }
       } else {
         await expect(codexUnified.execute(createCommand(kind, "codex"))).rejects.toBeInstanceOf(
           UnifiedBackendFeatureError
@@ -335,6 +339,9 @@ describe("unified provider adapters", () => {
       if (opencodeAvailability.status === "available") {
         const opencodeResult = await opencodeUnified.execute(createCommand(kind, "opencode"));
         expect(opencodeResult.kind).toBe(kind);
+        if (opencodeResult.kind === "listThreads") {
+          expect(opencodeResult.data[0]?.title).toBe("Named Thread");
+        }
         continue;
       }
 

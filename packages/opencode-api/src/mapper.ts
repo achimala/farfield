@@ -21,6 +21,7 @@ import {
 export interface MappedThreadListItem {
   id: string;
   preview: string;
+  title: string | null;
   createdAt: number;
   updatedAt: number;
   cwd?: string;
@@ -237,6 +238,7 @@ export function sessionToThreadListItem(session: Session): MappedThreadListItem 
   return {
     id: session.id,
     preview: session.title || "(untitled)",
+    title: session.title || null,
     createdAt: session.time.created,
     updatedAt: session.time.updated,
     cwd: session.directory,

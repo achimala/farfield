@@ -515,6 +515,7 @@ const server = http.createServer(async (req, res) => {
         id: string;
         provider: UnifiedProviderId;
         preview: string;
+        title?: string | null | undefined;
         createdAt: number;
         updatedAt: number;
         cwd?: string | undefined;
