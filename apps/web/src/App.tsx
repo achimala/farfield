@@ -918,7 +918,6 @@ export function App(): React.JSX.Element {
   const isChatAtBottomRef = useRef(true);
   const lastAppliedModeSignatureRef = useRef("");
   const hasHydratedAgentSelectionRef = useRef(false);
-  const pendingMaterializationThreadIdsRef = useRef<Set<string>>(new Set());
   const threadProviderByIdRef = useRef<Map<string, AgentId>>(new Map());
   const loadSelectedThreadRef = useRef<
     ((threadId: string) => Promise<void>) | null
@@ -1439,8 +1438,6 @@ export function App(): React.JSX.Element {
 
   const loadSelectedThread = useCallback(
     async (threadId: string) => {
-      const includeTurns =
-        !pendingMaterializationThreadIdsRef.current.has(threadId);
       const threadAgentId = threadProviderByIdRef.current.get(threadId);
       if (!threadAgentId) {
         throw new ApiRequestError(
@@ -1454,7 +1451,7 @@ export function App(): React.JSX.Element {
         );
       }
       const read = await readThread(threadId, {
-        includeTurns,
+        includeTurns: true,
         provider: threadAgentId,
       });
       threadProviderByIdRef.current.set(threadId, threadAgentId);
@@ -1473,12 +1470,6 @@ export function App(): React.JSX.Element {
           };
       const shouldLoadStreamEvents =
         canReadStreamEvents && activeTabRef.current === "debug";
-      if (
-        (live.conversationState?.turns.length ?? 0) > 0 ||
-        read.thread.turns.length > 0
-      ) {
-        pendingMaterializationThreadIdsRef.current.delete(threadId);
-      }
       const shouldUpdateSelectedThread =
         selectedThreadIdRef.current === threadId;
       startTransition(() => {
@@ -2169,13 +2160,11 @@ export function App(): React.JSX.Element {
           threadId = created.threadId;
           threadAgentId = selectedAgentId;
           threadProviderByIdRef.current.set(threadId, threadAgentId);
-          pendingMaterializationThreadIdsRef.current.add(threadId);
           setSelectedThreadId(threadId);
           selectedThreadIdRef.current = threadId;
         }
 
         await sendMessage({ provider: threadAgentId, threadId, text: draft });
-        pendingMaterializationThreadIdsRef.current.delete(threadId);
         await refreshAll();
       } catch (e) {
         setError(toErrorMessage(e));
@@ -2398,7 +2387,6 @@ export function App(): React.JSX.Element {
           agentId: targetAgentId,
         });
         threadProviderByIdRef.current.set(created.threadId, targetAgentId);
-        pendingMaterializationThreadIdsRef.current.add(created.threadId);
         setSelectedThreadId(created.threadId);
         selectedThreadIdRef.current = created.threadId;
         setMobileSidebarOpen(false);
