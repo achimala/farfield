@@ -245,10 +245,6 @@ function toErrorMessage(err: unknown): string {
   return String(err);
 }
 
-function isThreadNotFoundError(error: Error | null): boolean {
-  return error instanceof ApiRequestError && error.code === "threadNotFound";
-}
-
 function buildThreadListErrorMessage(
   errors: ThreadListProviderErrors,
 ): string | null {
@@ -1272,6 +1268,11 @@ export function App(): React.JSX.Element {
         : Promise.resolve<HistoryResponse | null>(null),
     ]);
     const incomingThreads = sortThreadsByRecency(nt.data);
+    const nextThreadProviders = new Map(threadProviderByIdRef.current);
+    for (const thread of incomingThreads) {
+      nextThreadProviders.set(thread.id, thread.provider);
+    }
+    threadProviderByIdRef.current = nextThreadProviders;
 
     const enabledAgents = nag.agents
       .filter((agent) => agent.enabled)
@@ -1440,39 +1441,22 @@ export function App(): React.JSX.Element {
     async (threadId: string) => {
       const includeTurns =
         !pendingMaterializationThreadIdsRef.current.has(threadId);
-      const providerCandidates = new Set<AgentId>();
-      const knownProvider = threadProviderByIdRef.current.get(threadId);
-      if (knownProvider) {
-        providerCandidates.add(knownProvider);
+      const threadAgentId = threadProviderByIdRef.current.get(threadId);
+      if (!threadAgentId) {
+        throw new ApiRequestError(
+          `Thread ${threadId} has no registered provider`,
+          {
+            code: "threadProviderMissing",
+            details: {
+              threadId,
+            },
+          },
+        );
       }
-      providerCandidates.add(selectedAgentId);
-      for (const agentId of availableAgentIds) {
-        providerCandidates.add(agentId);
-      }
-
-      let threadAgentId: AgentId | null = null;
-      let read: ReadThreadResponse | null = null;
-      let notFoundError: unknown = null;
-      for (const provider of providerCandidates) {
-        try {
-          read = await readThread(threadId, { includeTurns, provider });
-          threadAgentId = provider;
-          break;
-        } catch (error) {
-          const typedError = error instanceof Error ? error : null;
-          if (!isThreadNotFoundError(typedError)) {
-            throw error;
-          }
-          notFoundError = error;
-        }
-      }
-
-      if (!threadAgentId || !read) {
-        if (notFoundError) {
-          throw notFoundError;
-        }
-        throw new Error(`Thread ${threadId} is not available`);
-      }
+      const read = await readThread(threadId, {
+        includeTurns,
+        provider: threadAgentId,
+      });
       threadProviderByIdRef.current.set(threadId, threadAgentId);
 
       const descriptor = agentsById[threadAgentId];
@@ -1588,7 +1572,7 @@ export function App(): React.JSX.Element {
         });
       });
     },
-    [agentsById, availableAgentIds, selectedAgentId],
+    [agentsById],
   );
 
   const refreshAll = useCallback(async () => {
@@ -2184,6 +2168,7 @@ export function App(): React.JSX.Element {
           });
           threadId = created.threadId;
           threadAgentId = selectedAgentId;
+          threadProviderByIdRef.current.set(threadId, threadAgentId);
           pendingMaterializationThreadIdsRef.current.add(threadId);
           setSelectedThreadId(threadId);
           selectedThreadIdRef.current = threadId;
@@ -2412,6 +2397,7 @@ export function App(): React.JSX.Element {
           cwd: trimmedProjectPath,
           agentId: targetAgentId,
         });
+        threadProviderByIdRef.current.set(created.threadId, targetAgentId);
         pendingMaterializationThreadIdsRef.current.add(created.threadId);
         setSelectedThreadId(created.threadId);
         selectedThreadIdRef.current = created.threadId;

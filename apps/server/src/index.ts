@@ -621,6 +621,10 @@ const server = http.createServer(async (req, res) => {
       const providerFromQuery = parseUnifiedProviderId(
         url.searchParams.get("provider"),
       );
+      const includeTurns = parseBoolean(
+        url.searchParams.get("includeTurns"),
+        true,
+      );
       const provider =
         providerFromQuery ??
         parseUnifiedProviderId(threadIndex.resolve(threadId));
@@ -659,7 +663,7 @@ const server = http.createServer(async (req, res) => {
           kind: "readThread",
           provider,
           threadId,
-          includeTurns: true,
+          includeTurns,
         });
 
         threadIndex.register(result.thread.id, result.thread.provider);
@@ -683,6 +687,7 @@ const server = http.createServer(async (req, res) => {
             details: {
               provider,
               threadId,
+              includeTurns,
             },
           },
         });

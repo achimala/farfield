@@ -566,21 +566,15 @@ export async function readThread(
   if (typeof options?.provider === "string") {
     params.set("provider", options.provider);
   }
+  if (typeof options?.includeTurns === "boolean") {
+    params.set("includeTurns", options.includeTurns ? "1" : "0");
+  }
 
   const query = params.toString();
   const payload = await requestEnvelope(
     `/api/unified/thread/${encodeURIComponent(threadId)}${query.length > 0 ? `?${query}` : ""}`,
     UnifiedReadThreadEnvelopeSchema,
   );
-
-  if (options?.includeTurns === false) {
-    return ReadThreadResponseSchema.parse({
-      thread: {
-        ...payload.thread,
-        turns: [],
-      },
-    });
-  }
 
   return ReadThreadResponseSchema.parse({
     thread: payload.thread,
