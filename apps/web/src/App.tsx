@@ -877,7 +877,7 @@ export function App(): React.JSX.Element {
   const loadCoreData = useCallback(async () => {
     const [nh, nt, ntr, nhist, nag] = await Promise.all([
       getHealth(),
-      listThreads({ limit: 80, archived: false, all: true, maxPages: 20 }),
+      listThreads({ limit: 80, archived: false, all: false, maxPages: 1 }),
       getTraceStatus(),
       listDebugHistory(120),
       listAgents()
