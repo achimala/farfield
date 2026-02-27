@@ -2,13 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   parseBody,
   TraceMarkBodySchema,
-  TraceStartBodySchema
+  TraceStartBodySchema,
 } from "../src/http-schemas.js";
 
 describe("server request schemas", () => {
   it("validates trace start body", () => {
     const parsed = parseBody(TraceStartBodySchema, {
-      label: "capture"
+      label: "capture",
     });
 
     expect(parsed.label).toBe("capture");
@@ -18,14 +18,14 @@ describe("server request schemas", () => {
     expect(() =>
       parseBody(TraceStartBodySchema, {
         label: "capture",
-        extra: true
-      })
+        extra: true,
+      }),
     ).toThrowError(/Unrecognized key/);
   });
 
   it("validates trace mark body", () => {
     const parsed = parseBody(TraceMarkBodySchema, {
-      note: "checkpoint"
+      note: "checkpoint",
     });
 
     expect(parsed.note).toBe("checkpoint");
@@ -34,8 +34,8 @@ describe("server request schemas", () => {
   it("rejects note over max length", () => {
     expect(() =>
       parseBody(TraceMarkBodySchema, {
-        note: "x".repeat(501)
-      })
+        note: "x".repeat(501),
+      }),
     ).toThrowError(/at most 500/);
   });
 });

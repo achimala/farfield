@@ -12,9 +12,11 @@ export class ThreadIndex {
   }
 
   public list(): Array<{ threadId: string; agentId: AgentId }> {
-    return Array.from(this.agentIdByThreadId.entries()).map(([threadId, agentId]) => ({
-      threadId,
-      agentId
-    }));
+    return Array.from(this.agentIdByThreadId.entries()).map(
+      ([threadId, agentId]) => ({
+        threadId,
+        agentId,
+      }),
+    );
   }
 }

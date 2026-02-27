@@ -7,7 +7,7 @@ import type {
   CollaborationMode,
   IpcFrame,
   UserInputRequestId,
-  UserInputResponsePayload
+  UserInputResponsePayload,
 } from "@farfield/protocol";
 
 export type AgentId = "codex" | "opencode";
@@ -138,11 +138,16 @@ export interface AgentAdapter {
 
   listModels?(limit: number): Promise<AppServerListModelsResponse>;
   listCollaborationModes?(): Promise<AppServerCollaborationModeListResponse>;
-  setCollaborationMode?(input: AgentSetCollaborationModeInput): Promise<{ ownerClientId: string }>;
+  setCollaborationMode?(
+    input: AgentSetCollaborationModeInput,
+  ): Promise<{ ownerClientId: string }>;
   submitUserInput?(
-    input: AgentSubmitUserInputInput
+    input: AgentSubmitUserInputInput,
   ): Promise<{ ownerClientId: string; requestId: UserInputRequestId }>;
   readLiveState?(threadId: string): Promise<AgentThreadLiveState>;
-  readStreamEvents?(threadId: string, limit: number): Promise<AgentThreadStreamEvents>;
+  readStreamEvents?(
+    threadId: string,
+    limit: number,
+  ): Promise<AgentThreadStreamEvents>;
   listProjectDirectories?(): Promise<string[]>;
 }

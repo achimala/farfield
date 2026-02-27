@@ -1,9 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import { OpenCodeConnection, OpenCodeMonitorService } from "@farfield/opencode-api";
+import {
+  OpenCodeConnection,
+  OpenCodeMonitorService,
+} from "@farfield/opencode-api";
 import {
   AppServerThreadListItemSchema,
-  parseThreadConversationState
+  parseThreadConversationState,
 } from "@farfield/protocol";
 import type {
   AgentAdapter,
@@ -15,7 +18,7 @@ import type {
   AgentListThreadsResult,
   AgentReadThreadInput,
   AgentReadThreadResult,
-  AgentSendMessageInput
+  AgentSendMessageInput,
 } from "../types.js";
 
 export interface OpenCodeAgentOptions {
@@ -32,7 +35,7 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
     canSetCollaborationMode: false,
     canSubmitUserInput: false,
     canReadLiveState: false,
-    canReadStreamEvents: false
+    canReadStreamEvents: false,
   };
 
   private readonly connection: OpenCodeConnection;
@@ -42,7 +45,7 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
   public constructor(options: OpenCodeAgentOptions = {}) {
     this.connection = new OpenCodeConnection({
       ...(options.url ? { url: options.url } : {}),
-      ...(options.port !== undefined ? { port: options.port } : {})
+      ...(options.port !== undefined ? { port: options.port } : {}),
     });
     this.service = new OpenCodeMonitorService(this.connection);
   }
@@ -67,10 +70,17 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
     await this.connection.stop();
   }
 
-  public async listThreads(_input: AgentListThreadsInput): Promise<AgentListThreadsResult> {
+  public async listThreads(
+    _input: AgentListThreadsInput,
+  ): Promise<AgentListThreadsResult> {
     this.ensureConnected();
 
-    const sessions = new Map<string, Awaited<ReturnType<OpenCodeMonitorService["listSessions"]>>["data"][number]>();
+    const sessions = new Map<
+      string,
+      Awaited<
+        ReturnType<OpenCodeMonitorService["listSessions"]>
+      >["data"][number]
+    >();
     const directories = await this.listProjectDirectories();
 
     if (directories.length > 0) {
@@ -83,7 +93,7 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
               this.threadDirectoryById.set(item.id, path.resolve(item.cwd));
             }
           }
-        })
+        }),
       );
     } else {
       const result = await this.service.listSessions();
@@ -96,26 +106,33 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
     }
 
     const mappedData = Array.from(sessions.values()).map((session) =>
-      AppServerThreadListItemSchema.parse(session)
+      AppServerThreadListItemSchema.parse(session),
     );
 
     return {
       data: mappedData,
-      nextCursor: null
+      nextCursor: null,
     };
   }
 
-  public async createThread(input: AgentCreateThreadInput): Promise<AgentCreateThreadResult> {
+  public async createThread(
+    input: AgentCreateThreadInput,
+  ): Promise<AgentCreateThreadResult> {
     this.ensureConnected();
 
-    const directory = input.cwd ? normalizeDirectoryInput(input.cwd) : undefined;
+    const directory = input.cwd
+      ? normalizeDirectoryInput(input.cwd)
+      : undefined;
     const result = await this.service.createSession({
       ...(input.model ? { title: input.model } : {}),
-      ...(directory ? { directory } : {})
+      ...(directory ? { directory } : {}),
     });
 
     if (result.mapped.cwd && result.mapped.cwd.trim()) {
-      this.threadDirectoryById.set(result.threadId, path.resolve(result.mapped.cwd));
+      this.threadDirectoryById.set(
+        result.threadId,
+        path.resolve(result.mapped.cwd),
+      );
     } else if (directory) {
       this.threadDirectoryById.set(result.threadId, directory);
     }
@@ -125,11 +142,13 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
     return {
       threadId: result.threadId,
       thread: mappedThread,
-      cwd: mappedThread.cwd
+      cwd: mappedThread.cwd,
     };
   }
 
-  public async readThread(input: AgentReadThreadInput): Promise<AgentReadThreadResult> {
+  public async readThread(
+    input: AgentReadThreadInput,
+  ): Promise<AgentReadThreadResult> {
     this.ensureConnected();
 
     const directory = this.resolveThreadDirectory(input.threadId);
@@ -140,7 +159,7 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
     }
 
     return {
-      thread: parseThreadConversationState(state)
+      thread: parseThreadConversationState(state),
     };
   }
 
@@ -154,7 +173,7 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
     await this.service.sendMessage({
       sessionId: input.threadId,
       text: input.text,
-      ...(directory ? { directory } : {})
+      ...(directory ? { directory } : {}),
     });
   }
 

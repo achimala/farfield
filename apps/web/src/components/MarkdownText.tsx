@@ -19,7 +19,8 @@ const components: Components = {
   pre: ({ children }) => <>{children}</>,
   code: ({ className, children }) => {
     const code = String(children ?? "");
-    const isBlock = code.includes("\n") || (className?.startsWith("language-") ?? false);
+    const isBlock =
+      code.includes("\n") || (className?.startsWith("language-") ?? false);
 
     if (!isBlock) {
       return (
@@ -35,7 +36,7 @@ const components: Components = {
         language={detectLanguage(className)}
       />
     );
-  }
+  },
 };
 
 function MarkdownTextComponent({ text }: MarkdownTextProps) {

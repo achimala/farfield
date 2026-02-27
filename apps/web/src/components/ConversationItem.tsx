@@ -5,7 +5,10 @@ import { CommandBlock } from "./CommandBlock";
 import { DiffBlock } from "./DiffBlock";
 import { MarkdownText } from "./MarkdownText";
 
-type UserMessageLikeItem = Extract<UnifiedItem, { type: "userMessage" | "steeringUserMessage" }>;
+type UserMessageLikeItem = Extract<
+  UnifiedItem,
+  { type: "userMessage" | "steeringUserMessage" }
+>;
 
 interface Props {
   item: UnifiedItem;
@@ -20,7 +23,7 @@ const TOOL_BLOCK_TYPES: readonly UnifiedItem["type"][] = [
   "fileChange",
   "webSearch",
   "mcpToolCall",
-  "collabAgentToolCall"
+  "collabAgentToolCall",
 ];
 
 function isToolBlockType(type: UnifiedItem["type"] | undefined): boolean {
@@ -29,14 +32,14 @@ function isToolBlockType(type: UnifiedItem["type"] | undefined): boolean {
 
 function toolBlockSpacingClass(
   previousItemType: UnifiedItem["type"] | undefined,
-  nextItemType: UnifiedItem["type"] | undefined
+  nextItemType: UnifiedItem["type"] | undefined,
 ): string {
   const previousIsTool = isToolBlockType(previousItemType);
   const nextIsTool = isToolBlockType(nextItemType);
   if (previousIsTool && nextIsTool) return "my-1";
-  if (previousIsTool) return "mt-1 mb-4";
-  if (nextIsTool) return "mt-4 mb-1";
-  return "my-4";
+  if (previousIsTool) return "mt-1 mb-2";
+  if (nextIsTool) return "mt-2 mb-1";
+  return "my-2";
 }
 
 function readTextContent(content: UserMessageLikeItem["content"]): string {
@@ -52,7 +55,9 @@ interface RendererContext {
 }
 
 type ItemRendererMap = {
-  [K in UnifiedItemKind]: (args: RendererContext & { item: Extract<UnifiedItem, { type: K }> }) => React.JSX.Element | null;
+  [K in UnifiedItemKind]: (
+    args: RendererContext & { item: Extract<UnifiedItem, { type: K }> },
+  ) => React.JSX.Element | null;
 };
 
 const ITEM_RENDERERS = {
@@ -143,11 +148,16 @@ const ITEM_RENDERERS = {
       )}
       <ul className="space-y-1">
         {item.plan.map((entry, index) => (
-          <li key={`${entry.step}-${String(index)}`} className="text-sm text-foreground/90 flex items-start gap-2">
+          <li
+            key={`${entry.step}-${String(index)}`}
+            className="text-sm text-foreground/90 flex items-start gap-2"
+          >
             <span className="mt-[2px] text-muted-foreground">
               {entry.status === "completed" ? "x" : "o"}
             </span>
-            <span className="whitespace-pre-wrap break-words">{entry.step}</span>
+            <span className="whitespace-pre-wrap break-words">
+              {entry.step}
+            </span>
           </li>
         ))}
       </ul>
@@ -180,7 +190,9 @@ const ITEM_RENDERERS = {
           <div className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider font-medium">
             Response
           </div>
-          <div className="text-sm text-foreground whitespace-pre-wrap">{answersText}</div>
+          <div className="text-sm text-foreground whitespace-pre-wrap">
+            {answersText}
+          </div>
         </div>
       </div>
     );
@@ -199,13 +211,19 @@ const ITEM_RENDERERS = {
   ),
 
   contextCompaction: (_args) => (
-    <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-      Context compacted
+    <div className="flex items-center my-6">
+      <div className="flex-1 border-t border-dashed border-border/80"></div>
+      <div className="mx-4 text-[10px] uppercase tracking-widest text-muted-foreground/50 font-medium">
+        Compacted
+      </div>
+      <div className="flex-1 border-t border-dashed border-border/80"></div>
     </div>
   ),
 
   webSearch: ({ item, toolSpacing }) => (
-    <div className={`${toolSpacing} rounded-lg border border-border bg-muted/20 px-3 py-2`}>
+    <div
+      className={`${toolSpacing} rounded-lg border border-border bg-muted/20 px-3 py-2`}
+    >
       <div className="text-[10px] text-muted-foreground font-mono mb-1 uppercase tracking-wider">
         Web search
       </div>
@@ -218,7 +236,9 @@ const ITEM_RENDERERS = {
   mcpToolCall: ({ item, toolSpacing }) => {
     const argumentsText = JSON.stringify(item.arguments);
     return (
-      <div className={`${toolSpacing} rounded-lg border border-border bg-muted/20 px-3 py-2`}>
+      <div
+        className={`${toolSpacing} rounded-lg border border-border bg-muted/20 px-3 py-2`}
+      >
         <div className="text-[10px] text-muted-foreground font-mono mb-1 uppercase tracking-wider">
           MCP tool
         </div>
@@ -226,10 +246,14 @@ const ITEM_RENDERERS = {
           {item.server}/{item.tool} ({item.status})
         </div>
         {item.durationMs != null && (
-          <div className="mt-1 text-[11px] text-muted-foreground font-mono">{item.durationMs}ms</div>
+          <div className="mt-1 text-[11px] text-muted-foreground font-mono">
+            {item.durationMs}ms
+          </div>
         )}
         {item.error?.message && (
-          <div className="mt-2 text-xs text-danger whitespace-pre-wrap break-words">{item.error.message}</div>
+          <div className="mt-2 text-xs text-danger whitespace-pre-wrap break-words">
+            {item.error.message}
+          </div>
         )}
         {item.result?.content && item.result.content.length > 0 && (
           <div className="mt-2 text-xs text-muted-foreground">
@@ -244,7 +268,9 @@ const ITEM_RENDERERS = {
   },
 
   collabAgentToolCall: ({ item, toolSpacing }) => (
-    <div className={`${toolSpacing} rounded-lg border border-border bg-muted/20 px-3 py-2`}>
+    <div
+      className={`${toolSpacing} rounded-lg border border-border bg-muted/20 px-3 py-2`}
+    >
       <div className="text-[10px] text-muted-foreground font-mono mb-1 uppercase tracking-wider">
         Collab tool
       </div>
@@ -287,14 +313,17 @@ const ITEM_RENDERERS = {
     <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
       Model changed
     </div>
-  )
+  ),
 } satisfies ItemRendererMap;
 
 function assertNever(value: never): never {
   throw new Error(`Unhandled item kind: ${String(value)}`);
 }
 
-function renderItem(item: UnifiedItem, context: RendererContext): React.JSX.Element | null {
+function renderItem(
+  item: UnifiedItem,
+  context: RendererContext,
+): React.JSX.Element | null {
   switch (item.type) {
     case "userMessage":
       return ITEM_RENDERERS.userMessage({ item, ...context });
@@ -344,25 +373,28 @@ function ConversationItemComponent({
   isLast,
   turnIsInProgress,
   previousItemType,
-  nextItemType
+  nextItemType,
 }: Props) {
   const isActive = isLast && turnIsInProgress;
   const toolSpacing = toolBlockSpacingClass(previousItemType, nextItemType);
 
   return renderItem(item, {
     isActive,
-    toolSpacing
+    toolSpacing,
   });
 }
 
 function areConversationItemPropsEqual(prev: Props, next: Props): boolean {
   return (
-    prev.item === next.item
-    && prev.isLast === next.isLast
-    && prev.turnIsInProgress === next.turnIsInProgress
-    && prev.previousItemType === next.previousItemType
-    && prev.nextItemType === next.nextItemType
+    prev.item === next.item &&
+    prev.isLast === next.isLast &&
+    prev.turnIsInProgress === next.turnIsInProgress &&
+    prev.previousItemType === next.previousItemType &&
+    prev.nextItemType === next.nextItemType
   );
 }
 
-export const ConversationItem = memo(ConversationItemComponent, areConversationItemPropsEqual);
+export const ConversationItem = memo(
+  ConversationItemComponent,
+  areConversationItemPropsEqual,
+);

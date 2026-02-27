@@ -8,7 +8,7 @@ import {
   DesktopIpcClient,
   reduceThreadStreamEvents,
   ThreadStreamReductionError,
-  type SendRequestOptions
+  type SendRequestOptions,
 } from "@farfield/api";
 import {
   parseThreadConversationState,
@@ -20,7 +20,7 @@ import {
   type IpcResponseFrame,
   type ThreadConversationState,
   type ThreadStreamStateChangedBroadcast,
-  type UserInputRequestId
+  type UserInputRequestId,
 } from "@farfield/protocol";
 import { logger } from "../../logger.js";
 import { resolveOwnerClientId } from "../../thread-owner.js";
@@ -38,7 +38,7 @@ import type {
   AgentSetCollaborationModeInput,
   AgentSubmitUserInputInput,
   AgentThreadLiveState,
-  AgentThreadStreamEvents
+  AgentThreadStreamEvents,
 } from "../types.js";
 
 export interface CodexAgentRuntimeState {
@@ -66,7 +66,8 @@ export interface CodexAgentOptions {
 }
 
 const ANSI_ESCAPE_REGEX = /\u001B\[[0-?]*[ -/]*[@-~]/g;
-const INVALID_STREAM_EVENTS_LOG_PATH = process.env["FARFIELD_INVALID_STREAM_LOG_PATH"] ??
+const INVALID_STREAM_EVENTS_LOG_PATH =
+  process.env["FARFIELD_INVALID_STREAM_LOG_PATH"] ??
   path.resolve(process.cwd(), "invalid-thread-stream-events.jsonl");
 
 export class CodexAgentAdapter implements AgentAdapter {
@@ -78,7 +79,7 @@ export class CodexAgentAdapter implements AgentAdapter {
     canSetCollaborationMode: true,
     canSubmitUserInput: true,
     canReadLiveState: true,
-    canReadStreamEvents: true
+    canReadStreamEvents: true,
   };
 
   private readonly appClient: AppServerClient;
@@ -89,9 +90,14 @@ export class CodexAgentAdapter implements AgentAdapter {
 
   private readonly threadOwnerById = new Map<string, string>();
   private readonly streamEventsByThreadId = new Map<string, IpcFrame[]>();
-  private readonly streamSnapshotByThreadId = new Map<string, ThreadConversationState>();
+  private readonly streamSnapshotByThreadId = new Map<
+    string,
+    ThreadConversationState
+  >();
   private readonly threadTitleById = new Map<string, string | null>();
-  private readonly ipcFrameListeners = new Set<(event: CodexIpcFrameEvent) => void>();
+  private readonly ipcFrameListeners = new Set<
+    (event: CodexIpcFrameEvent) => void
+  >();
   private lastKnownOwnerClientId: string | null = null;
 
   private runtimeState: CodexAgentRuntimeState = {
@@ -99,7 +105,7 @@ export class CodexAgentAdapter implements AgentAdapter {
     ipcConnected: false,
     ipcInitialized: false,
     codexAvailable: true,
-    lastError: null
+    lastError: null,
   };
 
   private bootstrapInFlight: Promise<void> | null = null;
@@ -121,19 +127,21 @@ export class CodexAgentAdapter implements AgentAdapter {
           return;
         }
         logger.error({ line: normalized }, "codex-app-server-stderr");
-      }
+      },
     });
 
     this.ipcClient = new DesktopIpcClient({
-      socketPath: options.socketPath
+      socketPath: options.socketPath,
     });
     this.service = new CodexMonitorService(this.ipcClient);
 
     this.ipcClient.onConnectionState((state) => {
       this.patchRuntimeState({
         ipcConnected: state.connected,
-        ipcInitialized: state.connected ? this.runtimeState.ipcInitialized : false,
-        ...(state.reason ? { lastError: state.reason } : {})
+        ipcInitialized: state.connected
+          ? this.runtimeState.ipcInitialized
+          : false,
+        ...(state.reason ? { lastError: state.reason } : {}),
       });
 
       if (!state.connected) {
@@ -146,20 +154,19 @@ export class CodexAgentAdapter implements AgentAdapter {
 
     this.ipcClient.onFrame((frame) => {
       const threadId = extractThreadId(frame);
-      const method = frame.type === "request" || frame.type === "broadcast"
-        ? frame.method
-        : frame.type === "response"
-          ? frame.method ?? "response"
-          : frame.type;
-
-      const sourceClientIdRaw = (
+      const method =
         frame.type === "request" || frame.type === "broadcast"
-      )
-        ? frame.sourceClientId
-        : undefined;
-      const sourceClientId = typeof sourceClientIdRaw === "string"
-        ? sourceClientIdRaw.trim()
-        : "";
+          ? frame.method
+          : frame.type === "response"
+            ? (frame.method ?? "response")
+            : frame.type;
+
+      const sourceClientIdRaw =
+        frame.type === "request" || frame.type === "broadcast"
+          ? frame.sourceClientId
+          : undefined;
+      const sourceClientId =
+        typeof sourceClientIdRaw === "string" ? sourceClientIdRaw.trim() : "";
       if (sourceClientId) {
         this.lastKnownOwnerClientId = sourceClientId;
       }
@@ -168,10 +175,13 @@ export class CodexAgentAdapter implements AgentAdapter {
         direction: "in",
         frame,
         method,
-        threadId
+        threadId,
       });
 
-      if (frame.type !== "broadcast" || frame.method !== "thread-stream-state-changed") {
+      if (
+        frame.type !== "broadcast" ||
+        frame.method !== "thread-stream-state-changed"
+      ) {
         return;
       }
 
@@ -180,7 +190,9 @@ export class CodexAgentAdapter implements AgentAdapter {
         return;
       }
 
-      const conversationId = (params as Record<string, string>)["conversationId"];
+      const conversationId = (params as Record<string, string>)[
+        "conversationId"
+      ];
       if (!conversationId || !conversationId.trim()) {
         return;
       }
@@ -279,7 +291,9 @@ export class CodexAgentAdapter implements AgentAdapter {
     await this.appClient.close();
   }
 
-  public async listThreads(input: AgentListThreadsInput): Promise<AgentListThreadsResult> {
+  public async listThreads(
+    input: AgentListThreadsInput,
+  ): Promise<AgentListThreadsResult> {
     this.ensureCodexAvailable();
 
     const result = await this.runAppServerCall(() =>
@@ -290,46 +304,48 @@ export class CodexAgentAdapter implements AgentAdapter {
                   limit: input.limit,
                   archived: input.archived,
                   cursor: input.cursor,
-                  maxPages: input.maxPages
+                  maxPages: input.maxPages,
                 }
               : {
                   limit: input.limit,
                   archived: input.archived,
-                  maxPages: input.maxPages
-                }
+                  maxPages: input.maxPages,
+                },
           )
         : this.appClient.listThreads(
             input.cursor
               ? {
                   limit: input.limit,
                   archived: input.archived,
-                  cursor: input.cursor
+                  cursor: input.cursor,
                 }
               : {
                   limit: input.limit,
-                  archived: input.archived
-                }
-          )
+                  archived: input.archived,
+                },
+          ),
     );
 
     const data = result.data.map((thread) => {
       const title = this.resolveThreadTitle(thread.id, thread.title);
       const snapshot = this.streamSnapshotByThreadId.get(thread.id);
-      const isGenerating = snapshot ? isThreadStateGenerating(snapshot) : undefined;
+      const isGenerating = snapshot
+        ? isThreadStateGenerating(snapshot)
+        : undefined;
       if (title === undefined) {
         if (isGenerating === undefined) {
           return thread;
         }
         return {
           ...thread,
-          isGenerating
+          isGenerating,
         };
       }
 
       return {
         ...thread,
         title,
-        ...(isGenerating !== undefined ? { isGenerating } : {})
+        ...(isGenerating !== undefined ? { isGenerating } : {}),
       };
     });
 
@@ -337,11 +353,15 @@ export class CodexAgentAdapter implements AgentAdapter {
       data,
       nextCursor: result.nextCursor ?? null,
       ...(typeof result.pages === "number" ? { pages: result.pages } : {}),
-      ...(typeof result.truncated === "boolean" ? { truncated: result.truncated } : {})
+      ...(typeof result.truncated === "boolean"
+        ? { truncated: result.truncated }
+        : {}),
     };
   }
 
-  public async createThread(input: AgentCreateThreadInput): Promise<AgentCreateThreadResult> {
+  public async createThread(
+    input: AgentCreateThreadInput,
+  ): Promise<AgentCreateThreadResult> {
     this.ensureCodexAvailable();
 
     const cwd = input.cwd;
@@ -356,9 +376,13 @@ export class CodexAgentAdapter implements AgentAdapter {
         ...(input.modelProvider ? { modelProvider: input.modelProvider } : {}),
         ...(input.personality ? { personality: input.personality } : {}),
         ...(input.sandbox ? { sandbox: input.sandbox } : {}),
-        ...(input.approvalPolicy ? { approvalPolicy: input.approvalPolicy } : {}),
-        ...(typeof input.ephemeral === "boolean" ? { ephemeral: input.ephemeral } : {})
-      })
+        ...(input.approvalPolicy
+          ? { approvalPolicy: input.approvalPolicy }
+          : {}),
+        ...(typeof input.ephemeral === "boolean"
+          ? { ephemeral: input.ephemeral }
+          : {}),
+      }),
     );
     this.setThreadTitle(result.thread.id, result.thread.title);
 
@@ -370,20 +394,22 @@ export class CodexAgentAdapter implements AgentAdapter {
       cwd: result.cwd,
       approvalPolicy: result.approvalPolicy,
       sandbox: result.sandbox,
-      reasoningEffort: result.reasoningEffort
+      reasoningEffort: result.reasoningEffort,
     };
   }
 
-  public async readThread(input: AgentReadThreadInput): Promise<AgentReadThreadResult> {
+  public async readThread(
+    input: AgentReadThreadInput,
+  ): Promise<AgentReadThreadResult> {
     this.ensureCodexAvailable();
     const result = await this.runAppServerCall(() =>
-      this.appClient.readThread(input.threadId, input.includeTurns)
+      this.appClient.readThread(input.threadId, input.includeTurns),
     );
     const parsedThread = parseThreadConversationState(result.thread);
     this.streamSnapshotByThreadId.set(input.threadId, parsedThread);
     this.setThreadTitle(input.threadId, parsedThread.title);
     return {
-      thread: parsedThread
+      thread: parsedThread,
     };
   }
 
@@ -404,7 +430,7 @@ export class CodexAgentAdapter implements AgentAdapter {
         await this.appClient.steerTurn({
           threadId: input.threadId,
           expectedTurnId: activeTurnId,
-          input: [{ type: "text", text }]
+          input: [{ type: "text", text }],
         });
         return;
       }
@@ -413,7 +439,7 @@ export class CodexAgentAdapter implements AgentAdapter {
         threadId: input.threadId,
         input: [{ type: "text", text }],
         ...(input.cwd ? { cwd: input.cwd } : {}),
-        attachments: []
+        attachments: [],
       });
     };
 
@@ -427,7 +453,9 @@ export class CodexAgentAdapter implements AgentAdapter {
     }
 
     await this.runAppServerCall(() =>
-      this.appClient.resumeThread(input.threadId, { persistExtendedHistory: true })
+      this.appClient.resumeThread(input.threadId, {
+        persistExtendedHistory: true,
+      }),
     );
     await this.runAppServerCall(sendTurn);
   }
@@ -453,7 +481,9 @@ export class CodexAgentAdapter implements AgentAdapter {
     }
 
     await this.runAppServerCall(() =>
-      this.appClient.resumeThread(input.threadId, { persistExtendedHistory: true })
+      this.appClient.resumeThread(input.threadId, {
+        persistExtendedHistory: true,
+      }),
     );
     await this.runAppServerCall(interruptTurn);
   }
@@ -468,7 +498,9 @@ export class CodexAgentAdapter implements AgentAdapter {
     return this.runAppServerCall(() => this.appClient.listCollaborationModes());
   }
 
-  public async setCollaborationMode(input: AgentSetCollaborationModeInput): Promise<{ ownerClientId: string }> {
+  public async setCollaborationMode(
+    input: AgentSetCollaborationModeInput,
+  ): Promise<{ ownerClientId: string }> {
     this.ensureCodexAvailable();
     this.ensureIpcReady();
 
@@ -476,22 +508,22 @@ export class CodexAgentAdapter implements AgentAdapter {
       this.threadOwnerById,
       input.threadId,
       input.ownerClientId,
-      this.lastKnownOwnerClientId ?? undefined
+      this.lastKnownOwnerClientId ?? undefined,
     );
 
     await this.service.setCollaborationMode({
       threadId: input.threadId,
       ownerClientId,
-      collaborationMode: input.collaborationMode
+      collaborationMode: input.collaborationMode,
     });
 
     return {
-      ownerClientId
+      ownerClientId,
     };
   }
 
   public async submitUserInput(
-    input: AgentSubmitUserInputInput
+    input: AgentSubmitUserInputInput,
   ): Promise<{ ownerClientId: string; requestId: UserInputRequestId }> {
     this.ensureCodexAvailable();
     this.ensureIpcReady();
@@ -500,37 +532,37 @@ export class CodexAgentAdapter implements AgentAdapter {
       this.threadOwnerById,
       input.threadId,
       input.ownerClientId,
-      this.lastKnownOwnerClientId ?? undefined
+      this.lastKnownOwnerClientId ?? undefined,
     );
 
     await this.service.submitUserInput({
       threadId: input.threadId,
       ownerClientId,
       requestId: input.requestId,
-      response: parseUserInputResponsePayload(input.response)
+      response: parseUserInputResponsePayload(input.response),
     });
 
     return {
       ownerClientId,
-      requestId: input.requestId
+      requestId: input.requestId,
     };
   }
 
   public async readLiveState(threadId: string): Promise<AgentThreadLiveState> {
     const snapshotState = this.streamSnapshotByThreadId.get(threadId) ?? null;
-    const ownerClientId = this.threadOwnerById.get(threadId)
-      ?? this.lastKnownOwnerClientId
-      ?? null;
+    const ownerClientId =
+      this.threadOwnerById.get(threadId) ?? this.lastKnownOwnerClientId ?? null;
     const rawEvents = this.streamEventsByThreadId.get(threadId) ?? [];
     if (rawEvents.length === 0) {
       return {
         ownerClientId,
         conversationState: snapshotState,
-        liveStateError: null
+        liveStateError: null,
       };
     }
 
-    const events: ReturnType<typeof parseThreadStreamStateChangedBroadcast>[] = [];
+    const events: ReturnType<typeof parseThreadStreamStateChangedBroadcast>[] =
+      [];
     const validRawEvents: IpcFrame[] = [];
     let invalidEventCount = 0;
     let firstInvalidEventError: string | null = null;
@@ -544,14 +576,20 @@ export class CodexAgentAdapter implements AgentAdapter {
         invalidEventCount += 1;
         if (!firstInvalidEventError) {
           firstInvalidEventError = toErrorMessage(error);
-          firstInvalidEventMessage = formatInvalidStreamEventMessage(threadId, event, error);
+          firstInvalidEventMessage = formatInvalidStreamEventMessage(
+            threadId,
+            event,
+            error,
+          );
           logger.warn(firstInvalidEventMessage);
           writeInvalidStreamEventDetail({
             threadId,
             error: firstInvalidEventError,
-            ...(error instanceof ProtocolValidationError ? { issues: error.issues } : {}),
+            ...(error instanceof ProtocolValidationError
+              ? { issues: error.issues }
+              : {}),
             frame: describeFrame(event),
-            loggedAt: new Date().toISOString()
+            loggedAt: new Date().toISOString(),
           });
         }
       }
@@ -559,7 +597,7 @@ export class CodexAgentAdapter implements AgentAdapter {
 
     if (invalidEventCount > 0) {
       logger.warn(
-        `[stream-mismatch-summary] thread=${threadId} pruned=${String(invalidEventCount)} total=${String(rawEvents.length)}${firstInvalidEventMessage ? ` first="${firstInvalidEventMessage}"` : ""}`
+        `[stream-mismatch-summary] thread=${threadId} pruned=${String(invalidEventCount)} total=${String(rawEvents.length)}${firstInvalidEventMessage ? ` first="${firstInvalidEventMessage}"` : ""}`,
       );
       this.streamEventsByThreadId.set(threadId, validRawEvents);
     }
@@ -568,22 +606,27 @@ export class CodexAgentAdapter implements AgentAdapter {
       return {
         ownerClientId,
         conversationState: snapshotState,
-        liveStateError: null
+        liveStateError: null,
       };
     }
 
     try {
       const reductionInput = snapshotState
-        ? [buildSyntheticSnapshotEvent(threadId, ownerClientId ?? "farfield", snapshotState), ...events]
+        ? [
+            buildSyntheticSnapshotEvent(
+              threadId,
+              ownerClientId ?? "farfield",
+              snapshotState,
+            ),
+            ...events,
+          ]
         : events;
       const reduced = reduceThreadStreamEvents(reductionInput);
       const state = reduced.get(threadId);
       return {
-        ownerClientId: state?.ownerClientId
-          ?? ownerClientId
-          ?? null,
+        ownerClientId: state?.ownerClientId ?? ownerClientId ?? null,
         conversationState: state?.conversationState ?? snapshotState,
-        liveStateError: null
+        liveStateError: null,
       };
     } catch (error) {
       const details =
@@ -591,7 +634,7 @@ export class CodexAgentAdapter implements AgentAdapter {
           ? {
               threadId: error.details.threadId,
               eventIndex: error.details.eventIndex,
-              patchIndex: error.details.patchIndex
+              patchIndex: error.details.patchIndex,
             }
           : null;
       logger.error(
@@ -599,9 +642,9 @@ export class CodexAgentAdapter implements AgentAdapter {
           threadId,
           eventCount: events.length,
           error: toErrorMessage(error),
-          details
+          details,
         },
-        "codex-thread-stream-reduction-failed"
+        "codex-thread-stream-reduction-failed",
       );
       return {
         ownerClientId,
@@ -610,25 +653,29 @@ export class CodexAgentAdapter implements AgentAdapter {
           kind: "reductionFailed",
           message: toErrorMessage(error),
           eventIndex: details?.eventIndex ?? null,
-          patchIndex: details?.patchIndex ?? null
-        }
+          patchIndex: details?.patchIndex ?? null,
+        },
       };
     }
   }
 
-  public async readStreamEvents(threadId: string, limit: number): Promise<AgentThreadStreamEvents> {
+  public async readStreamEvents(
+    threadId: string,
+    limit: number,
+  ): Promise<AgentThreadStreamEvents> {
     return {
-      ownerClientId: this.threadOwnerById.get(threadId)
-        ?? this.lastKnownOwnerClientId
-        ?? null,
-      events: (this.streamEventsByThreadId.get(threadId) ?? []).slice(-limit)
+      ownerClientId:
+        this.threadOwnerById.get(threadId) ??
+        this.lastKnownOwnerClientId ??
+        null,
+      events: (this.streamEventsByThreadId.get(threadId) ?? []).slice(-limit),
     };
   }
 
   public async replayRequest(
     method: string,
     params: IpcRequestFrame["params"],
-    options: SendRequestOptions = {}
+    options: SendRequestOptions = {},
   ): Promise<IpcResponseFrame["result"]> {
     this.ensureIpcReady();
     const previewFrame: IpcFrame = {
@@ -637,23 +684,27 @@ export class CodexAgentAdapter implements AgentAdapter {
       method,
       params,
       targetClientId: options.targetClientId,
-      version: options.version
+      version: options.version,
     };
     this.emitIpcFrame({
       direction: "out",
       frame: previewFrame,
       method,
-      threadId: extractThreadId(previewFrame)
+      threadId: extractThreadId(previewFrame),
     });
 
-    const response = await this.ipcClient.sendRequestAndWait(method, params, options);
+    const response = await this.ipcClient.sendRequestAndWait(
+      method,
+      params,
+      options,
+    );
     return response.result;
   }
 
   public replayBroadcast(
     method: string,
     params: IpcRequestFrame["params"],
-    options: SendRequestOptions = {}
+    options: SendRequestOptions = {},
   ): void {
     this.ensureIpcReady();
     const previewFrame: IpcFrame = {
@@ -661,7 +712,7 @@ export class CodexAgentAdapter implements AgentAdapter {
       method,
       params,
       targetClientId: options.targetClientId,
-      version: options.version
+      version: options.version,
     };
     this.emitIpcFrame({
       direction: "out",
@@ -673,8 +724,8 @@ export class CodexAgentAdapter implements AgentAdapter {
         method,
         params,
         targetClientId: options.targetClientId,
-        version: options.version
-      })
+        version: options.version,
+      }),
     });
 
     this.ipcClient.sendBroadcast(method, params, options);
@@ -693,11 +744,12 @@ export class CodexAgentAdapter implements AgentAdapter {
   }
 
   private setRuntimeState(next: CodexAgentRuntimeState): void {
-    const isSameState = this.runtimeState.appReady === next.appReady
-      && this.runtimeState.ipcConnected === next.ipcConnected
-      && this.runtimeState.ipcInitialized === next.ipcInitialized
-      && this.runtimeState.codexAvailable === next.codexAvailable
-      && this.runtimeState.lastError === next.lastError;
+    const isSameState =
+      this.runtimeState.appReady === next.appReady &&
+      this.runtimeState.ipcConnected === next.ipcConnected &&
+      this.runtimeState.ipcInitialized === next.ipcInitialized &&
+      this.runtimeState.codexAvailable === next.codexAvailable &&
+      this.runtimeState.lastError === next.lastError;
 
     if (isSameState) {
       return;
@@ -710,7 +762,7 @@ export class CodexAgentAdapter implements AgentAdapter {
   private patchRuntimeState(patch: Partial<CodexAgentRuntimeState>): void {
     this.setRuntimeState({
       ...this.runtimeState,
-      ...patch
+      ...patch,
     });
   }
 
@@ -722,12 +774,18 @@ export class CodexAgentAdapter implements AgentAdapter {
 
   private ensureIpcReady(): void {
     if (!this.isIpcReady()) {
-      throw new Error(this.runtimeState.lastError ?? "Desktop IPC is not connected");
+      throw new Error(
+        this.runtimeState.lastError ?? "Desktop IPC is not connected",
+      );
     }
   }
 
   private scheduleIpcReconnect(): void {
-    if (this.reconnectTimer || !this.runtimeState.codexAvailable || !this.started) {
+    if (
+      this.reconnectTimer ||
+      !this.runtimeState.codexAvailable ||
+      !this.started
+    ) {
       return;
     }
 
@@ -742,13 +800,13 @@ export class CodexAgentAdapter implements AgentAdapter {
       const result = await operation();
       this.patchRuntimeState({
         appReady: true,
-        lastError: null
+        lastError: null,
       });
       return result;
     } catch (error) {
       this.patchRuntimeState({
         appReady: !(error instanceof AppServerTransportError),
-        lastError: toErrorMessage(error)
+        lastError: toErrorMessage(error),
       });
       throw error;
     }
@@ -762,19 +820,21 @@ export class CodexAgentAdapter implements AgentAdapter {
     this.bootstrapInFlight = (async () => {
       try {
         await this.runAppServerCall(() =>
-          this.appClient.listThreads({ limit: 1, archived: false })
+          this.appClient.listThreads({ limit: 1, archived: false }),
         );
       } catch (error) {
         const message = toErrorMessage(error);
-        const isSpawnError = message.includes("ENOENT") ||
+        const isSpawnError =
+          message.includes("ENOENT") ||
           message.includes("not found") ||
-          (error instanceof Error && "code" in error &&
+          (error instanceof Error &&
+            "code" in error &&
             (error as NodeJS.ErrnoException).code === "ENOENT");
 
         if (isSpawnError) {
           this.patchRuntimeState({
             codexAvailable: false,
-            lastError: message
+            lastError: message,
           });
           logger.warn({ error: message }, "codex-not-found");
         }
@@ -790,18 +850,18 @@ export class CodexAgentAdapter implements AgentAdapter {
           await this.ipcClient.connect();
         }
         this.patchRuntimeState({
-          ipcConnected: true
+          ipcConnected: true,
         });
 
         await this.ipcClient.initialize(this.label);
         this.patchRuntimeState({
-          ipcInitialized: true
+          ipcInitialized: true,
         });
       } catch (error) {
         this.patchRuntimeState({
           ipcInitialized: false,
           ipcConnected: this.ipcClient.isConnected(),
-          lastError: toErrorMessage(error)
+          lastError: toErrorMessage(error),
         });
         this.scheduleIpcReconnect();
       } finally {
@@ -823,11 +883,12 @@ export class CodexAgentAdapter implements AgentAdapter {
       }
 
       const status = turn.status.trim().toLowerCase();
-      const isTerminal = status === "completed"
-        || status === "failed"
-        || status === "error"
-        || status === "cancelled"
-        || status === "canceled";
+      const isTerminal =
+        status === "completed" ||
+        status === "failed" ||
+        status === "error" ||
+        status === "cancelled" ||
+        status === "canceled";
       if (isTerminal) {
         continue;
       }
@@ -846,7 +907,7 @@ export class CodexAgentAdapter implements AgentAdapter {
 
   private resolveThreadTitle(
     threadId: string,
-    directTitle: string | null | undefined
+    directTitle: string | null | undefined,
   ): string | null | undefined {
     if (directTitle !== undefined) {
       return directTitle;
@@ -864,7 +925,10 @@ export class CodexAgentAdapter implements AgentAdapter {
     return snapshot.title;
   }
 
-  private setThreadTitle(threadId: string, title: string | null | undefined): void {
+  private setThreadTitle(
+    threadId: string,
+    title: string | null | undefined,
+  ): void {
     if (title === undefined) {
       this.threadTitleById.delete(threadId);
       return;
@@ -912,7 +976,7 @@ function describeFrame(frame: IpcFrame): string {
 function formatInvalidStreamEventMessage(
   threadId: string,
   event: IpcFrame,
-  error: unknown
+  error: unknown,
 ): string {
   const frame = describeFrame(event);
   if (error instanceof ProtocolValidationError) {
@@ -941,13 +1005,14 @@ function isThreadStateGenerating(state: ThreadConversationState): boolean {
     }
 
     const status = turn.status.trim().toLowerCase();
-    const isTerminal = status === "completed"
-      || status === "failed"
-      || status === "error"
-      || status === "cancelled"
-      || status === "canceled"
-      || status === "interrupted"
-      || status === "aborted";
+    const isTerminal =
+      status === "completed" ||
+      status === "failed" ||
+      status === "error" ||
+      status === "cancelled" ||
+      status === "canceled" ||
+      status === "interrupted" ||
+      status === "aborted";
     if (isTerminal) {
       continue;
     }
@@ -957,7 +1022,9 @@ function isThreadStateGenerating(state: ThreadConversationState): boolean {
   return false;
 }
 
-function parseIncomingThreadStreamBroadcast(frame: IpcFrame): ThreadStreamStateChangedBroadcast | null {
+function parseIncomingThreadStreamBroadcast(
+  frame: IpcFrame,
+): ThreadStreamStateChangedBroadcast | null {
   try {
     return parseThreadStreamStateChangedBroadcast(frame);
   } catch {
@@ -968,7 +1035,7 @@ function parseIncomingThreadStreamBroadcast(frame: IpcFrame): ThreadStreamStateC
 function buildSyntheticSnapshotEvent(
   threadId: string,
   sourceClientId: string,
-  conversationState: ThreadConversationState
+  conversationState: ThreadConversationState,
 ): ThreadStreamStateChangedBroadcast {
   return {
     type: "broadcast",
@@ -979,11 +1046,11 @@ function buildSyntheticSnapshotEvent(
       conversationId: threadId,
       change: {
         type: "snapshot",
-        conversationState
+        conversationState,
       },
       version: 0,
-      type: "thread-stream-state-changed"
-    }
+      type: "thread-stream-state-changed",
+    },
   };
 }
 
@@ -999,21 +1066,24 @@ function writeInvalidStreamEventDetail(detail: Record<string, unknown>): void {
     fs.appendFileSync(
       INVALID_STREAM_EVENTS_LOG_PATH,
       JSON.stringify(detail) + "\n",
-      { encoding: "utf8" }
+      { encoding: "utf8" },
     );
   } catch (error) {
     logger.warn(
       {
         path: INVALID_STREAM_EVENTS_LOG_PATH,
-        error: toErrorMessage(error)
+        error: toErrorMessage(error),
       },
-      "codex-invalid-thread-stream-event-detail-write-failed"
+      "codex-invalid-thread-stream-event-detail-write-failed",
     );
   }
 }
 
 function extractThreadId(frame: IpcFrame): string | null {
-  if (frame.type === "broadcast" && frame.method === "thread-stream-state-changed") {
+  if (
+    frame.type === "broadcast" &&
+    frame.method === "thread-stream-state-changed"
+  ) {
     const params = frame.params;
     if (!params || typeof params !== "object") {
       return null;
@@ -1040,7 +1110,7 @@ function extractThreadId(frame: IpcFrame): string | null {
   const candidates = [
     asRecord["conversationId"],
     asRecord["threadId"],
-    asRecord["turnId"]
+    asRecord["turnId"],
   ];
 
   for (const candidate of candidates) {

@@ -18,7 +18,7 @@ export function ChatComposer({
   isGenerating,
   placeholder = "Message Codex…",
   onInterrupt,
-  onSend
+  onSend,
 }: ChatComposerProps): React.JSX.Element {
   const [draft, setDraft] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -89,7 +89,9 @@ export function ChatComposer({
     previousHeightRef.current = 0;
   }, [canSend, draft, isBusy, isGenerating, onInterrupt, onSend]);
 
-  const disableSend = isGenerating ? !canSend || isBusy : !canSend || isBusy || !draft.trim();
+  const disableSend = isGenerating
+    ? !canSend || isBusy
+    : !canSend || isBusy || !draft.trim();
   const shouldSendOnEnter = useCallback(() => {
     if (typeof window.matchMedia !== "function") {
       return true;
@@ -108,10 +110,10 @@ export function ChatComposer({
         }}
         onKeyDown={(e) => {
           if (
-            e.key === "Enter"
-            && !e.shiftKey
-            && !e.nativeEvent.isComposing
-            && shouldSendOnEnter()
+            e.key === "Enter" &&
+            !e.shiftKey &&
+            !e.nativeEvent.isComposing &&
+            shouldSendOnEnter()
           ) {
             e.preventDefault();
             void sendDraft();

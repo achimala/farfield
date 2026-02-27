@@ -15,22 +15,31 @@ import {
   type UnifiedItem,
   type UnifiedProviderId,
   type UnifiedThread,
-  type UnifiedThreadSummary
+  type UnifiedThreadSummary,
 } from "@farfield/unified-surface";
 import type { AgentAdapter } from "../agents/types.js";
 
-type UnifiedCommandByKind<K extends UnifiedCommandKind> = Extract<UnifiedCommand, { kind: K }>;
-type UnifiedCommandResultByKind<K extends UnifiedCommandKind> = Extract<UnifiedCommandResult, { kind: K }>;
+type UnifiedCommandByKind<K extends UnifiedCommandKind> = Extract<
+  UnifiedCommand,
+  { kind: K }
+>;
+type UnifiedCommandResultByKind<K extends UnifiedCommandKind> = Extract<
+  UnifiedCommandResult,
+  { kind: K }
+>;
 
 type UnifiedCommandHandler<K extends UnifiedCommandKind> = (
-  command: UnifiedCommandByKind<K>
+  command: UnifiedCommandByKind<K>,
 ) => Promise<UnifiedCommandResultByKind<K>>;
 
 export type UnifiedCommandHandlerTable = {
   [K in UnifiedCommandKind]: UnifiedCommandHandler<K>;
 };
 
-export const FEATURE_ID_BY_COMMAND_KIND: Record<UnifiedCommandKind, UnifiedFeatureId> = {
+export const FEATURE_ID_BY_COMMAND_KIND: Record<
+  UnifiedCommandKind,
+  UnifiedFeatureId
+> = {
   listThreads: "listThreads",
   createThread: "createThread",
   readThread: "readThread",
@@ -42,10 +51,13 @@ export const FEATURE_ID_BY_COMMAND_KIND: Record<UnifiedCommandKind, UnifiedFeatu
   submitUserInput: "submitUserInput",
   readLiveState: "readLiveState",
   readStreamEvents: "readStreamEvents",
-  listProjectDirectories: "listProjectDirectories"
+  listProjectDirectories: "listProjectDirectories",
 };
 
-const PROVIDER_FEATURE_SUPPORT: Record<UnifiedProviderId, Record<UnifiedFeatureId, boolean>> = {
+const PROVIDER_FEATURE_SUPPORT: Record<
+  UnifiedProviderId,
+  Record<UnifiedFeatureId, boolean>
+> = {
   codex: {
     listThreads: true,
     createThread: true,
@@ -58,7 +70,7 @@ const PROVIDER_FEATURE_SUPPORT: Record<UnifiedProviderId, Record<UnifiedFeatureI
     submitUserInput: true,
     readLiveState: true,
     readStreamEvents: true,
-    listProjectDirectories: false
+    listProjectDirectories: false,
   },
   opencode: {
     listThreads: true,
@@ -72,8 +84,8 @@ const PROVIDER_FEATURE_SUPPORT: Record<UnifiedProviderId, Record<UnifiedFeatureI
     submitUserInput: false,
     readLiveState: false,
     readStreamEvents: false,
-    listProjectDirectories: true
-  }
+    listProjectDirectories: true,
+  },
 };
 
 export class UnifiedBackendFeatureError extends Error {
@@ -85,9 +97,12 @@ export class UnifiedBackendFeatureError extends Error {
     provider: UnifiedProviderId,
     featureId: UnifiedFeatureId,
     reason: UnifiedFeatureUnavailableReason,
-    detail?: string
+    detail?: string,
   ) {
-    super(detail ?? `Feature ${featureId} is unavailable for ${provider} (${reason})`);
+    super(
+      detail ??
+        `Feature ${featureId} is unavailable for ${provider} (${reason})`,
+    );
     this.name = "UnifiedBackendFeatureError";
     this.provider = provider;
     this.featureId = featureId;
@@ -99,9 +114,12 @@ export interface UnifiedProviderAdapter {
   readonly provider: UnifiedProviderId;
   readonly handlers: UnifiedCommandHandlerTable;
 
-  getFeatureAvailability(): Record<UnifiedFeatureId, UnifiedFeatureAvailability>;
+  getFeatureAvailability(): Record<
+    UnifiedFeatureId,
+    UnifiedFeatureAvailability
+  >;
   execute<K extends UnifiedCommandKind>(
-    command: UnifiedCommandByKind<K>
+    command: UnifiedCommandByKind<K>,
   ): Promise<UnifiedCommandResultByKind<K>>;
 }
 
@@ -117,15 +135,20 @@ export class AgentUnifiedProviderAdapter implements UnifiedProviderAdapter {
     this.handlers = createHandlerTable(provider, adapter);
   }
 
-  public getFeatureAvailability(): Record<UnifiedFeatureId, UnifiedFeatureAvailability> {
+  public getFeatureAvailability(): Record<
+    UnifiedFeatureId,
+    UnifiedFeatureAvailability
+  > {
     return buildProviderFeatureAvailability(this.provider, this.adapter);
   }
 
   public async execute<K extends UnifiedCommandKind>(
-    command: UnifiedCommandByKind<K>
+    command: UnifiedCommandByKind<K>,
   ): Promise<UnifiedCommandResultByKind<K>> {
     if (command.provider !== this.provider) {
-      throw new Error(`Command provider ${command.provider} does not match adapter ${this.provider}`);
+      throw new Error(
+        `Command provider ${command.provider} does not match adapter ${this.provider}`,
+      );
     }
 
     const featureId = FEATURE_ID_BY_COMMAND_KIND[command.kind];
@@ -139,7 +162,7 @@ export class AgentUnifiedProviderAdapter implements UnifiedProviderAdapter {
         this.provider,
         featureId,
         availability.reason,
-        availability.detail
+        availability.detail,
       );
     }
 
@@ -147,34 +170,41 @@ export class AgentUnifiedProviderAdapter implements UnifiedProviderAdapter {
   }
 
   private runCommand<K extends UnifiedCommandKind>(
-    command: UnifiedCommandByKind<K>
+    command: UnifiedCommandByKind<K>,
   ): Promise<UnifiedCommandResultByKind<K>> {
     return this.handlers[command.kind](command);
   }
 }
 
 export function createUnifiedProviderAdapters(
-  adapters: Record<UnifiedProviderId, AgentAdapter | null>
+  adapters: Record<UnifiedProviderId, AgentAdapter | null>,
 ): Record<UnifiedProviderId, UnifiedProviderAdapter | null> {
   return {
-    codex: adapters.codex ? new AgentUnifiedProviderAdapter("codex", adapters.codex) : null,
-    opencode: adapters.opencode ? new AgentUnifiedProviderAdapter("opencode", adapters.opencode) : null
+    codex: adapters.codex
+      ? new AgentUnifiedProviderAdapter("codex", adapters.codex)
+      : null,
+    opencode: adapters.opencode
+      ? new AgentUnifiedProviderAdapter("opencode", adapters.opencode)
+      : null,
   };
 }
 
 export function buildUnifiedFeatureMatrix(
-  adapters: Record<UnifiedProviderId, AgentAdapter | null>
+  adapters: Record<UnifiedProviderId, AgentAdapter | null>,
 ): UnifiedFeatureMatrix {
   const matrix: UnifiedFeatureMatrix = {
     codex: buildProviderFeatureAvailability("codex", adapters.codex),
-    opencode: buildProviderFeatureAvailability("opencode", adapters.opencode)
+    opencode: buildProviderFeatureAvailability("opencode", adapters.opencode),
   };
 
   UnifiedFeatureMatrixSchema.parse(matrix);
   return matrix;
 }
 
-function createHandlerTable(provider: UnifiedProviderId, adapter: AgentAdapter): UnifiedCommandHandlerTable {
+function createHandlerTable(
+  provider: UnifiedProviderId,
+  adapter: AgentAdapter,
+): UnifiedCommandHandlerTable {
   return {
     listThreads: async (command) => {
       const result = await adapter.listThreads({
@@ -182,7 +212,7 @@ function createHandlerTable(provider: UnifiedProviderId, adapter: AgentAdapter):
         archived: command.archived,
         all: command.all,
         maxPages: command.maxPages,
-        cursor: command.cursor ?? null
+        cursor: command.cursor ?? null,
       });
 
       return {
@@ -190,7 +220,9 @@ function createHandlerTable(provider: UnifiedProviderId, adapter: AgentAdapter):
         data: result.data.map((thread) => mapThreadSummary(provider, thread)),
         nextCursor: result.nextCursor ?? null,
         ...(typeof result.pages === "number" ? { pages: result.pages } : {}),
-        ...(typeof result.truncated === "boolean" ? { truncated: result.truncated } : {})
+        ...(typeof result.truncated === "boolean"
+          ? { truncated: result.truncated }
+          : {}),
       };
     },
 
@@ -198,34 +230,40 @@ function createHandlerTable(provider: UnifiedProviderId, adapter: AgentAdapter):
       const created = await adapter.createThread({
         ...(command.cwd ? { cwd: command.cwd } : {}),
         ...(command.model ? { model: command.model } : {}),
-        ...(command.modelProvider ? { modelProvider: command.modelProvider } : {}),
+        ...(command.modelProvider
+          ? { modelProvider: command.modelProvider }
+          : {}),
         ...(command.personality ? { personality: command.personality } : {}),
         ...(command.sandbox ? { sandbox: command.sandbox } : {}),
-        ...(command.approvalPolicy ? { approvalPolicy: command.approvalPolicy } : {}),
-        ...(typeof command.ephemeral === "boolean" ? { ephemeral: command.ephemeral } : {})
+        ...(command.approvalPolicy
+          ? { approvalPolicy: command.approvalPolicy }
+          : {}),
+        ...(typeof command.ephemeral === "boolean"
+          ? { ephemeral: command.ephemeral }
+          : {}),
       });
 
       const loaded = await adapter.readThread({
         threadId: created.threadId,
-        includeTurns: true
+        includeTurns: true,
       });
 
       return {
         kind: "createThread",
         threadId: created.threadId,
-        thread: mapThread(provider, loaded.thread)
+        thread: mapThread(provider, loaded.thread),
       };
     },
 
     readThread: async (command) => {
       const result = await adapter.readThread({
         threadId: command.threadId,
-        includeTurns: command.includeTurns
+        includeTurns: command.includeTurns,
       });
 
       return {
         kind: "readThread",
-        thread: mapThread(provider, result.thread)
+        thread: mapThread(provider, result.thread),
       };
     },
 
@@ -233,30 +271,40 @@ function createHandlerTable(provider: UnifiedProviderId, adapter: AgentAdapter):
       await adapter.sendMessage({
         threadId: command.threadId,
         text: command.text,
-        ...(command.ownerClientId ? { ownerClientId: command.ownerClientId } : {}),
+        ...(command.ownerClientId
+          ? { ownerClientId: command.ownerClientId }
+          : {}),
         ...(command.cwd ? { cwd: command.cwd } : {}),
-        ...(typeof command.isSteering === "boolean" ? { isSteering: command.isSteering } : {})
+        ...(typeof command.isSteering === "boolean"
+          ? { isSteering: command.isSteering }
+          : {}),
       });
 
       return {
-        kind: "sendMessage"
+        kind: "sendMessage",
       };
     },
 
     interrupt: async (command) => {
       await adapter.interrupt({
         threadId: command.threadId,
-        ...(command.ownerClientId ? { ownerClientId: command.ownerClientId } : {})
+        ...(command.ownerClientId
+          ? { ownerClientId: command.ownerClientId }
+          : {}),
       });
 
       return {
-        kind: "interrupt"
+        kind: "interrupt",
       };
     },
 
     listModels: async (command) => {
       if (!adapter.listModels) {
-        throw new UnifiedBackendFeatureError(provider, "listModels", "unsupportedByProvider");
+        throw new UnifiedBackendFeatureError(
+          provider,
+          "listModels",
+          "unsupportedByProvider",
+        );
       }
 
       const result = await adapter.listModels(command.limit);
@@ -267,16 +315,22 @@ function createHandlerTable(provider: UnifiedProviderId, adapter: AgentAdapter):
           displayName: model.displayName,
           description: model.description,
           defaultReasoningEffort: model.defaultReasoningEffort ?? null,
-          supportedReasoningEfforts: model.supportedReasoningEfforts.map((entry) => entry.reasoningEffort),
+          supportedReasoningEfforts: model.supportedReasoningEfforts.map(
+            (entry) => entry.reasoningEffort,
+          ),
           hidden: model.hidden ?? false,
-          isDefault: model.isDefault ?? false
-        }))
+          isDefault: model.isDefault ?? false,
+        })),
       };
     },
 
     listCollaborationModes: async () => {
       if (!adapter.listCollaborationModes) {
-        throw new UnifiedBackendFeatureError(provider, "listCollaborationModes", "unsupportedByProvider");
+        throw new UnifiedBackendFeatureError(
+          provider,
+          "listCollaborationModes",
+          "unsupportedByProvider",
+        );
       }
 
       const result = await adapter.listCollaborationModes();
@@ -286,22 +340,30 @@ function createHandlerTable(provider: UnifiedProviderId, adapter: AgentAdapter):
           name: mode.name,
           mode: mode.mode ?? "default",
           ...(mode.model !== undefined ? { model: mode.model } : {}),
-          ...(mode.reasoning_effort !== undefined ? { reasoningEffort: mode.reasoning_effort } : {}),
+          ...(mode.reasoning_effort !== undefined
+            ? { reasoningEffort: mode.reasoning_effort }
+            : {}),
           ...(mode.developer_instructions !== undefined
             ? { developerInstructions: mode.developer_instructions }
-            : {})
-        }))
+            : {}),
+        })),
       };
     },
 
     setCollaborationMode: async (command) => {
       if (!adapter.setCollaborationMode) {
-        throw new UnifiedBackendFeatureError(provider, "setCollaborationMode", "unsupportedByProvider");
+        throw new UnifiedBackendFeatureError(
+          provider,
+          "setCollaborationMode",
+          "unsupportedByProvider",
+        );
       }
 
       const result = await adapter.setCollaborationMode({
         threadId: command.threadId,
-        ...(command.ownerClientId ? { ownerClientId: command.ownerClientId } : {}),
+        ...(command.ownerClientId
+          ? { ownerClientId: command.ownerClientId }
+          : {}),
         collaborationMode: {
           mode: command.collaborationMode.mode,
           settings: {
@@ -309,43 +371,60 @@ function createHandlerTable(provider: UnifiedProviderId, adapter: AgentAdapter):
               ? { model: command.collaborationMode.settings.model }
               : {}),
             ...(command.collaborationMode.settings.reasoningEffort !== undefined
-              ? { reasoning_effort: command.collaborationMode.settings.reasoningEffort }
+              ? {
+                  reasoning_effort:
+                    command.collaborationMode.settings.reasoningEffort,
+                }
               : {}),
-            ...(command.collaborationMode.settings.developerInstructions !== undefined
-              ? { developer_instructions: command.collaborationMode.settings.developerInstructions }
-              : {})
-          }
-        }
+            ...(command.collaborationMode.settings.developerInstructions !==
+            undefined
+              ? {
+                  developer_instructions:
+                    command.collaborationMode.settings.developerInstructions,
+                }
+              : {}),
+          },
+        },
       });
 
       return {
         kind: "setCollaborationMode",
-        ownerClientId: result.ownerClientId
+        ownerClientId: result.ownerClientId,
       };
     },
 
     submitUserInput: async (command) => {
       if (!adapter.submitUserInput) {
-        throw new UnifiedBackendFeatureError(provider, "submitUserInput", "unsupportedByProvider");
+        throw new UnifiedBackendFeatureError(
+          provider,
+          "submitUserInput",
+          "unsupportedByProvider",
+        );
       }
 
       const result = await adapter.submitUserInput({
         threadId: command.threadId,
-        ...(command.ownerClientId ? { ownerClientId: command.ownerClientId } : {}),
+        ...(command.ownerClientId
+          ? { ownerClientId: command.ownerClientId }
+          : {}),
         requestId: command.requestId,
-        response: command.response
+        response: command.response,
       });
 
       return {
         kind: "submitUserInput",
         ownerClientId: result.ownerClientId,
-        requestId: result.requestId
+        requestId: result.requestId,
       };
     },
 
     readLiveState: async (command) => {
       if (!adapter.readLiveState) {
-        throw new UnifiedBackendFeatureError(provider, "readLiveState", "unsupportedByProvider");
+        throw new UnifiedBackendFeatureError(
+          provider,
+          "readLiveState",
+          "unsupportedByProvider",
+        );
       }
 
       const liveState = await adapter.readLiveState(command.threadId);
@@ -356,46 +435,68 @@ function createHandlerTable(provider: UnifiedProviderId, adapter: AgentAdapter):
         conversationState: liveState.conversationState
           ? mapThread(provider, liveState.conversationState)
           : null,
-        ...(liveState.liveStateError ? { liveStateError: liveState.liveStateError } : {})
+        ...(liveState.liveStateError
+          ? { liveStateError: liveState.liveStateError }
+          : {}),
       };
     },
 
     readStreamEvents: async (command) => {
       if (!adapter.readStreamEvents) {
-        throw new UnifiedBackendFeatureError(provider, "readStreamEvents", "unsupportedByProvider");
+        throw new UnifiedBackendFeatureError(
+          provider,
+          "readStreamEvents",
+          "unsupportedByProvider",
+        );
       }
 
-      const streamEvents = await adapter.readStreamEvents(command.threadId, command.limit);
+      const streamEvents = await adapter.readStreamEvents(
+        command.threadId,
+        command.limit,
+      );
       return {
         kind: "readStreamEvents",
         threadId: command.threadId,
         ownerClientId: streamEvents.ownerClientId,
-        events: streamEvents.events.map((event) => jsonValueFromString(JSON.stringify(event)))
+        events: streamEvents.events.map((event) =>
+          jsonValueFromString(JSON.stringify(event)),
+        ),
       };
     },
 
     listProjectDirectories: async () => {
       if (!adapter.listProjectDirectories) {
-        throw new UnifiedBackendFeatureError(provider, "listProjectDirectories", "unsupportedByProvider");
+        throw new UnifiedBackendFeatureError(
+          provider,
+          "listProjectDirectories",
+          "unsupportedByProvider",
+        );
       }
 
       const directories = await adapter.listProjectDirectories();
       return {
         kind: "listProjectDirectories",
-        directories
+        directories,
       };
-    }
+    },
   };
 }
 
 function buildProviderFeatureAvailability(
   provider: UnifiedProviderId,
-  adapter: AgentAdapter | null
+  adapter: AgentAdapter | null,
 ): Record<UnifiedFeatureId, UnifiedFeatureAvailability> {
-  const availability = {} as Record<UnifiedFeatureId, UnifiedFeatureAvailability>;
+  const availability = {} as Record<
+    UnifiedFeatureId,
+    UnifiedFeatureAvailability
+  >;
 
   for (const featureId of UNIFIED_FEATURE_IDS) {
-    availability[featureId] = resolveFeatureAvailability(provider, adapter, featureId);
+    availability[featureId] = resolveFeatureAvailability(
+      provider,
+      adapter,
+      featureId,
+    );
   }
 
   return availability;
@@ -404,7 +505,7 @@ function buildProviderFeatureAvailability(
 function resolveFeatureAvailability(
   provider: UnifiedProviderId,
   adapter: AgentAdapter | null,
-  featureId: UnifiedFeatureId
+  featureId: UnifiedFeatureId,
 ): UnifiedFeatureAvailability {
   if (!adapter || !adapter.isEnabled()) {
     return unavailable("providerDisabled");
@@ -419,56 +520,73 @@ function resolveFeatureAvailability(
   }
 
   return {
-    status: "available"
+    status: "available",
   };
 }
 
-function unavailable(reason: UnifiedFeatureUnavailableReason, detail?: string): UnifiedFeatureAvailability {
+function unavailable(
+  reason: UnifiedFeatureUnavailableReason,
+  detail?: string,
+): UnifiedFeatureAvailability {
   return {
     status: "unavailable",
     reason,
-    ...(detail ? { detail } : {})
+    ...(detail ? { detail } : {}),
   };
 }
 
-function mapThreadSummary(provider: UnifiedProviderId, thread: {
-  id: string;
-  preview: string;
-  title?: string | null | undefined;
-  isGenerating?: boolean | undefined;
-  createdAt: number;
-  updatedAt: number;
-  cwd?: string | undefined;
-  source?: string | undefined;
-}): UnifiedThreadSummary {
+function mapThreadSummary(
+  provider: UnifiedProviderId,
+  thread: {
+    id: string;
+    preview: string;
+    title?: string | null | undefined;
+    isGenerating?: boolean | undefined;
+    createdAt: number;
+    updatedAt: number;
+    cwd?: string | undefined;
+    source?: string | undefined;
+  },
+): UnifiedThreadSummary {
   return {
     id: thread.id,
     provider,
     preview: thread.preview,
     ...(thread.title !== undefined ? { title: thread.title } : {}),
-    ...(thread.isGenerating !== undefined ? { isGenerating: thread.isGenerating } : {}),
+    ...(thread.isGenerating !== undefined
+      ? { isGenerating: thread.isGenerating }
+      : {}),
     createdAt: thread.createdAt,
     updatedAt: thread.updatedAt,
     ...(thread.cwd ? { cwd: thread.cwd } : {}),
-    ...(thread.source ? { source: thread.source } : {})
+    ...(thread.source ? { source: thread.source } : {}),
   };
 }
 
-function mapThread(provider: UnifiedProviderId, thread: ThreadConversationState): UnifiedThread {
+function mapThread(
+  provider: UnifiedProviderId,
+  thread: ThreadConversationState,
+): UnifiedThread {
   return {
     id: thread.id,
     provider,
     turns: thread.turns.map((turn, turnIndex) => ({
-      id: (turn.id ?? turn.turnId ?? `${thread.id}-${String(turnIndex + 1)}`),
+      id: turn.id ?? turn.turnId ?? `${thread.id}-${String(turnIndex + 1)}`,
       ...(turn.turnId ? { turnId: turn.turnId } : {}),
       status: turn.status,
-      ...(turn.turnStartedAtMs !== undefined ? { turnStartedAtMs: turn.turnStartedAtMs } : {}),
+      ...(turn.turnStartedAtMs !== undefined
+        ? { turnStartedAtMs: turn.turnStartedAtMs }
+        : {}),
       ...(turn.finalAssistantStartedAtMs !== undefined
         ? { finalAssistantStartedAtMs: turn.finalAssistantStartedAtMs }
         : {}),
-      ...(turn.error !== undefined ? { error: jsonValueFromString(JSON.stringify(turn.error)) } : {}),
-      ...(turn.diff !== undefined ? { diff: jsonValueFromString(JSON.stringify(turn.diff)) } : {}),
-      items: turn.items.map(mapTurnItem)
+      ...(turn.error !== undefined
+        ? { error: jsonValueFromString(JSON.stringify(turn.error)) }
+        : {}),
+      ...(turn.diff !== undefined
+        ? { diff: jsonValueFromString(JSON.stringify(turn.diff)) }
+        : {}),
+      items: turn.items.map(mapTurnItem),
     })),
     requests: thread.requests.map((request) => ({
       id: request.id,
@@ -485,11 +603,13 @@ function mapThread(provider: UnifiedProviderId, thread: ThreadConversationState)
           isSecret: question.isSecret ?? false,
           options: question.options.map((option) => ({
             label: option.label,
-            description: option.description
-          }))
-        }))
+            description: option.description,
+          })),
+        })),
       },
-      ...(typeof request.completed === "boolean" ? { completed: request.completed } : {})
+      ...(typeof request.completed === "boolean"
+        ? { completed: request.completed }
+        : {}),
     })),
     ...(thread.createdAt !== undefined ? { createdAt: thread.createdAt } : {}),
     ...(thread.updatedAt !== undefined ? { updatedAt: thread.updatedAt } : {}),
@@ -500,61 +620,80 @@ function mapThread(provider: UnifiedProviderId, thread: ThreadConversationState)
             ? {
                 mode: thread.latestCollaborationMode.mode,
                 settings: {
-                  ...(thread.latestCollaborationMode.settings.model !== undefined
+                  ...(thread.latestCollaborationMode.settings.model !==
+                  undefined
                     ? { model: thread.latestCollaborationMode.settings.model }
                     : {}),
-                  ...(thread.latestCollaborationMode.settings.reasoning_effort !== undefined
-                    ? { reasoningEffort: thread.latestCollaborationMode.settings.reasoning_effort }
+                  ...(thread.latestCollaborationMode.settings
+                    .reasoning_effort !== undefined
+                    ? {
+                        reasoningEffort:
+                          thread.latestCollaborationMode.settings
+                            .reasoning_effort,
+                      }
                     : {}),
-                  ...(thread.latestCollaborationMode.settings.developer_instructions !== undefined
-                    ? { developerInstructions: thread.latestCollaborationMode.settings.developer_instructions }
-                    : {})
-                }
+                  ...(thread.latestCollaborationMode.settings
+                    .developer_instructions !== undefined
+                    ? {
+                        developerInstructions:
+                          thread.latestCollaborationMode.settings
+                            .developer_instructions,
+                      }
+                    : {}),
+                },
               }
-            : null
+            : null,
         }
       : {}),
-    ...(thread.latestModel !== undefined ? { latestModel: thread.latestModel } : {}),
+    ...(thread.latestModel !== undefined
+      ? { latestModel: thread.latestModel }
+      : {}),
     ...(thread.latestReasoningEffort !== undefined
       ? { latestReasoningEffort: thread.latestReasoningEffort }
       : {}),
     ...(thread.cwd ? { cwd: thread.cwd } : {}),
-    ...(thread.source ? { source: thread.source } : {})
+    ...(thread.source ? { source: thread.source } : {}),
   };
 }
 
-function mapTurnItem(item: ThreadConversationState["turns"][number]["items"][number]): UnifiedItem {
+function mapTurnItem(
+  item: ThreadConversationState["turns"][number]["items"][number],
+): UnifiedItem {
   switch (item.type) {
     case "userMessage":
       return {
         id: item.id,
         type: "userMessage",
-        content: item.content.map((part) => (
+        content: item.content.map((part) =>
           part.type === "text"
             ? { type: "text", text: part.text }
-            : { type: "image", url: part.url }
-        ))
+            : { type: "image", url: part.url },
+        ),
       };
 
     case "steeringUserMessage":
       return {
         id: item.id,
         type: "steeringUserMessage",
-        content: item.content.map((part) => (
+        content: item.content.map((part) =>
           part.type === "text"
             ? { type: "text", text: part.text }
-            : { type: "image", url: part.url }
-        )),
+            : { type: "image", url: part.url },
+        ),
         ...(item.attachments
-          ? { attachments: item.attachments.map((attachment) => jsonValueFromString(JSON.stringify(attachment))) }
-          : {})
+          ? {
+              attachments: item.attachments.map((attachment) =>
+                jsonValueFromString(JSON.stringify(attachment)),
+              ),
+            }
+          : {}),
       };
 
     case "agentMessage":
       return {
         id: item.id,
         type: "agentMessage",
-        text: item.text
+        text: item.text,
       };
 
     case "error":
@@ -562,11 +701,17 @@ function mapTurnItem(item: ThreadConversationState["turns"][number]["items"][num
         id: item.id,
         type: "error",
         message: item.message,
-        ...(typeof item.willRetry === "boolean" ? { willRetry: item.willRetry } : {}),
+        ...(typeof item.willRetry === "boolean"
+          ? { willRetry: item.willRetry }
+          : {}),
         ...(item.errorInfo !== undefined ? { errorInfo: item.errorInfo } : {}),
         ...(item.additionalDetails !== undefined
-          ? { additionalDetails: jsonValueFromString(JSON.stringify(item.additionalDetails)) }
-          : {})
+          ? {
+              additionalDetails: jsonValueFromString(
+                JSON.stringify(item.additionalDetails),
+              ),
+            }
+          : {}),
       };
 
     case "reasoning":
@@ -574,25 +719,27 @@ function mapTurnItem(item: ThreadConversationState["turns"][number]["items"][num
         id: item.id,
         type: "reasoning",
         ...(item.summary ? { summary: item.summary } : {}),
-        ...(item.text ? { text: item.text } : {})
+        ...(item.text ? { text: item.text } : {}),
       };
 
     case "plan":
       return {
         id: item.id,
         type: "plan",
-        text: item.text
+        text: item.text,
       };
 
     case "todo-list":
       return {
         id: item.id,
         type: "todoList",
-        ...(item.explanation !== undefined ? { explanation: item.explanation } : {}),
+        ...(item.explanation !== undefined
+          ? { explanation: item.explanation }
+          : {}),
         plan: item.plan.map((entry) => ({
           step: entry.step,
-          status: entry.status
-        }))
+          status: entry.status,
+        })),
       };
 
     case "planImplementation":
@@ -601,7 +748,9 @@ function mapTurnItem(item: ThreadConversationState["turns"][number]["items"][num
         type: "planImplementation",
         turnId: item.turnId,
         planContent: item.planContent,
-        ...(typeof item.isCompleted === "boolean" ? { isCompleted: item.isCompleted } : {})
+        ...(typeof item.isCompleted === "boolean"
+          ? { isCompleted: item.isCompleted }
+          : {}),
       };
 
     case "userInputResponse":
@@ -613,10 +762,14 @@ function mapTurnItem(item: ThreadConversationState["turns"][number]["items"][num
         questions: item.questions.map((question) => ({
           id: question.id,
           ...(question.header !== undefined ? { header: question.header } : {}),
-          ...(question.question !== undefined ? { question: question.question } : {})
+          ...(question.question !== undefined
+            ? { question: question.question }
+            : {}),
         })),
         answers: item.answers,
-        ...(typeof item.completed === "boolean" ? { completed: item.completed } : {})
+        ...(typeof item.completed === "boolean"
+          ? { completed: item.completed }
+          : {}),
       };
 
     case "commandExecution":
@@ -631,16 +784,22 @@ function mapTurnItem(item: ThreadConversationState["turns"][number]["items"][num
           ? {
               commandActions: item.commandActions.map((action) => ({
                 type: action.type,
-                ...(action.command !== undefined ? { command: action.command } : {}),
+                ...(action.command !== undefined
+                  ? { command: action.command }
+                  : {}),
                 ...(action.name !== undefined ? { name: action.name } : {}),
                 ...(action.path !== undefined ? { path: action.path } : {}),
-                ...(action.query !== undefined ? { query: action.query } : {})
-              }))
+                ...(action.query !== undefined ? { query: action.query } : {}),
+              })),
             }
           : {}),
-        ...(item.aggregatedOutput !== undefined ? { aggregatedOutput: item.aggregatedOutput } : {}),
+        ...(item.aggregatedOutput !== undefined
+          ? { aggregatedOutput: item.aggregatedOutput }
+          : {}),
         ...(item.exitCode !== undefined ? { exitCode: item.exitCode } : {}),
-        ...(item.durationMs !== undefined ? { durationMs: item.durationMs } : {})
+        ...(item.durationMs !== undefined
+          ? { durationMs: item.durationMs }
+          : {}),
       };
 
     case "fileChange":
@@ -652,17 +811,21 @@ function mapTurnItem(item: ThreadConversationState["turns"][number]["items"][num
           path: change.path,
           kind: {
             type: change.kind.type,
-            ...(change.kind.move_path !== undefined ? { movePath: change.kind.move_path } : {})
+            ...(change.kind.move_path !== undefined
+              ? { movePath: change.kind.move_path }
+              : {}),
           },
-          ...(change.diff !== undefined ? { diff: change.diff } : {})
-        }))
+          ...(change.diff !== undefined ? { diff: change.diff } : {}),
+        })),
       };
 
     case "contextCompaction":
       return {
         id: item.id,
         type: "contextCompaction",
-        ...(typeof item.completed === "boolean" ? { completed: item.completed } : {})
+        ...(typeof item.completed === "boolean"
+          ? { completed: item.completed }
+          : {}),
       };
 
     case "webSearch":
@@ -672,9 +835,13 @@ function mapTurnItem(item: ThreadConversationState["turns"][number]["items"][num
         query: item.query,
         action: {
           type: item.action.type,
-          ...(item.action.query !== undefined ? { query: item.action.query } : {}),
-          ...(item.action.queries !== undefined ? { queries: item.action.queries } : {})
-        }
+          ...(item.action.query !== undefined
+            ? { query: item.action.query }
+            : {}),
+          ...(item.action.queries !== undefined
+            ? { queries: item.action.queries }
+            : {}),
+        },
       };
 
     case "mcpToolCall":
@@ -689,22 +856,29 @@ function mapTurnItem(item: ThreadConversationState["turns"][number]["items"][num
           ? {
               result: item.result
                 ? {
-                    content: item.result.content.map((entry) => jsonValueFromString(JSON.stringify(entry))),
+                    content: item.result.content.map((entry) =>
+                      jsonValueFromString(JSON.stringify(entry)),
+                    ),
                     ...(item.result.structuredContent !== undefined
                       ? {
-                          structuredContent: item.result.structuredContent === null
-                            ? null
-                            : jsonValueFromString(JSON.stringify(item.result.structuredContent))
+                          structuredContent:
+                            item.result.structuredContent === null
+                              ? null
+                              : jsonValueFromString(
+                                  JSON.stringify(item.result.structuredContent),
+                                ),
                         }
-                      : {})
+                      : {}),
                   }
-                : null
+                : null,
             }
           : {}),
         ...(item.error !== undefined
           ? { error: item.error ? { message: item.error.message } : null }
           : {}),
-        ...(item.durationMs !== undefined ? { durationMs: item.durationMs } : {})
+        ...(item.durationMs !== undefined
+          ? { durationMs: item.durationMs }
+          : {}),
       };
 
     case "collabAgentToolCall":
@@ -716,28 +890,28 @@ function mapTurnItem(item: ThreadConversationState["turns"][number]["items"][num
         senderThreadId: item.senderThreadId,
         receiverThreadIds: item.receiverThreadIds,
         ...(item.prompt !== undefined ? { prompt: item.prompt } : {}),
-        agentsStates: item.agentsStates
+        agentsStates: item.agentsStates,
       };
 
     case "imageView":
       return {
         id: item.id,
         type: "imageView",
-        path: item.path
+        path: item.path,
       };
 
     case "enteredReviewMode":
       return {
         id: item.id,
         type: "enteredReviewMode",
-        review: item.review
+        review: item.review,
       };
 
     case "exitedReviewMode":
       return {
         id: item.id,
         type: "exitedReviewMode",
-        review: item.review
+        review: item.review,
       };
 
     case "modelChanged":
@@ -745,7 +919,7 @@ function mapTurnItem(item: ThreadConversationState["turns"][number]["items"][num
         id: item.id,
         type: "modelChanged",
         ...(item.fromModel !== undefined ? { fromModel: item.fromModel } : {}),
-        ...(item.toModel !== undefined ? { toModel: item.toModel } : {})
+        ...(item.toModel !== undefined ? { toModel: item.toModel } : {}),
       };
 
     default:
@@ -757,18 +931,26 @@ function jsonValueFromString(serialized: string): JsonValue {
   return JsonValueSchema.parse(JSON.parse(serialized));
 }
 
-type MissingCommandHandlers = Exclude<UnifiedCommandKind, keyof UnifiedCommandHandlerTable>;
-type ExtraCommandHandlers = Exclude<keyof UnifiedCommandHandlerTable, UnifiedCommandKind>;
+type MissingCommandHandlers = Exclude<
+  UnifiedCommandKind,
+  keyof UnifiedCommandHandlerTable
+>;
+type ExtraCommandHandlers = Exclude<
+  keyof UnifiedCommandHandlerTable,
+  UnifiedCommandKind
+>;
 
 type AssertTrue<T extends true> = T;
 type IsNever<T> = [T] extends [never] ? true : false;
 
-type _AssertNoMissingCommandHandlers = AssertTrue<IsNever<MissingCommandHandlers>>;
+type _AssertNoMissingCommandHandlers = AssertTrue<
+  IsNever<MissingCommandHandlers>
+>;
 type _AssertNoExtraCommandHandlers = AssertTrue<IsNever<ExtraCommandHandlers>>;
 
-void ({
+void {
   commandKinds: UNIFIED_COMMAND_KINDS,
   featureIds: UNIFIED_FEATURE_IDS,
   providerSupport: PROVIDER_FEATURE_SUPPORT,
-  featureByCommandKind: FEATURE_ID_BY_COMMAND_KIND
-});
+  featureByCommandKind: FEATURE_ID_BY_COMMAND_KIND,
+};

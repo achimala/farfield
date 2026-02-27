@@ -5,7 +5,7 @@ import {
   useEffect,
   useMemo,
   useRef,
-  useState
+  useState,
 } from "react";
 import {
   Activity,
@@ -21,9 +21,8 @@ import {
   Moon,
   PanelLeft,
   Plus,
-  RefreshCcw,
   Sun,
-  X
+  X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -47,12 +46,12 @@ import {
   startTrace,
   stopTrace,
   submitUserInput,
-  type AgentId
+  type AgentId,
 } from "@/lib/api";
 import {
   UnifiedEventSchema,
   type UnifiedFeatureAvailability,
-  type UnifiedFeatureId
+  type UnifiedFeatureId,
 } from "@farfield/unified-surface";
 import { useTheme } from "@/hooks/useTheme";
 import { ConversationItem } from "@/components/ConversationItem";
@@ -66,20 +65,20 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuTrigger
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
-  TooltipTrigger
+  TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue
+  SelectValue,
 } from "@/components/ui/select";
 
 /* ── Types ─────────────────────────────────────────────────── */
@@ -98,7 +97,9 @@ type PendingRequest = ReturnType<typeof getPendingUserInputRequests>[number];
 type PendingRequestId = PendingRequest["id"];
 type Thread = ThreadsResponse["data"][number];
 type AgentDescriptor = AgentsResponse["agents"][number];
-type ConversationTurn = NonNullable<ReadThreadResponse["thread"]>["turns"][number];
+type ConversationTurn = NonNullable<
+  ReadThreadResponse["thread"]
+>["turns"][number];
 type ConversationTurnItem = NonNullable<ConversationTurn["items"]>[number];
 type ConversationItemType = ConversationTurnItem["type"];
 
@@ -120,10 +121,15 @@ interface RefreshFlags {
 
 /* ── Helpers ────────────────────────────────────────────────── */
 function formatDate(value: number | string | null | undefined): string {
-  if (typeof value === "number") return new Date(value * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (typeof value === "number")
+    return new Date(value * 1000).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   if (typeof value === "string") {
     const d = new Date(value);
-    if (!Number.isNaN(d.getTime())) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    if (!Number.isNaN(d.getTime()))
+      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     return value;
   }
   return "";
@@ -148,7 +154,8 @@ function threadRecencyTimestamp(thread: Thread): number {
 }
 
 function compareThreadsByRecency(left: Thread, right: Thread): number {
-  const recencyDelta = threadRecencyTimestamp(right) - threadRecencyTimestamp(left);
+  const recencyDelta =
+    threadRecencyTimestamp(right) - threadRecencyTimestamp(left);
   if (recencyDelta !== 0) {
     return recencyDelta;
   }
@@ -175,7 +182,7 @@ function buildThreadSignature(thread: Thread): string {
     thread.preview,
     thread.provider,
     thread.cwd ?? "",
-    thread.source ?? ""
+    thread.source ?? "",
   ].join("|");
 }
 
@@ -183,20 +190,31 @@ function buildThreadsSignature(threads: Thread[]): string[] {
   return threads.map(buildThreadSignature);
 }
 
-function mergeIncomingThreads(nextThreads: Thread[], previousThreads: Thread[]): Thread[] {
-  const previousById = new Map(previousThreads.map((thread) => [thread.id, thread]));
+function mergeIncomingThreads(
+  nextThreads: Thread[],
+  previousThreads: Thread[],
+): Thread[] {
+  const previousById = new Map(
+    previousThreads.map((thread) => [thread.id, thread]),
+  );
   const merged = nextThreads.map((thread) => {
     const previous = previousById.get(thread.id);
-    if ((thread.title !== undefined || previous?.title === undefined)
-      && (thread.isGenerating !== undefined || previous?.isGenerating === undefined)) {
+    if (
+      (thread.title !== undefined || previous?.title === undefined) &&
+      (thread.isGenerating !== undefined ||
+        previous?.isGenerating === undefined)
+    ) {
       return thread;
     }
     return {
       ...thread,
-      ...(thread.title !== undefined || previous?.title === undefined ? {} : { title: previous.title }),
-      ...(thread.isGenerating !== undefined || previous?.isGenerating === undefined
+      ...(thread.title !== undefined || previous?.title === undefined
         ? {}
-        : { isGenerating: previous.isGenerating })
+        : { title: previous.title }),
+      ...(thread.isGenerating !== undefined ||
+      previous?.isGenerating === undefined
+        ? {}
+        : { isGenerating: previous.isGenerating }),
     };
   });
 
@@ -220,7 +238,9 @@ function shouldRenderConversationItem(item: ConversationTurnItem): boolean {
   switch (item.type) {
     case "userMessage":
     case "steeringUserMessage":
-      return item.content.some((part) => part.type === "text" && part.text.length > 0);
+      return item.content.some(
+        (part) => part.type === "text" && part.text.length > 0,
+      );
     case "agentMessage":
       return item.text.length > 0;
     case "reasoning": {
@@ -233,13 +253,15 @@ function shouldRenderConversationItem(item: ConversationTurnItem): boolean {
   }
 }
 
-function isFeatureAvailable(availability: UnifiedFeatureAvailability | undefined): boolean {
+function isFeatureAvailable(
+  availability: UnifiedFeatureAvailability | undefined,
+): boolean {
   return availability?.status === "available";
 }
 
 function canUseFeature(
   descriptor: AgentDescriptor | null | undefined,
-  featureId: UnifiedFeatureId
+  featureId: UnifiedFeatureId,
 ): boolean {
   if (!descriptor) {
     return false;
@@ -251,7 +273,9 @@ function isTurnInProgressStatus(status: string | undefined): boolean {
   return status === "in-progress" || status === "inProgress";
 }
 
-function isThreadGeneratingState(state: NonNullable<ReadThreadResponse["thread"]> | null | undefined): boolean {
+function isThreadGeneratingState(
+  state: NonNullable<ReadThreadResponse["thread"]> | null | undefined,
+): boolean {
   if (!state) {
     return false;
   }
@@ -266,16 +290,23 @@ function signaturesMatch(prev: string[], next: string[]): boolean {
   return prev.every((value, index) => value === next[index]);
 }
 
-const DEFAULT_EFFORT_OPTIONS = ["minimal", "low", "medium", "high", "xhigh"] as const;
+const DEFAULT_EFFORT_OPTIONS = [
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+] as const;
 const INITIAL_VISIBLE_CHAT_ITEMS = 90;
 const VISIBLE_CHAT_ITEMS_STEP = 80;
 const APP_DEFAULT_VALUE = "__app_default__";
 const ASSUMED_APP_DEFAULT_MODEL = "gpt-5.3-codex";
 const ASSUMED_APP_DEFAULT_EFFORT = "medium";
-const SIDEBAR_COLLAPSED_GROUPS_STORAGE_KEY = "farfield.sidebar.collapsed-groups.v1";
+const SIDEBAR_COLLAPSED_GROUPS_STORAGE_KEY =
+  "farfield.sidebar.collapsed-groups.v1";
 const AGENT_FAVICON_BY_ID: Record<AgentId, string> = {
   codex: "https://openai.com/favicon.ico",
-  opencode: "https://opencode.ai/favicon.ico"
+  opencode: "https://opencode.ai/favicon.ico",
 };
 
 function agentFavicon(agentId: AgentId | null | undefined): string | null {
@@ -288,7 +319,7 @@ function agentFavicon(agentId: AgentId | null | undefined): string | null {
 function AgentFavicon({
   agentId,
   label,
-  className
+  className,
 }: {
   agentId: AgentId;
   label: string;
@@ -316,11 +347,14 @@ function isPlanModeOption(mode: {
   name: string;
 }): boolean {
   const modeKey = typeof mode.mode === "string" ? mode.mode : "";
-  return modeKey.toLowerCase().includes("plan") || mode.name.toLowerCase().includes("plan");
+  return (
+    modeKey.toLowerCase().includes("plan") ||
+    mode.name.toLowerCase().includes("plan")
+  );
 }
 
 function getConversationStateUpdatedAt(
-  state: NonNullable<ReadThreadResponse["thread"]> | null | undefined
+  state: NonNullable<ReadThreadResponse["thread"]> | null | undefined,
 ): number {
   if (!state || typeof state.updatedAt !== "number") {
     return Number.NEGATIVE_INFINITY;
@@ -329,7 +363,7 @@ function getConversationStateUpdatedAt(
 }
 
 function hasExplicitModeSelectionInState(
-  state: NonNullable<ReadThreadResponse["thread"]> | null | undefined
+  state: NonNullable<ReadThreadResponse["thread"]> | null | undefined,
 ): boolean {
   if (!state) {
     return false;
@@ -351,7 +385,7 @@ function hasExplicitModeSelectionInState(
 }
 
 function countConversationItems(
-  state: NonNullable<ReadThreadResponse["thread"]> | null | undefined
+  state: NonNullable<ReadThreadResponse["thread"]> | null | undefined,
 ): number {
   if (!state) {
     return -1;
@@ -365,7 +399,7 @@ function countConversationItems(
 
 function pickPreferredConversationState(
   liveState: NonNullable<ReadThreadResponse["thread"]>,
-  readState: NonNullable<ReadThreadResponse["thread"]>
+  readState: NonNullable<ReadThreadResponse["thread"]>,
 ): NonNullable<ReadThreadResponse["thread"]> {
   const liveUpdatedAt = getConversationStateUpdatedAt(liveState);
   const readUpdatedAt = getConversationStateUpdatedAt(readState);
@@ -384,7 +418,9 @@ function pickPreferredConversationState(
   }
 
   if (liveState.turns.length !== readState.turns.length) {
-    return liveState.turns.length > readState.turns.length ? liveState : readState;
+    return liveState.turns.length > readState.turns.length
+      ? liveState
+      : readState;
   }
 
   const liveItemCount = countConversationItems(liveState);
@@ -396,7 +432,11 @@ function pickPreferredConversationState(
   return readState;
 }
 
-function buildModeSignature(modeKey: string, modelId: string, effort: string): string {
+function buildModeSignature(
+  modeKey: string,
+  modelId: string,
+  effort: string,
+): string {
   return `${modeKey}|${modelId}|${effort}`;
 }
 
@@ -410,7 +450,7 @@ function normalizeNullableModeValue(value: string | null | undefined): string {
 
 function normalizeModeSettingValue(
   value: string | null | undefined,
-  assumedDefault: string
+  assumedDefault: string,
 ): string {
   const normalized = normalizeNullableModeValue(value);
   if (!normalized) {
@@ -422,7 +462,9 @@ function normalizeModeSettingValue(
   return normalized;
 }
 
-function readModeSelectionFromConversationState(state: NonNullable<ReadThreadResponse["thread"]> | null): {
+function readModeSelectionFromConversationState(
+  state: NonNullable<ReadThreadResponse["thread"]> | null,
+): {
   modeKey: string;
   modelId: string;
   reasoningEffort: string;
@@ -431,7 +473,7 @@ function readModeSelectionFromConversationState(state: NonNullable<ReadThreadRes
     return {
       modeKey: "",
       modelId: "",
-      reasoningEffort: ""
+      reasoningEffort: "",
     };
   }
 
@@ -440,31 +482,41 @@ function readModeSelectionFromConversationState(state: NonNullable<ReadThreadRes
       modeKey: state.latestCollaborationMode.mode,
       modelId: normalizeModeSettingValue(
         state.latestCollaborationMode.settings.model,
-        ASSUMED_APP_DEFAULT_MODEL
+        ASSUMED_APP_DEFAULT_MODEL,
       ),
       reasoningEffort: normalizeModeSettingValue(
         state.latestCollaborationMode.settings.reasoningEffort,
-        ASSUMED_APP_DEFAULT_EFFORT
-      )
+        ASSUMED_APP_DEFAULT_EFFORT,
+      ),
     };
   }
 
   return {
     modeKey: "",
-    modelId: normalizeModeSettingValue(state.latestModel, ASSUMED_APP_DEFAULT_MODEL),
-    reasoningEffort: normalizeModeSettingValue(state.latestReasoningEffort, ASSUMED_APP_DEFAULT_EFFORT)
+    modelId: normalizeModeSettingValue(
+      state.latestModel,
+      ASSUMED_APP_DEFAULT_MODEL,
+    ),
+    reasoningEffort: normalizeModeSettingValue(
+      state.latestReasoningEffort,
+      ASSUMED_APP_DEFAULT_EFFORT,
+    ),
   };
 }
 
 function modeSelectionSignatureFromConversationState(
-  state: NonNullable<ReadThreadResponse["thread"]> | null | undefined
+  state: NonNullable<ReadThreadResponse["thread"]> | null | undefined,
 ): string {
   const selection = readModeSelectionFromConversationState(state ?? null);
-  return buildModeSignature(selection.modeKey, selection.modelId, selection.reasoningEffort);
+  return buildModeSignature(
+    selection.modeKey,
+    selection.modelId,
+    selection.reasoningEffort,
+  );
 }
 
 function conversationProgressSignature(
-  state: NonNullable<ReadThreadResponse["thread"]> | null | undefined
+  state: NonNullable<ReadThreadResponse["thread"]> | null | undefined,
 ): string {
   if (!state) {
     return "";
@@ -485,11 +537,13 @@ function conversationProgressSignature(
     lastTurn.status,
     String(items.length),
     lastItem?.id ?? "",
-    lastItem?.type ?? ""
+    lastItem?.type ?? "",
   ].join("|");
 }
 
-function buildLiveStateSyncSignature(state: LiveStateResponse | null | undefined): string {
+function buildLiveStateSyncSignature(
+  state: LiveStateResponse | null | undefined,
+): string {
   if (!state) {
     return "";
   }
@@ -501,11 +555,13 @@ function buildLiveStateSyncSignature(state: LiveStateResponse | null | undefined
     String(getConversationStateUpdatedAt(conversationState)),
     String(conversationState?.turns.length ?? -1),
     modeSelectionSignatureFromConversationState(conversationState),
-    conversationProgressSignature(conversationState)
+    conversationProgressSignature(conversationState),
   ].join("|");
 }
 
-function buildReadThreadSyncSignature(state: ReadThreadResponse | null | undefined): string {
+function buildReadThreadSyncSignature(
+  state: ReadThreadResponse | null | undefined,
+): string {
   if (!state) {
     return "";
   }
@@ -516,7 +572,7 @@ function buildReadThreadSyncSignature(state: ReadThreadResponse | null | undefin
     String(getConversationStateUpdatedAt(conversationState)),
     String(conversationState.turns.length),
     modeSelectionSignatureFromConversationState(conversationState),
-    conversationProgressSignature(conversationState)
+    conversationProgressSignature(conversationState),
   ].join("|");
 }
 
@@ -547,7 +603,9 @@ function readSidebarCollapsedGroupsFromStorage(): Record<string, boolean> {
       return {};
     }
     const collapsed: Record<string, boolean> = {};
-    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+    for (const [key, value] of Object.entries(
+      parsed as Record<string, unknown>,
+    )) {
       if (typeof value === "boolean") {
         collapsed[key] = value;
       }
@@ -558,7 +616,9 @@ function readSidebarCollapsedGroupsFromStorage(): Record<string, boolean> {
   }
 }
 
-function writeSidebarCollapsedGroupsToStorage(value: Record<string, boolean>): void {
+function writeSidebarCollapsedGroupsToStorage(
+  value: Record<string, boolean>,
+): void {
   if (typeof window === "undefined") {
     return;
   }
@@ -567,13 +627,19 @@ function writeSidebarCollapsedGroupsToStorage(value: Record<string, boolean>): v
     if (!storage || typeof storage.setItem !== "function") {
       return;
     }
-    storage.setItem(SIDEBAR_COLLAPSED_GROUPS_STORAGE_KEY, JSON.stringify(value));
+    storage.setItem(
+      SIDEBAR_COLLAPSED_GROUPS_STORAGE_KEY,
+      JSON.stringify(value),
+    );
   } catch {
     // Ignore storage errors.
   }
 }
 
-function parseUiStateFromPath(pathname: string): { threadId: string | null; tab: "chat" | "debug" } {
+function parseUiStateFromPath(pathname: string): {
+  threadId: string | null;
+  tab: "chat" | "debug";
+} {
   const segments = pathname.split("/").filter((segment) => segment.length > 0);
   if (segments.length === 0) {
     return { threadId: null, tab: "chat" };
@@ -581,7 +647,11 @@ function parseUiStateFromPath(pathname: string): { threadId: string | null; tab:
   if (segments.length === 1 && segments[0] === "debug") {
     return { threadId: null, tab: "debug" };
   }
-  if (segments[0] === "threads" && typeof segments[1] === "string" && segments[1].length > 0) {
+  if (
+    segments[0] === "threads" &&
+    typeof segments[1] === "string" &&
+    segments[1].length > 0
+  ) {
     const threadId = decodeURIComponent(segments[1]);
     if (segments[2] === "debug") {
       return { threadId, tab: "debug" };
@@ -591,7 +661,10 @@ function parseUiStateFromPath(pathname: string): { threadId: string | null; tab:
   return { threadId: null, tab: "chat" };
 }
 
-function buildPathFromUiState(threadId: string | null, tab: "chat" | "debug"): string {
+function buildPathFromUiState(
+  threadId: string | null,
+  tab: "chat" | "debug",
+): string {
   if (!threadId) {
     return tab === "debug" ? "/debug" : "/";
   }
@@ -606,7 +679,7 @@ function IconBtn({
   disabled,
   title,
   active,
-  children
+  children,
 }: {
   onClick?: () => void;
   disabled?: boolean;
@@ -646,16 +719,24 @@ function IconBtn({
 /* ── Main App ───────────────────────────────────────────────── */
 export function App(): React.JSX.Element {
   const { theme, toggle: toggleTheme } = useTheme();
-  const initialUiState = useMemo(() => parseUiStateFromPath(window.location.pathname), []);
+  const initialUiState = useMemo(
+    () => parseUiStateFromPath(window.location.pathname),
+    [],
+  );
 
   /* State */
   const [error, setError] = useState("");
   const [health, setHealth] = useState<Health | null>(null);
   const [threads, setThreads] = useState<ThreadsResponse["data"]>([]);
-  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(initialUiState.threadId);
+  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(
+    initialUiState.threadId,
+  );
   const [liveState, setLiveState] = useState<LiveStateResponse | null>(null);
-  const [readThreadState, setReadThreadState] = useState<ReadThreadResponse | null>(null);
-  const [streamEvents, setStreamEvents] = useState<StreamEventsResponse["events"]>([]);
+  const [readThreadState, setReadThreadState] =
+    useState<ReadThreadResponse | null>(null);
+  const [streamEvents, setStreamEvents] = useState<
+    StreamEventsResponse["events"]
+  >([]);
   const [modes, setModes] = useState<ModesResponse["data"]>([]);
   const [models, setModels] = useState<ModelsResponse["data"]>([]);
   const [selectedModeKey, setSelectedModeKey] = useState("");
@@ -667,23 +748,35 @@ export function App(): React.JSX.Element {
   const [traceNote, setTraceNote] = useState("");
   const [history, setHistory] = useState<HistoryResponse["history"]>([]);
   const [selectedHistoryId, setSelectedHistoryId] = useState("");
-  const [historyDetail, setHistoryDetail] = useState<HistoryDetail | null>(null);
-  const [selectedRequestId, setSelectedRequestId] = useState<PendingRequestId | null>(null);
-  const [answerDraft, setAnswerDraft] = useState<Record<string, { option: string; freeform: string }>>({});
-  const [agentDescriptors, setAgentDescriptors] = useState<AgentDescriptor[]>([]);
+  const [historyDetail, setHistoryDetail] = useState<HistoryDetail | null>(
+    null,
+  );
+  const [selectedRequestId, setSelectedRequestId] =
+    useState<PendingRequestId | null>(null);
+  const [answerDraft, setAnswerDraft] = useState<
+    Record<string, { option: string; freeform: string }>
+  >({});
+  const [agentDescriptors, setAgentDescriptors] = useState<AgentDescriptor[]>(
+    [],
+  );
   const [selectedAgentId, setSelectedAgentId] = useState<AgentId>("codex");
 
   /* UI state */
-  const [activeTab, setActiveTab] = useState<"chat" | "debug">(initialUiState.tab);
+  const [activeTab, setActiveTab] = useState<"chat" | "debug">(
+    initialUiState.tab,
+  );
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true);
   const [isChatAtBottom, setIsChatAtBottom] = useState(true);
-  const [visibleChatItemLimit, setVisibleChatItemLimit] = useState(INITIAL_VISIBLE_CHAT_ITEMS);
-  const [hasHydratedModeFromLiveState, setHasHydratedModeFromLiveState] = useState(false);
-  const [isModeSyncing, setIsModeSyncing] = useState(false);
-  const [sidebarCollapsedGroups, setSidebarCollapsedGroups] = useState<Record<string, boolean>>(
-    () => readSidebarCollapsedGroupsFromStorage()
+  const [visibleChatItemLimit, setVisibleChatItemLimit] = useState(
+    INITIAL_VISIBLE_CHAT_ITEMS,
   );
+  const [hasHydratedModeFromLiveState, setHasHydratedModeFromLiveState] =
+    useState(false);
+  const [isModeSyncing, setIsModeSyncing] = useState(false);
+  const [sidebarCollapsedGroups, setSidebarCollapsedGroups] = useState<
+    Record<string, boolean>
+  >(() => readSidebarCollapsedGroupsFromStorage());
 
   /* Refs */
   const selectedThreadIdRef = useRef<string | null>(null);
@@ -692,7 +785,7 @@ export function App(): React.JSX.Element {
   const pendingRefreshFlagsRef = useRef<RefreshFlags>({
     refreshCore: false,
     refreshHistory: false,
-    refreshSelectedThread: false
+    refreshSelectedThread: false,
   });
   const coreRefreshIntervalRef = useRef<number | null>(null);
   const selectedThreadRefreshIntervalRef = useRef<number | null>(null);
@@ -709,7 +802,7 @@ export function App(): React.JSX.Element {
   /* Derived */
   const selectedThread = useMemo(
     () => threads.find((t) => t.id === selectedThreadId) ?? null,
-    [threads, selectedThreadId]
+    [threads, selectedThreadId],
   );
   const agentsById = useMemo(() => {
     const map: Partial<Record<AgentId, AgentDescriptor>> = {};
@@ -719,12 +812,15 @@ export function App(): React.JSX.Element {
     return map;
   }, [agentDescriptors]);
   const availableAgentIds = useMemo(
-    () => agentDescriptors.filter((descriptor) => descriptor.enabled).map((descriptor) => descriptor.id),
-    [agentDescriptors]
+    () =>
+      agentDescriptors
+        .filter((descriptor) => descriptor.enabled)
+        .map((descriptor) => descriptor.id),
+    [agentDescriptors],
   );
   const selectedAgentDescriptor = useMemo(
     () => agentsById[selectedAgentId] ?? null,
-    [agentsById, selectedAgentId]
+    [agentsById, selectedAgentId],
   );
   const selectedAgentLabel = selectedAgentDescriptor?.label ?? "Agent";
   const groupedThreads = useMemo(() => {
@@ -739,7 +835,10 @@ export function App(): React.JSX.Element {
     const groups = new Map<string, Group>();
 
     for (const thread of threads) {
-      const cwd = typeof thread.cwd === "string" && thread.cwd.trim() ? thread.cwd.trim() : null;
+      const cwd =
+        typeof thread.cwd === "string" && thread.cwd.trim()
+          ? thread.cwd.trim()
+          : null;
       const projectPath = cwd;
       const key = projectPath ? `project:${projectPath}` : "project:unknown";
       const label = projectPath ? basenameFromPath(projectPath) : "Unknown";
@@ -762,7 +861,7 @@ export function App(): React.JSX.Element {
           projectPath,
           latestUpdatedAt: updatedAt,
           preferredAgentId: threadAgentId,
-          threads: [thread]
+          threads: [thread],
         });
       }
     }
@@ -783,7 +882,7 @@ export function App(): React.JSX.Element {
           projectPath: normalized,
           latestUpdatedAt: 0,
           preferredAgentId: descriptor.id,
-          threads: []
+          threads: [],
         });
       }
     }
@@ -792,14 +891,19 @@ export function App(): React.JSX.Element {
       group.threads.sort(compareThreadsByRecency);
     }
 
-    return Array.from(groups.values()).sort((left, right) => right.latestUpdatedAt - left.latestUpdatedAt);
+    return Array.from(groups.values()).sort(
+      (left, right) => right.latestUpdatedAt - left.latestUpdatedAt,
+    );
   }, [agentDescriptors, threads]);
   const conversationState = useMemo(() => {
     const liveConversationState = liveState?.conversationState ?? null;
     const readConversationState = readThreadState?.thread ?? null;
     if (!liveConversationState) return readConversationState;
     if (!readConversationState) return liveConversationState;
-    return pickPreferredConversationState(liveConversationState, readConversationState);
+    return pickPreferredConversationState(
+      liveConversationState,
+      readConversationState,
+    );
   }, [liveState?.conversationState, readThreadState?.thread]);
 
   const pendingRequests = useMemo(() => {
@@ -817,35 +921,57 @@ export function App(): React.JSX.Element {
   const activeRequest = useMemo(() => {
     if (!pendingRequests.length) return null;
     if (selectedRequestId === null) return pendingRequests[0];
-    return pendingRequests.find((r) => r.id === selectedRequestId) ?? pendingRequests[0];
+    return (
+      pendingRequests.find((r) => r.id === selectedRequestId) ??
+      pendingRequests[0]
+    );
   }, [pendingRequests, selectedRequestId]);
 
   const activeThreadAgentId: AgentId = useMemo(
     () => selectedThread?.provider ?? selectedAgentId,
-    [selectedAgentId, selectedThread]
+    [selectedAgentId, selectedThread],
   );
   const activeAgentDescriptor = useMemo(
     () => agentsById[activeThreadAgentId] ?? selectedAgentDescriptor,
-    [activeThreadAgentId, agentsById, selectedAgentDescriptor]
+    [activeThreadAgentId, agentsById, selectedAgentDescriptor],
   );
   const activeAgentLabel = activeAgentDescriptor?.label ?? selectedAgentLabel;
-  const canSetCollaborationMode = canUseFeature(activeAgentDescriptor, "setCollaborationMode");
+  const canSetCollaborationMode = canUseFeature(
+    activeAgentDescriptor,
+    "setCollaborationMode",
+  );
   const canListModels = canUseFeature(activeAgentDescriptor, "listModels");
-  const canListCollaborationModes = canUseFeature(activeAgentDescriptor, "listCollaborationModes");
-  const canSubmitUserInputForActiveAgent = canUseFeature(activeAgentDescriptor, "submitUserInput");
-  const canSendMessageForActiveAgent = canUseFeature(activeAgentDescriptor, "sendMessage");
-  const canInterruptForActiveAgent = canUseFeature(activeAgentDescriptor, "interrupt");
-  const canCreateThreadForSelectedAgent = canUseFeature(selectedAgentDescriptor, "createThread");
+  const canListCollaborationModes = canUseFeature(
+    activeAgentDescriptor,
+    "listCollaborationModes",
+  );
+  const canSubmitUserInputForActiveAgent = canUseFeature(
+    activeAgentDescriptor,
+    "submitUserInput",
+  );
+  const canSendMessageForActiveAgent = canUseFeature(
+    activeAgentDescriptor,
+    "sendMessage",
+  );
+  const canInterruptForActiveAgent = canUseFeature(
+    activeAgentDescriptor,
+    "interrupt",
+  );
+  const canCreateThreadForSelectedAgent = canUseFeature(
+    selectedAgentDescriptor,
+    "createThread",
+  );
 
   const planModeOption = useMemo(
     () => modes.find((mode) => isPlanModeOption(mode)) ?? null,
-    [modes]
+    [modes],
   );
   const defaultModeOption = useMemo(
     () => modes.find((mode) => !isPlanModeOption(mode)) ?? modes[0] ?? null,
-    [modes]
+    [modes],
   );
-  const isPlanModeEnabled = planModeOption !== null && selectedModeKey === planModeOption.mode;
+  const isPlanModeEnabled =
+    planModeOption !== null && selectedModeKey === planModeOption.mode;
 
   const effortOptions = useMemo(() => {
     const vals = new Set<string>(DEFAULT_EFFORT_OPTIONS);
@@ -858,10 +984,15 @@ export function App(): React.JSX.Element {
     if (le) vals.add(le);
     if (selectedReasoningEffort) vals.add(selectedReasoningEffort);
     return Array.from(vals);
-  }, [conversationState?.latestReasoningEffort, modes, selectedReasoningEffort]);
+  }, [
+    conversationState?.latestReasoningEffort,
+    modes,
+    selectedReasoningEffort,
+  ]);
   const effortOptionsWithoutAssumedDefault = useMemo(
-    () => effortOptions.filter((option) => option !== ASSUMED_APP_DEFAULT_EFFORT),
-    [effortOptions]
+    () =>
+      effortOptions.filter((option) => option !== ASSUMED_APP_DEFAULT_EFFORT),
+    [effortOptions],
   );
 
   const modelOptions = useMemo(() => {
@@ -875,12 +1006,14 @@ export function App(): React.JSX.Element {
     }
     const lm = conversationState?.latestModel;
     if (lm && !map.has(lm)) map.set(lm, lm);
-    if (selectedModelId && !map.has(selectedModelId)) map.set(selectedModelId, selectedModelId);
+    if (selectedModelId && !map.has(selectedModelId))
+      map.set(selectedModelId, selectedModelId);
     return Array.from(map.entries()).map(([id, label]) => ({ id, label }));
   }, [conversationState?.latestModel, models, selectedModelId]);
   const modelOptionsWithoutAssumedDefault = useMemo(
-    () => modelOptions.filter((option) => option.id !== ASSUMED_APP_DEFAULT_MODEL),
-    [modelOptions]
+    () =>
+      modelOptions.filter((option) => option.id !== ASSUMED_APP_DEFAULT_MODEL),
+    [modelOptions],
   );
 
   const deferredConversationState = useDeferredValue(conversationState);
@@ -889,11 +1022,11 @@ export function App(): React.JSX.Element {
   const isGenerating = isTurnInProgressStatus(lastTurn?.status);
   const canUseComposer = isGenerating
     ? canInterruptForActiveAgent
-    : (
-      selectedThreadId
-        ? canSendMessageForActiveAgent
-        : (availableAgentIds.length > 0 && canCreateThreadForSelectedAgent && canSendMessageForActiveAgent)
-    );
+    : selectedThreadId
+      ? canSendMessageForActiveAgent
+      : availableAgentIds.length > 0 &&
+        canCreateThreadForSelectedAgent &&
+        canSendMessageForActiveAgent;
   const flatConversationItems = useMemo(() => {
     const flattened: FlatConversationItem[] = [];
     let previousRenderedTurnIndex = -1;
@@ -917,7 +1050,7 @@ export function App(): React.JSX.Element {
           turnIsInProgress: turnInProgress,
           previousItemType: items[itemIndexInTurn - 1]?.type,
           nextItemType: items[itemIndexInTurn + 1]?.type,
-          spacingTop
+          spacingTop,
         });
         previousRenderedTurnIndex = turnIndex;
       });
@@ -930,28 +1063,27 @@ export function App(): React.JSX.Element {
     return flattened;
   }, [isGenerating, turns]);
   const conversationItemCount = flatConversationItems.length;
-  const firstVisibleChatItemIndex = Math.max(0, conversationItemCount - visibleChatItemLimit);
+  const firstVisibleChatItemIndex = Math.max(
+    0,
+    conversationItemCount - visibleChatItemLimit,
+  );
   const hasHiddenChatItems = firstVisibleChatItemIndex > 0;
   const visibleConversationItems = useMemo(
     () => flatConversationItems.slice(firstVisibleChatItemIndex),
-    [flatConversationItems, firstVisibleChatItemIndex]
+    [flatConversationItems, firstVisibleChatItemIndex],
   );
   const commitLabel = health?.state.gitCommit ?? "unknown";
   const codexConfigured = agentsById.codex?.enabled === true;
   const openCodeConnected = agentsById.opencode?.connected === true;
   const allSystemsReady = codexConfigured
-    ? (
-      health?.state.appReady === true &&
+    ? health?.state.appReady === true &&
       health?.state.ipcConnected === true &&
       health?.state.ipcInitialized === true
-    )
     : openCodeConnected;
   const hasAnySystemFailure = codexConfigured
-    ? (
-      health?.state.appReady === false ||
+    ? health?.state.appReady === false ||
       health?.state.ipcConnected === false ||
       health?.state.ipcInitialized === false
-    )
     : !openCodeConnected;
   /* Data loading */
   const loadCoreData = useCallback(async () => {
@@ -960,18 +1092,29 @@ export function App(): React.JSX.Element {
       getHealth(),
       listThreads({ limit: 80, archived: false, all: false, maxPages: 1 }),
       listAgents(),
-      shouldLoadDebugData ? getTraceStatus() : Promise.resolve<TraceStatus | null>(null),
-      shouldLoadDebugData ? listDebugHistory(120) : Promise.resolve<HistoryResponse | null>(null)
+      shouldLoadDebugData
+        ? getTraceStatus()
+        : Promise.resolve<TraceStatus | null>(null),
+      shouldLoadDebugData
+        ? listDebugHistory(120)
+        : Promise.resolve<HistoryResponse | null>(null),
     ]);
     const incomingThreads = sortThreadsByRecency(nt.data);
 
-    const enabledAgents = nag.agents.filter((agent) => agent.enabled).map((agent) => agent.id);
+    const enabledAgents = nag.agents
+      .filter((agent) => agent.enabled)
+      .map((agent) => agent.id);
     const nextDefaultAgent = enabledAgents.includes(nag.defaultAgentId)
       ? nag.defaultAgentId
       : (enabledAgents[0] ?? nag.defaultAgentId);
-    const threadForActiveProvider = incomingThreads.find((thread) => thread.id === selectedThreadIdRef.current) ?? null;
-    const activeProviderId = threadForActiveProvider?.provider ?? selectedAgentId;
-    const activeDescriptor = nag.agents.find((agent) => agent.id === activeProviderId) ?? null;
+    const threadForActiveProvider =
+      incomingThreads.find(
+        (thread) => thread.id === selectedThreadIdRef.current,
+      ) ?? null;
+    const activeProviderId =
+      threadForActiveProvider?.provider ?? selectedAgentId;
+    const activeDescriptor =
+      nag.agents.find((agent) => agent.id === activeProviderId) ?? null;
 
     const [nm, nmo] = await Promise.all([
       canUseFeature(activeDescriptor, "listCollaborationModes")
@@ -979,15 +1122,15 @@ export function App(): React.JSX.Element {
         : Promise.resolve({ data: [] as ModesResponse["data"] }),
       canUseFeature(activeDescriptor, "listModels")
         ? listModels(activeProviderId)
-        : Promise.resolve({ data: [] as ModelsResponse["data"] })
+        : Promise.resolve({ data: [] as ModelsResponse["data"] }),
     ]);
 
     let preferredAgentId: AgentId | null = null;
     const nextModesSignature = nm.data.map((mode) =>
-      [mode.mode, mode.name, mode.reasoningEffort ?? ""].join("|")
+      [mode.mode, mode.name, mode.reasoningEffort ?? ""].join("|"),
     );
     const nextModelsSignature = nmo.data.map((model) =>
-      [model.id, model.displayName ?? ""].join("|")
+      [model.id, model.displayName ?? ""].join("|"),
     );
 
     startTransition(() => {
@@ -1007,9 +1150,14 @@ export function App(): React.JSX.Element {
         return nh;
       });
       setThreads((previousThreads) => {
-        const nextThreads = mergeIncomingThreads(incomingThreads, previousThreads);
+        const nextThreads = mergeIncomingThreads(
+          incomingThreads,
+          previousThreads,
+        );
         const nextThreadsSignature = buildThreadsSignature(nextThreads);
-        if (signaturesMatch(threadsSignatureRef.current, nextThreadsSignature)) {
+        if (
+          signaturesMatch(threadsSignatureRef.current, nextThreadsSignature)
+        ) {
           return previousThreads;
         }
         threadsSignatureRef.current = nextThreadsSignature;
@@ -1042,7 +1190,8 @@ export function App(): React.JSX.Element {
         setHistory((prev) => {
           if (
             prev.length === nhist.history.length &&
-            prev[prev.length - 1]?.id === nhist.history[nhist.history.length - 1]?.id
+            prev[prev.length - 1]?.id ===
+              nhist.history[nhist.history.length - 1]?.id
           ) {
             return prev;
           }
@@ -1062,13 +1211,20 @@ export function App(): React.JSX.Element {
                 agent.id === nextAgent.id &&
                 agent.enabled === nextAgent.enabled &&
                 agent.connected === nextAgent.connected &&
-                agent.capabilities.canListModels === nextAgent.capabilities.canListModels &&
-                agent.capabilities.canListCollaborationModes === nextAgent.capabilities.canListCollaborationModes &&
-                agent.capabilities.canSetCollaborationMode === nextAgent.capabilities.canSetCollaborationMode &&
-                agent.capabilities.canSubmitUserInput === nextAgent.capabilities.canSubmitUserInput &&
-                agent.capabilities.canReadLiveState === nextAgent.capabilities.canReadLiveState &&
-                agent.capabilities.canReadStreamEvents === nextAgent.capabilities.canReadStreamEvents &&
-                agent.capabilities.canListProjectDirectories === nextAgent.capabilities.canListProjectDirectories
+                agent.capabilities.canListModels ===
+                  nextAgent.capabilities.canListModels &&
+                agent.capabilities.canListCollaborationModes ===
+                  nextAgent.capabilities.canListCollaborationModes &&
+                agent.capabilities.canSetCollaborationMode ===
+                  nextAgent.capabilities.canSetCollaborationMode &&
+                agent.capabilities.canSubmitUserInput ===
+                  nextAgent.capabilities.canSubmitUserInput &&
+                agent.capabilities.canReadLiveState ===
+                  nextAgent.capabilities.canReadLiveState &&
+                agent.capabilities.canReadStreamEvents ===
+                  nextAgent.capabilities.canReadStreamEvents &&
+                agent.capabilities.canListProjectDirectories ===
+                  nextAgent.capabilities.canListProjectDirectories
               );
             })
           ) {
@@ -1088,7 +1244,9 @@ export function App(): React.JSX.Element {
       setSelectedThreadId((cur) => {
         if (cur) return cur;
         if (preferredAgentId) {
-          const preferredThread = incomingThreads.find((thread) => thread.provider === preferredAgentId);
+          const preferredThread = incomingThreads.find(
+            (thread) => thread.provider === preferredAgentId,
+          );
           if (preferredThread) {
             return preferredThread.id;
           }
@@ -1103,107 +1261,128 @@ export function App(): React.JSX.Element {
     });
   }, [selectedAgentId]);
 
-  const loadSelectedThread = useCallback(async (threadId: string) => {
-    const includeTurns = !pendingMaterializationThreadIdsRef.current.has(threadId);
-    const thread = threads.find((entry) => entry.id === threadId) ?? null;
-    const threadAgentId = thread?.provider ?? selectedAgentId;
-    const descriptor = agentsById[threadAgentId];
-    const canReadLiveState = canUseFeature(descriptor, "readLiveState");
-    const canReadStreamEvents = canUseFeature(descriptor, "readStreamEvents");
+  const loadSelectedThread = useCallback(
+    async (threadId: string) => {
+      const includeTurns =
+        !pendingMaterializationThreadIdsRef.current.has(threadId);
+      const thread = threads.find((entry) => entry.id === threadId) ?? null;
+      const threadAgentId = thread?.provider ?? selectedAgentId;
+      const descriptor = agentsById[threadAgentId];
+      const canReadLiveState = canUseFeature(descriptor, "readLiveState");
+      const canReadStreamEvents = canUseFeature(descriptor, "readStreamEvents");
 
-    const [live, stream, read] = await Promise.all([
-      canReadLiveState
-        ? getLiveState(threadId, threadAgentId)
-        : Promise.resolve({
-            ok: true as const,
-            threadId,
-            ownerClientId: null,
-            conversationState: null,
-            liveStateError: null
-          }),
-      canReadStreamEvents
-        ? getStreamEvents(threadId, threadAgentId)
-        : Promise.resolve({
-            ok: true as const,
-            threadId,
-            ownerClientId: null,
-            events: []
-          }),
-      readThread(threadId, { includeTurns, provider: threadAgentId })
-    ]);
-    if ((live.conversationState?.turns.length ?? 0) > 0 || read.thread.turns.length > 0) {
-      pendingMaterializationThreadIdsRef.current.delete(threadId);
-    }
-    startTransition(() => {
-      setLiveState((prev) => {
-        if (buildLiveStateSyncSignature(prev) === buildLiveStateSyncSignature(live)) {
-          return prev;
-        }
-        return live;
-      });
-      setThreads((previousThreads) => {
-        const nextIsGenerating = live.conversationState
-          ? isThreadGeneratingState(live.conversationState)
-          : isThreadGeneratingState(read.thread);
-        const nextThreads = previousThreads.map((threadSummary) => {
-          if (threadSummary.id !== read.thread.id) {
-            return threadSummary;
-          }
-
-          const nextUpdatedAt = typeof read.thread.updatedAt === "number"
-            ? Math.max(threadSummary.updatedAt, read.thread.updatedAt)
-            : threadSummary.updatedAt;
-          const nextTitle = read.thread.title !== undefined ? read.thread.title : threadSummary.title;
-          const hadGenerating = threadSummary.isGenerating ?? false;
-
+      const [live, stream, read] = await Promise.all([
+        canReadLiveState
+          ? getLiveState(threadId, threadAgentId)
+          : Promise.resolve({
+              ok: true as const,
+              threadId,
+              ownerClientId: null,
+              conversationState: null,
+              liveStateError: null,
+            }),
+        canReadStreamEvents
+          ? getStreamEvents(threadId, threadAgentId)
+          : Promise.resolve({
+              ok: true as const,
+              threadId,
+              ownerClientId: null,
+              events: [],
+            }),
+        readThread(threadId, { includeTurns, provider: threadAgentId }),
+      ]);
+      if (
+        (live.conversationState?.turns.length ?? 0) > 0 ||
+        read.thread.turns.length > 0
+      ) {
+        pendingMaterializationThreadIdsRef.current.delete(threadId);
+      }
+      startTransition(() => {
+        setLiveState((prev) => {
           if (
-            nextUpdatedAt === threadSummary.updatedAt
-            && nextTitle === threadSummary.title
-            && hadGenerating === nextIsGenerating
+            buildLiveStateSyncSignature(prev) ===
+            buildLiveStateSyncSignature(live)
           ) {
-            return threadSummary;
+            return prev;
           }
-
-          return {
-            ...threadSummary,
-            updatedAt: nextUpdatedAt,
-            isGenerating: nextIsGenerating,
-            ...(nextTitle !== undefined ? { title: nextTitle } : {})
-          };
+          return live;
         });
+        setThreads((previousThreads) => {
+          const nextIsGenerating = live.conversationState
+            ? isThreadGeneratingState(live.conversationState)
+            : isThreadGeneratingState(read.thread);
+          const nextThreads = previousThreads.map((threadSummary) => {
+            if (threadSummary.id !== read.thread.id) {
+              return threadSummary;
+            }
 
-        const sortedThreads = sortThreadsByRecency(nextThreads);
-        const nextSignature = buildThreadsSignature(sortedThreads);
-        if (signaturesMatch(threadsSignatureRef.current, nextSignature)) {
-          return previousThreads;
-        }
-        threadsSignatureRef.current = nextSignature;
-        return sortedThreads;
+            const nextUpdatedAt =
+              typeof read.thread.updatedAt === "number"
+                ? Math.max(threadSummary.updatedAt, read.thread.updatedAt)
+                : threadSummary.updatedAt;
+            const nextTitle =
+              read.thread.title !== undefined
+                ? read.thread.title
+                : threadSummary.title;
+            const hadGenerating = threadSummary.isGenerating ?? false;
+
+            if (
+              nextUpdatedAt === threadSummary.updatedAt &&
+              nextTitle === threadSummary.title &&
+              hadGenerating === nextIsGenerating
+            ) {
+              return threadSummary;
+            }
+
+            return {
+              ...threadSummary,
+              updatedAt: nextUpdatedAt,
+              isGenerating: nextIsGenerating,
+              ...(nextTitle !== undefined ? { title: nextTitle } : {}),
+            };
+          });
+
+          const sortedThreads = sortThreadsByRecency(nextThreads);
+          const nextSignature = buildThreadsSignature(sortedThreads);
+          if (signaturesMatch(threadsSignatureRef.current, nextSignature)) {
+            return previousThreads;
+          }
+          threadsSignatureRef.current = nextSignature;
+          return sortedThreads;
+        });
+        setReadThreadState((prev) => {
+          if (
+            buildReadThreadSyncSignature(prev) ===
+            buildReadThreadSyncSignature(read)
+          ) {
+            return prev;
+          }
+          return read;
+        });
+        setStreamEvents((prev) => {
+          const prevLast = prev[prev.length - 1];
+          const nextLast = stream.events[stream.events.length - 1];
+          const prevLastSignature = prevLast ? JSON.stringify(prevLast) : "";
+          const nextLastSignature = nextLast ? JSON.stringify(nextLast) : "";
+          if (
+            prev.length === stream.events.length &&
+            prevLastSignature === nextLastSignature
+          ) {
+            return prev;
+          }
+          return stream.events;
+        });
       });
-      setReadThreadState((prev) => {
-        if (buildReadThreadSyncSignature(prev) === buildReadThreadSyncSignature(read)) {
-          return prev;
-        }
-        return read;
-      });
-      setStreamEvents((prev) => {
-        const prevLast = prev[prev.length - 1];
-        const nextLast = stream.events[stream.events.length - 1];
-        const prevLastSignature = prevLast ? JSON.stringify(prevLast) : "";
-        const nextLastSignature = nextLast ? JSON.stringify(nextLast) : "";
-        if (prev.length === stream.events.length && prevLastSignature === nextLastSignature) {
-          return prev;
-        }
-        return stream.events;
-      });
-    });
-  }, [agentsById, selectedAgentId, threads]);
+    },
+    [agentsById, selectedAgentId, threads],
+  );
 
   const refreshAll = useCallback(async () => {
     try {
       setError("");
       await loadCoreData();
-      if (selectedThreadIdRef.current) await loadSelectedThread(selectedThreadIdRef.current);
+      if (selectedThreadIdRef.current)
+        await loadSelectedThread(selectedThreadIdRef.current);
     } catch (e) {
       setError(toErrorMessage(e));
     }
@@ -1251,7 +1430,10 @@ export function App(): React.JSX.Element {
       if (coreRefreshIntervalRef.current !== null) {
         return;
       }
-      coreRefreshIntervalRef.current = window.setInterval(refreshCoreData, 5000);
+      coreRefreshIntervalRef.current = window.setInterval(
+        refreshCoreData,
+        5000,
+      );
     };
 
     const stopCoreRefresh = () => {
@@ -1306,14 +1488,19 @@ export function App(): React.JSX.Element {
       if (document.visibilityState === "hidden") {
         return;
       }
-      void loadSelectedThread(selectedThreadId).catch((e) => setError(toErrorMessage(e)));
+      void loadSelectedThread(selectedThreadId).catch((e) =>
+        setError(toErrorMessage(e)),
+      );
     };
 
     const startSelectedThreadRefresh = () => {
       if (selectedThreadRefreshIntervalRef.current !== null) {
         return;
       }
-      selectedThreadRefreshIntervalRef.current = window.setInterval(refreshSelectedThreadData, 3000);
+      selectedThreadRefreshIntervalRef.current = window.setInterval(
+        refreshSelectedThreadData,
+        3000,
+      );
     };
 
     startSelectedThreadRefresh();
@@ -1349,7 +1536,9 @@ export function App(): React.JSX.Element {
       setStreamEvents([]);
       return;
     }
-    void loadSelectedThread(selectedThreadId).catch((e) => setError(toErrorMessage(e)));
+    void loadSelectedThread(selectedThreadId).catch((e) =>
+      setError(toErrorMessage(e)),
+    );
   }, [loadSelectedThread, selectedThreadId]);
 
   useEffect(() => {
@@ -1359,12 +1548,17 @@ export function App(): React.JSX.Element {
     let reconnectDelayMs = 1000;
     let hasOpenedConnection = false;
 
-    const scheduleRefresh = (refreshCore: boolean, refreshHistory: boolean, refreshSelectedThread: boolean) => {
+    const scheduleRefresh = (
+      refreshCore: boolean,
+      refreshHistory: boolean,
+      refreshSelectedThread: boolean,
+    ) => {
       const previousFlags = pendingRefreshFlagsRef.current;
       pendingRefreshFlagsRef.current = {
         refreshCore: previousFlags.refreshCore || refreshCore,
         refreshHistory: previousFlags.refreshHistory || refreshHistory,
-        refreshSelectedThread: previousFlags.refreshSelectedThread || refreshSelectedThread
+        refreshSelectedThread:
+          previousFlags.refreshSelectedThread || refreshSelectedThread,
       };
 
       if (refreshTimerRef.current) {
@@ -1376,19 +1570,23 @@ export function App(): React.JSX.Element {
         pendingRefreshFlagsRef.current = {
           refreshCore: false,
           refreshHistory: false,
-          refreshSelectedThread: false
+          refreshSelectedThread: false,
         };
         void (async () => {
           try {
             if (flags.refreshCore) {
               await loadCoreData();
-            } else if (flags.refreshHistory && activeTabRef.current === "debug") {
+            } else if (
+              flags.refreshHistory &&
+              activeTabRef.current === "debug"
+            ) {
               const nextHistory = await listDebugHistory(120);
               startTransition(() => {
                 setHistory((prev) => {
                   if (
                     prev.length === nextHistory.history.length &&
-                    prev[prev.length - 1]?.id === nextHistory.history[nextHistory.history.length - 1]?.id
+                    prev[prev.length - 1]?.id ===
+                      nextHistory.history[nextHistory.history.length - 1]?.id
                   ) {
                     return prev;
                   }
@@ -1429,7 +1627,11 @@ export function App(): React.JSX.Element {
           return;
         }
         hasOpenedConnection = true;
-        scheduleRefresh(true, activeTabRef.current === "debug", Boolean(selectedThreadIdRef.current));
+        scheduleRefresh(
+          true,
+          activeTabRef.current === "debug",
+          Boolean(selectedThreadIdRef.current),
+        );
       };
 
       source.onmessage = (event: MessageEvent<string>) => {
@@ -1438,7 +1640,9 @@ export function App(): React.JSX.Element {
         let refreshSelectedThread = false;
 
         try {
-          const parsedEventResult = UnifiedEventSchema.safeParse(JSON.parse(event.data));
+          const parsedEventResult = UnifiedEventSchema.safeParse(
+            JSON.parse(event.data),
+          );
           if (!parsedEventResult.success) {
             refreshCore = true;
           } else {
@@ -1454,8 +1658,8 @@ export function App(): React.JSX.Element {
                 refreshSelectedThread = true;
               }
             } else if (
-              parsedEvent.kind === "userInputRequested"
-              || parsedEvent.kind === "userInputResolved"
+              parsedEvent.kind === "userInputRequested" ||
+              parsedEvent.kind === "userInputResolved"
             ) {
               if (
                 selectedThreadIdRef.current &&
@@ -1496,7 +1700,7 @@ export function App(): React.JSX.Element {
       pendingRefreshFlagsRef.current = {
         refreshCore: false,
         refreshHistory: false,
-        refreshSelectedThread: false
+        refreshSelectedThread: false,
       };
       if (source) {
         source.close();
@@ -1552,16 +1756,19 @@ export function App(): React.JSX.Element {
     const cs = conversationState;
     if (!cs) return;
     const remoteSelection = readModeSelectionFromConversationState(cs);
-    const remoteHasExplicitSelection = (
-      remoteSelection.modeKey.length > 0
-      || remoteSelection.modelId.length > 0
-      || remoteSelection.reasoningEffort.length > 0
-    );
-    const remoteModeKey = remoteSelection.modeKey || selectedModeKey || defaultModeOption?.mode || "";
+    const remoteHasExplicitSelection =
+      remoteSelection.modeKey.length > 0 ||
+      remoteSelection.modelId.length > 0 ||
+      remoteSelection.reasoningEffort.length > 0;
+    const remoteModeKey =
+      remoteSelection.modeKey ||
+      selectedModeKey ||
+      defaultModeOption?.mode ||
+      "";
     const remoteSignature = buildModeSignature(
       remoteModeKey,
       remoteSelection.modelId,
-      remoteSelection.reasoningEffort
+      remoteSelection.reasoningEffort,
     );
 
     if (!hasHydratedModeFromLiveState) {
@@ -1580,7 +1787,11 @@ export function App(): React.JSX.Element {
       return;
     }
 
-    const localSignature = buildModeSignature(selectedModeKey, selectedModelId, selectedReasoningEffort);
+    const localSignature = buildModeSignature(
+      selectedModeKey,
+      selectedModelId,
+      selectedReasoningEffort,
+    );
     if (remoteSignature === localSignature) {
       lastAppliedModeSignatureRef.current = remoteSignature;
       if (isModeSyncing) {
@@ -1615,7 +1826,7 @@ export function App(): React.JSX.Element {
     isModeSyncing,
     selectedModeKey,
     selectedModelId,
-    selectedReasoningEffort
+    selectedReasoningEffort,
   ]);
 
   useEffect(() => {
@@ -1642,7 +1853,8 @@ export function App(): React.JSX.Element {
     let rafId: number | null = null;
 
     const syncBottomState = () => {
-      const distanceFromBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+      const distanceFromBottom =
+        scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
       const nextIsBottom = distanceFromBottom <= 48;
       if (nextIsBottom !== isChatAtBottomRef.current) {
         isChatAtBottomRef.current = nextIsBottom;
@@ -1670,14 +1882,19 @@ export function App(): React.JSX.Element {
 
   // Keep chat pinned to bottom only if user is already at the bottom.
   useEffect(() => {
-    if (activeTab === "chat" && isChatAtBottomRef.current && scrollRef.current) {
+    if (
+      activeTab === "chat" &&
+      isChatAtBottomRef.current &&
+      scrollRef.current
+    ) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [activeTab, conversationItemCount]);
 
   // Keep bottom pinned when expanded/collapsed blocks change chat height.
   useEffect(() => {
-    if (activeTab !== "chat" || !scrollRef.current || !chatContentRef.current) return;
+    if (activeTab !== "chat" || !scrollRef.current || !chatContentRef.current)
+      return;
     const scroller = scrollRef.current;
     const content = chatContentRef.current;
     let rafId: number | null = null;
@@ -1713,83 +1930,105 @@ export function App(): React.JSX.Element {
   }, [activeTab, selectedThreadId]);
 
   /* Actions */
-  const submitMessage = useCallback(async (draft: string) => {
-    if (!draft.trim()) return;
-    if (!canSendMessageForActiveAgent) return;
+  const submitMessage = useCallback(
+    async (draft: string) => {
+      if (!draft.trim()) return;
+      if (!canSendMessageForActiveAgent) return;
 
-    setIsBusy(true);
-    try {
-      setError("");
+      setIsBusy(true);
+      try {
+        setError("");
 
-      let threadId = selectedThreadId;
-      let threadAgentId = activeThreadAgentId;
+        let threadId = selectedThreadId;
+        let threadAgentId = activeThreadAgentId;
 
-      // Auto-create a thread if none is selected.
-      if (!threadId) {
-        const created = await createThread({
-          agentId: selectedAgentId
-        });
-        threadId = created.threadId;
-        threadAgentId = selectedAgentId;
-        pendingMaterializationThreadIdsRef.current.add(threadId);
-        setSelectedThreadId(threadId);
-        selectedThreadIdRef.current = threadId;
+        // Auto-create a thread if none is selected.
+        if (!threadId) {
+          const created = await createThread({
+            agentId: selectedAgentId,
+          });
+          threadId = created.threadId;
+          threadAgentId = selectedAgentId;
+          pendingMaterializationThreadIdsRef.current.add(threadId);
+          setSelectedThreadId(threadId);
+          selectedThreadIdRef.current = threadId;
+        }
+
+        await sendMessage({ provider: threadAgentId, threadId, text: draft });
+        pendingMaterializationThreadIdsRef.current.delete(threadId);
+        await refreshAll();
+      } catch (e) {
+        setError(toErrorMessage(e));
+      } finally {
+        setIsBusy(false);
+      }
+    },
+    [
+      activeThreadAgentId,
+      canSendMessageForActiveAgent,
+      refreshAll,
+      selectedAgentId,
+      selectedThreadId,
+    ],
+  );
+
+  const applyModeDraft = useCallback(
+    async (draft: {
+      modeKey: string;
+      modelId: string;
+      reasoningEffort: string;
+    }) => {
+      if (!selectedThreadId) {
+        return;
       }
 
-      await sendMessage({ provider: threadAgentId, threadId, text: draft });
-      pendingMaterializationThreadIdsRef.current.delete(threadId);
-      await refreshAll();
-    } catch (e) {
-      setError(toErrorMessage(e));
-    } finally {
-      setIsBusy(false);
-    }
-  }, [activeThreadAgentId, canSendMessageForActiveAgent, refreshAll, selectedAgentId, selectedThreadId]);
+      const mode = modes.find((entry) => entry.mode === draft.modeKey) ?? null;
+      if (!mode || typeof mode.mode !== "string") {
+        return;
+      }
 
-  const applyModeDraft = useCallback(async (draft: {
-    modeKey: string;
-    modelId: string;
-    reasoningEffort: string;
-  }) => {
-    if (!selectedThreadId) {
-      return;
-    }
+      const signature = buildModeSignature(
+        draft.modeKey,
+        draft.modelId,
+        draft.reasoningEffort,
+      );
+      if (!isModeSyncing && lastAppliedModeSignatureRef.current === signature) {
+        return;
+      }
 
-    const mode = modes.find((entry) => entry.mode === draft.modeKey) ?? null;
-    if (!mode || typeof mode.mode !== "string") {
-      return;
-    }
-
-    const signature = buildModeSignature(draft.modeKey, draft.modelId, draft.reasoningEffort);
-    if (!isModeSyncing && lastAppliedModeSignatureRef.current === signature) {
-      return;
-    }
-
-    const previousSignature = lastAppliedModeSignatureRef.current;
-    lastAppliedModeSignatureRef.current = signature;
-    setIsModeSyncing(true);
-    try {
-      setError("");
-      await setCollaborationMode({
-        provider: activeThreadAgentId,
-        threadId: selectedThreadId,
-        collaborationMode: {
-          mode: mode.mode,
-          settings: {
-            model: draft.modelId || null,
-            reasoningEffort: draft.reasoningEffort || null,
-            developerInstructions: mode.developerInstructions ?? null
-          }
-        }
-      });
-      await loadSelectedThread(selectedThreadId);
-    } catch (e) {
-      lastAppliedModeSignatureRef.current = previousSignature;
-      setError(toErrorMessage(e));
-    } finally {
-      setIsModeSyncing(false);
-    }
-  }, [activeThreadAgentId, isModeSyncing, loadSelectedThread, modes, selectedThreadId]);
+      const previousSignature = lastAppliedModeSignatureRef.current;
+      lastAppliedModeSignatureRef.current = signature;
+      setIsModeSyncing(true);
+      try {
+        setError("");
+        await setCollaborationMode({
+          provider: activeThreadAgentId,
+          threadId: selectedThreadId,
+          collaborationMode: {
+            mode: mode.mode,
+            settings: {
+              model: draft.modelId || null,
+              reasoningEffort: draft.reasoningEffort || null,
+              developerInstructions: mode.developerInstructions ?? null,
+            },
+          },
+        });
+        await loadSelectedThread(selectedThreadId);
+      } catch (e) {
+        lastAppliedModeSignatureRef.current = previousSignature;
+        setError(toErrorMessage(e));
+      } finally {
+        setIsModeSyncing(false);
+      }
+    },
+    [
+      activeThreadAgentId,
+      isModeSyncing,
+      loadSelectedThread,
+      modes,
+      selectedThreadId,
+    ],
+  );
 
   const submitPendingRequest = useCallback(async () => {
     if (!selectedThreadId || !activeRequest) return;
@@ -1806,7 +2045,7 @@ export function App(): React.JSX.Element {
         provider: activeThreadAgentId,
         threadId: selectedThreadId,
         requestId: activeRequest.id,
-        response: { answers }
+        response: { answers },
       });
       await refreshAll();
     } catch (e) {
@@ -1814,7 +2053,13 @@ export function App(): React.JSX.Element {
     } finally {
       setIsBusy(false);
     }
-  }, [activeRequest, activeThreadAgentId, answerDraft, refreshAll, selectedThreadId]);
+  }, [
+    activeRequest,
+    activeThreadAgentId,
+    answerDraft,
+    refreshAll,
+    selectedThreadId,
+  ]);
 
   const skipPendingRequest = useCallback(async () => {
     if (!selectedThreadId || !activeRequest) return;
@@ -1825,7 +2070,7 @@ export function App(): React.JSX.Element {
         provider: activeThreadAgentId,
         threadId: selectedThreadId,
         requestId: activeRequest.id,
-        response: { answers: {} }
+        response: { answers: {} },
       });
       await refreshAll();
     } catch (e) {
@@ -1840,75 +2085,101 @@ export function App(): React.JSX.Element {
     setIsBusy(true);
     try {
       setError("");
-      await interruptThread({ provider: activeThreadAgentId, threadId: selectedThreadId });
+      await interruptThread({
+        provider: activeThreadAgentId,
+        threadId: selectedThreadId,
+      });
       await refreshAll();
     } catch (e) {
       setError(toErrorMessage(e));
     } finally {
       setIsBusy(false);
     }
-  }, [activeThreadAgentId, canInterruptForActiveAgent, refreshAll, selectedThreadId]);
+  }, [
+    activeThreadAgentId,
+    canInterruptForActiveAgent,
+    refreshAll,
+    selectedThreadId,
+  ]);
 
   const loadHistoryDetail = useCallback(async (id: string) => {
-    if (!id) { setHistoryDetail(null); return; }
+    if (!id) {
+      setHistoryDetail(null);
+      return;
+    }
     const detail = await getHistoryEntry(id);
     setHistoryDetail(detail);
   }, []);
 
   useEffect(() => {
-    void loadHistoryDetail(selectedHistoryId).catch((e) => setError(toErrorMessage(e)));
+    void loadHistoryDetail(selectedHistoryId).catch((e) =>
+      setError(toErrorMessage(e)),
+    );
   }, [loadHistoryDetail, selectedHistoryId]);
 
   const handleAnswerChange = useCallback(
     (questionId: string, field: "option" | "freeform", value: string) => {
       setAnswerDraft((prev) => ({
         ...prev,
-        [questionId]: { ...(prev[questionId] ?? { option: "", freeform: "" }), [field]: value }
+        [questionId]: {
+          ...(prev[questionId] ?? { option: "", freeform: "" }),
+          [field]: value,
+        },
       }));
     },
-    []
+    [],
   );
 
-  const createNewThread = useCallback(async (projectPath: string, agentId?: AgentId) => {
-    const trimmedProjectPath = projectPath.trim();
-    const targetAgentId = agentId ?? selectedAgentId;
-    if (!trimmedProjectPath) {
-      setError("Cannot create thread: missing project path");
-      return;
-    }
-    if (!canUseFeature(agentsById[targetAgentId], "createThread")) {
-      setError(`Cannot create thread: ${targetAgentId} does not support thread creation`);
-      return;
-    }
-    setIsBusy(true);
-    try {
-      setError("");
-      const created = await createThread({
-        cwd: trimmedProjectPath,
-        agentId: targetAgentId
-      });
-      pendingMaterializationThreadIdsRef.current.add(created.threadId);
-      setSelectedThreadId(created.threadId);
-      selectedThreadIdRef.current = created.threadId;
-      setMobileSidebarOpen(false);
-      await refreshAll();
-    } catch (e) {
-      setError(toErrorMessage(e));
-    } finally {
-      setIsBusy(false);
-    }
-  }, [agentsById, refreshAll, selectedAgentId]);
+  const createNewThread = useCallback(
+    async (projectPath: string, agentId?: AgentId) => {
+      const trimmedProjectPath = projectPath.trim();
+      const targetAgentId = agentId ?? selectedAgentId;
+      if (!trimmedProjectPath) {
+        setError("Cannot create thread: missing project path");
+        return;
+      }
+      if (!canUseFeature(agentsById[targetAgentId], "createThread")) {
+        setError(
+          `Cannot create thread: ${targetAgentId} does not support thread creation`,
+        );
+        return;
+      }
+      setIsBusy(true);
+      try {
+        setError("");
+        const created = await createThread({
+          cwd: trimmedProjectPath,
+          agentId: targetAgentId,
+        });
+        pendingMaterializationThreadIdsRef.current.add(created.threadId);
+        setSelectedThreadId(created.threadId);
+        selectedThreadIdRef.current = created.threadId;
+        setMobileSidebarOpen(false);
+        await refreshAll();
+      } catch (e) {
+        setError(toErrorMessage(e));
+      } finally {
+        setIsBusy(false);
+      }
+    },
+    [agentsById, refreshAll, selectedAgentId],
+  );
 
-  const createThreadForSingleAgent = useCallback((projectPath: string) => {
-    const onlyAgentId = availableAgentIds[0];
-    if (!onlyAgentId) {
-      setError("Cannot create thread: no enabled agent");
-      return;
-    }
-    void createNewThread(projectPath, onlyAgentId);
-  }, [availableAgentIds, createNewThread]);
+  const createThreadForSingleAgent = useCallback(
+    (projectPath: string) => {
+      const onlyAgentId = availableAgentIds[0];
+      if (!onlyAgentId) {
+        setError("Cannot create thread: no enabled agent");
+        return;
+      }
+      void createNewThread(projectPath, onlyAgentId);
+    },
+    [availableAgentIds, createNewThread],
+  );
 
-  const renderSidebarContent = (viewport: "desktop" | "mobile"): React.JSX.Element => (
+  const renderSidebarContent = (
+    viewport: "desktop" | "mobile",
+  ): React.JSX.Element => (
     <>
       <div className="relative z-20 h-14 shrink-0 px-4">
         <div
@@ -1919,7 +2190,10 @@ export function App(): React.JSX.Element {
           <span className="text-sm font-semibold">Farfield</span>
           <div className="flex items-center gap-1">
             {viewport === "desktop" && (
-              <IconBtn onClick={() => setDesktopSidebarOpen(false)} title="Hide sidebar">
+              <IconBtn
+                onClick={() => setDesktopSidebarOpen(false)}
+                title="Hide sidebar"
+              >
                 <PanelLeft size={15} />
               </IconBtn>
             )}
@@ -1943,8 +2217,8 @@ export function App(): React.JSX.Element {
           {threads.length === 0 && (
             <div className="px-4 py-6 text-xs text-muted-foreground text-center space-y-3">
               <div>No threads</div>
-              {availableAgentIds.length > 0 && (
-                availableAgentIds.length === 1 ? (
+              {availableAgentIds.length > 0 &&
+                (availableAgentIds.length === 1 ? (
                   <Button
                     type="button"
                     variant="outline"
@@ -1952,7 +2226,8 @@ export function App(): React.JSX.Element {
                     className="rounded-full"
                     disabled={isBusy || !canCreateThreadForSelectedAgent}
                     onClick={() => {
-                      const defaultProjectPath = selectedAgentDescriptor?.projectDirectories[0] ?? ".";
+                      const defaultProjectPath =
+                        selectedAgentDescriptor?.projectDirectories[0] ?? ".";
                       createThreadForSingleAgent(defaultProjectPath);
                     }}
                   >
@@ -1968,24 +2243,34 @@ export function App(): React.JSX.Element {
                         size="sm"
                         className="rounded-full"
                         disabled={
-                          isBusy
-                          || !availableAgentIds.some((agentId) => canUseFeature(agentsById[agentId], "createThread"))
+                          isBusy ||
+                          !availableAgentIds.some((agentId) =>
+                            canUseFeature(agentsById[agentId], "createThread"),
+                          )
                         }
                       >
                         <Plus size={13} className="mr-1.5" />
                         New thread
                       </Button>
                     </DropdownMenuTrigger>
-                        <DropdownMenuContent align="center" sideOffset={6}>
+                    <DropdownMenuContent align="center" sideOffset={6}>
                       {availableAgentIds.map((agentId) => (
                         <DropdownMenuItem
                           key={agentId}
-                          disabled={!canUseFeature(agentsById[agentId], "createThread")}
+                          disabled={
+                            !canUseFeature(agentsById[agentId], "createThread")
+                          }
                           onSelect={() => {
-                            if (!canUseFeature(agentsById[agentId], "createThread")) {
+                            if (
+                              !canUseFeature(
+                                agentsById[agentId],
+                                "createThread",
+                              )
+                            ) {
                               return;
                             }
-                            const defaultProjectPath = agentsById[agentId]?.projectDirectories[0] ?? ".";
+                            const defaultProjectPath =
+                              agentsById[agentId]?.projectDirectories[0] ?? ".";
                             void createNewThread(defaultProjectPath, agentId);
                           }}
                         >
@@ -2001,16 +2286,20 @@ export function App(): React.JSX.Element {
                       ))}
                     </DropdownMenuContent>
                   </DropdownMenu>
-                )
-              )}
+                ))}
             </div>
           )}
           <div className="space-y-2 pr-2">
             {groupedThreads.map((group) => {
-              const hasSelectedThread = group.threads.some((thread) => thread.id === selectedThreadId);
-              const isCollapsed = hasSelectedThread ? false : Boolean(sidebarCollapsedGroups[group.key]);
+              const hasSelectedThread = group.threads.some(
+                (thread) => thread.id === selectedThreadId,
+              );
+              const isCollapsed = hasSelectedThread
+                ? false
+                : Boolean(sidebarCollapsedGroups[group.key]);
               const nextAgentId = group.preferredAgentId ?? selectedAgentId;
-              const nextAgentLabel = agentsById[nextAgentId]?.label ?? nextAgentId;
+              const nextAgentLabel =
+                agentsById[nextAgentId]?.label ?? nextAgentId;
               return (
                 <div key={group.key} className="space-y-1">
                   <div className="flex items-center gap-1">
@@ -2019,7 +2308,7 @@ export function App(): React.JSX.Element {
                       onClick={() =>
                         setSidebarCollapsedGroups((prev) => ({
                           ...prev,
-                          [group.key]: !isCollapsed
+                          [group.key]: !isCollapsed,
                         }))
                       }
                       variant="ghost"
@@ -2045,7 +2334,11 @@ export function App(): React.JSX.Element {
                             ? `New ${nextAgentLabel} thread in ${group.label}`
                             : "Cannot create thread: missing project path"
                         }
-                        disabled={isBusy || !group.projectPath || !canCreateThreadForSelectedAgent}
+                        disabled={
+                          isBusy ||
+                          !group.projectPath ||
+                          !canCreateThreadForSelectedAgent
+                        }
                       >
                         <Plus size={14} />
                       </IconBtn>
@@ -2055,9 +2348,14 @@ export function App(): React.JSX.Element {
                           <Button
                             type="button"
                             disabled={
-                              isBusy
-                              || !group.projectPath
-                              || !availableAgentIds.some((agentId) => canUseFeature(agentsById[agentId], "createThread"))
+                              isBusy ||
+                              !group.projectPath ||
+                              !availableAgentIds.some((agentId) =>
+                                canUseFeature(
+                                  agentsById[agentId],
+                                  "createThread",
+                                ),
+                              )
                             }
                             variant="ghost"
                             size="icon"
@@ -2075,15 +2373,28 @@ export function App(): React.JSX.Element {
                           {availableAgentIds.map((agentId) => (
                             <DropdownMenuItem
                               key={agentId}
-                              disabled={!canUseFeature(agentsById[agentId], "createThread")}
+                              disabled={
+                                !canUseFeature(
+                                  agentsById[agentId],
+                                  "createThread",
+                                )
+                              }
                               onSelect={() => {
                                 if (!group.projectPath) {
                                   return;
                                 }
-                                if (!canUseFeature(agentsById[agentId], "createThread")) {
+                                if (
+                                  !canUseFeature(
+                                    agentsById[agentId],
+                                    "createThread",
+                                  )
+                                ) {
                                   return;
                                 }
-                                void createNewThread(group.projectPath, agentId);
+                                void createNewThread(
+                                  group.projectPath,
+                                  agentId,
+                                );
                               }}
                             >
                               <span className="shrink-0 h-4 w-4 rounded-sm bg-muted/30 ring-1 ring-border/60 flex items-center justify-center overflow-hidden">
@@ -2109,7 +2420,9 @@ export function App(): React.JSX.Element {
                       )}
                       {group.threads.map((thread) => {
                         const isSelected = thread.id === selectedThreadId;
-                        const threadIsGenerating = Boolean(thread.isGenerating) || (isSelected && isGenerating);
+                        const threadIsGenerating =
+                          Boolean(thread.isGenerating) ||
+                          (isSelected && isGenerating);
                         return (
                           <Button
                             key={thread.id}
@@ -2124,20 +2437,28 @@ export function App(): React.JSX.Element {
                                 ? "bg-muted/90 text-foreground shadow-sm"
                                 : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
                             }`}
-                            >
-                              <span className="min-w-0 flex-1 flex items-center gap-1.5 truncate leading-5">
+                          >
+                            <span className="min-w-0 flex-1 flex items-center gap-1.5 truncate leading-5">
                               <span className="shrink-0 h-4 w-4 rounded-sm bg-muted/30 ring-1 ring-border/60 flex items-center justify-center overflow-hidden">
                                 <AgentFavicon
                                   agentId={thread.provider}
-                                  label={agentsById[thread.provider]?.label ?? "Agent"}
+                                  label={
+                                    agentsById[thread.provider]?.label ??
+                                    "Agent"
+                                  }
                                   className="h-3.5 w-3.5"
                                 />
                               </span>
-                                <span className="truncate">{threadLabel(thread)}</span>
+                              <span className="truncate">
+                                {threadLabel(thread)}
                               </span>
+                            </span>
                             <span className="shrink-0 flex items-center gap-1.5">
                               {threadIsGenerating && (
-                                <Loader2 size={11} className="animate-spin text-muted-foreground/70" />
+                                <Loader2
+                                  size={11}
+                                  className="animate-spin text-muted-foreground/70"
+                                />
                               )}
                               {thread.updatedAt && (
                                 <span className="text-[10px] text-muted-foreground/50">
@@ -2178,20 +2499,30 @@ export function App(): React.JSX.Element {
                 <span className="font-mono truncate">commit {commitLabel}</span>
               </div>
             </TooltipTrigger>
-            <TooltipContent side="top" align="start" className="space-y-1 text-xs">
+            <TooltipContent
+              side="top"
+              align="start"
+              className="space-y-1 text-xs"
+            >
               <div className="font-mono text-[11px]">commit {commitLabel}</div>
               {agentDescriptors
                 .filter((descriptor) => descriptor.enabled)
                 .map((descriptor) => (
                   <div key={descriptor.id}>
-                    {descriptor.label}: {descriptor.connected ? "connected" : "disconnected"}
+                    {descriptor.label}:{" "}
+                    {descriptor.connected ? "connected" : "disconnected"}
                   </div>
                 ))}
               {codexConfigured ? (
                 <>
                   <div>App: {health?.state.appReady ? "ok" : "not ready"}</div>
-                  <div>IPC: {health?.state.ipcConnected ? "connected" : "disconnected"}</div>
-                  <div>Init: {health?.state.ipcInitialized ? "ready" : "not ready"}</div>
+                  <div>
+                    IPC:{" "}
+                    {health?.state.ipcConnected ? "connected" : "disconnected"}
+                  </div>
+                  <div>
+                    Init: {health?.state.ipcInitialized ? "ready" : "not ready"}
+                  </div>
                 </>
               ) : null}
               {health?.state.lastError && (
@@ -2212,7 +2543,9 @@ export function App(): React.JSX.Element {
                 <Github size={14} />
               </a>
             </TooltipTrigger>
-            <TooltipContent side="top" align="end">GitHub</TooltipContent>
+            <TooltipContent side="top" align="end">
+              GitHub
+            </TooltipContent>
           </Tooltip>
         </div>
       </div>
@@ -2223,559 +2556,629 @@ export function App(): React.JSX.Element {
   return (
     <TooltipProvider delayDuration={120}>
       <div className="app-shell flex bg-background text-foreground font-sans">
+        {/* Mobile sidebar backdrop */}
+        <AnimatePresence>
+          {mobileSidebarOpen && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="md:hidden fixed inset-0 bg-black/50 z-40"
+              onClick={() => setMobileSidebarOpen(false)}
+            />
+          )}
+        </AnimatePresence>
 
-      {/* Mobile sidebar backdrop */}
-      <AnimatePresence>
-        {mobileSidebarOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.15 }}
-            className="md:hidden fixed inset-0 bg-black/50 z-40"
-            onClick={() => setMobileSidebarOpen(false)}
-          />
-        )}
-      </AnimatePresence>
+        {/* Desktop sidebar */}
+        <AnimatePresence initial={false}>
+          {desktopSidebarOpen && (
+            <motion.aside
+              key="desktop-sidebar"
+              initial={{ x: -280, opacity: 0.94 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: -280, opacity: 0.94 }}
+              transition={{
+                type: "spring",
+                stiffness: 380,
+                damping: 36,
+                mass: 0.7,
+              }}
+              className="hidden md:flex fixed left-0 top-[env(safe-area-inset-top)] bottom-[env(safe-area-inset-bottom)] z-30 w-64 flex-col border-r border-sidebar-border bg-sidebar shadow-xl"
+            >
+              {renderSidebarContent("desktop")}
+            </motion.aside>
+          )}
+        </AnimatePresence>
 
-      {/* Desktop sidebar */}
-      <AnimatePresence initial={false}>
-        {desktopSidebarOpen && (
-          <motion.aside
-            key="desktop-sidebar"
-            initial={{ x: -280, opacity: 0.94 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: -280, opacity: 0.94 }}
-            transition={{ type: "spring", stiffness: 380, damping: 36, mass: 0.7 }}
-            className="hidden md:flex fixed left-0 top-[env(safe-area-inset-top)] bottom-[env(safe-area-inset-bottom)] z-30 w-64 flex-col border-r border-sidebar-border bg-sidebar shadow-xl"
-          >
-            {renderSidebarContent("desktop")}
-          </motion.aside>
-        )}
-      </AnimatePresence>
+        {/* Mobile sidebar */}
+        <AnimatePresence initial={false}>
+          {mobileSidebarOpen && (
+            <motion.aside
+              key="mobile-sidebar"
+              initial={{ x: -280 }}
+              animate={{ x: 0 }}
+              exit={{ x: -280 }}
+              transition={{
+                type: "spring",
+                stiffness: 380,
+                damping: 36,
+                mass: 0.7,
+              }}
+              className="md:hidden fixed left-0 top-[env(safe-area-inset-top)] bottom-[env(safe-area-inset-bottom)] z-50 w-64 flex flex-col border-r border-sidebar-border bg-sidebar shadow-xl"
+            >
+              {renderSidebarContent("mobile")}
+            </motion.aside>
+          )}
+        </AnimatePresence>
 
-      {/* Mobile sidebar */}
-      <AnimatePresence initial={false}>
-        {mobileSidebarOpen && (
-          <motion.aside
-            key="mobile-sidebar"
-            initial={{ x: -280 }}
-            animate={{ x: 0 }}
-            exit={{ x: -280 }}
-            transition={{ type: "spring", stiffness: 380, damping: 36, mass: 0.7 }}
-            className="md:hidden fixed left-0 top-[env(safe-area-inset-top)] bottom-[env(safe-area-inset-bottom)] z-50 w-64 flex flex-col border-r border-sidebar-border bg-sidebar shadow-xl"
-          >
-            {renderSidebarContent("mobile")}
-          </motion.aside>
-        )}
-      </AnimatePresence>
-
-      {/* ── Main area ───────────────────────────────────────── */}
-      <div
-        className={`relative flex-1 flex flex-col min-w-0 transition-[margin] duration-200 ${
-          desktopSidebarOpen ? "md:ml-64" : "md:ml-0"
-        }`}
-      >
-
-        {/* Header */}
-        <header
-          className={`flex items-center justify-between px-3 h-14 shrink-0 gap-2 ${
-            activeTab === "chat"
-              ? "absolute inset-x-0 top-0 z-20 bg-transparent"
-              : "border-b border-border"
+        {/* ── Main area ───────────────────────────────────────── */}
+        <div
+          className={`relative flex-1 flex flex-col min-w-0 transition-[margin] duration-200 ${
+            desktopSidebarOpen ? "md:ml-64" : "md:ml-0"
           }`}
         >
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="md:hidden">
-              <IconBtn onClick={() => setMobileSidebarOpen(true)} title="Threads">
-                <Menu size={15} />
-              </IconBtn>
-            </div>
-            {!desktopSidebarOpen && (
-              <div className="hidden md:block">
-                <IconBtn onClick={() => setDesktopSidebarOpen(true)} title="Show sidebar">
-                  <PanelLeft size={15} />
+          {/* Header */}
+          <header
+            className={`flex items-center justify-between px-3 h-14 shrink-0 gap-2 ${
+              activeTab === "chat"
+                ? "absolute inset-x-0 top-0 z-20 bg-transparent"
+                : "border-b border-border"
+            }`}
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="md:hidden">
+                <IconBtn
+                  onClick={() => setMobileSidebarOpen(true)}
+                  title="Threads"
+                >
+                  <Menu size={15} />
                 </IconBtn>
               </div>
-            )}
-            <div className="min-w-0">
-              <div className="text-sm font-medium truncate leading-5 flex items-center gap-1.5">
-                {selectedThread ? threadLabel(selectedThread) : "No thread selected"}
-                {selectedThread && activeAgentLabel && (
-                  <span className="shrink-0 h-5 w-5 rounded-md bg-muted/30 ring-1 ring-border/60 flex items-center justify-center overflow-hidden">
-                    <AgentFavicon
-                      agentId={activeThreadAgentId}
-                      label={activeAgentLabel}
-                      className="h-4 w-4"
-                    />
-                  </span>
-                )}
-              </div>
-              {isGenerating && (
-                <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                  <Loader2 size={9} className="animate-spin" />
-                  <span>generating</span>
+              {!desktopSidebarOpen && (
+                <div className="hidden md:block">
+                  <IconBtn
+                    onClick={() => setDesktopSidebarOpen(true)}
+                    title="Show sidebar"
+                  >
+                    <PanelLeft size={15} />
+                  </IconBtn>
                 </div>
               )}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-0.5 shrink-0">
-            <IconBtn
-              onClick={() => void refreshAll()}
-              disabled={isBusy}
-              title="Refresh"
-            >
-              <RefreshCcw size={14} className={isBusy ? "animate-spin" : ""} />
-            </IconBtn>
-            <IconBtn
-              onClick={() => setActiveTab(activeTab === "debug" ? "chat" : "debug")}
-              active={activeTab === "debug"}
-              title="Debug"
-            >
-              <Bug size={14} />
-            </IconBtn>
-            <IconBtn onClick={toggleTheme} title="Toggle theme">
-              {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
-            </IconBtn>
-          </div>
-        </header>
-
-        <div className={activeTab === "chat" ? "flex-1 min-h-0 flex flex-col pt-14" : "flex-1 min-h-0 flex flex-col"}>
-        {/* Error bar */}
-        <AnimatePresence>
-          {error && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              className="overflow-hidden shrink-0"
-            >
-              <div className="flex items-center justify-between px-4 py-2 bg-destructive/10 border-b border-destructive/20 text-sm text-destructive">
-                <span className="truncate">{error}</span>
-                <Button
-                  type="button"
-                  onClick={() => setError("")}
-                  variant="ghost"
-                  size="icon"
-                  className="ml-3 h-6 w-6 shrink-0 opacity-60 hover:opacity-100"
-                >
-                  <X size={13} />
-                </Button>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-        <AnimatePresence>
-          {liveStateReductionError && activeTab === "chat" && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              className="overflow-hidden shrink-0"
-            >
-              <div className="px-4 py-2 bg-amber-500/10 border-b border-amber-500/30 text-sm text-amber-200">
-                Live updates failed for this thread. Showing saved messages only.
-                {liveStateReductionError.eventIndex !== null && (
-                  <span className="ml-2 text-xs text-amber-300/90">
-                    event {liveStateReductionError.eventIndex}
-                  </span>
-                )}
-                {liveStateReductionError.patchIndex !== null && (
-                  <span className="ml-1 text-xs text-amber-300/90">
-                    patch {liveStateReductionError.patchIndex}
-                  </span>
-                )}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* ── Chat tab ──────────────────────────────────────── */}
-        {activeTab === "chat" && (
-          <div className="relative flex-1 flex flex-col min-h-0">
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-x-0 -top-4 z-10 h-[5.5rem] bg-gradient-to-b from-background from-52% via-background/78 via-82% to-transparent to-100%"
-            />
-
-            {/* Conversation */}
-            <div ref={scrollRef} className="flex-1 overflow-y-auto">
-              <AnimatePresence initial={false} mode="wait">
-                <motion.div
-                  key={selectedThreadId ?? "__no_thread__"}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.14, ease: "easeOut" }}
-                  className="max-w-3xl mx-auto px-4 pt-8 pb-6"
-                >
-                  {turns.length === 0 ? (
-                    <div className="text-center py-20 text-sm text-muted-foreground">
-                      {selectedThreadId
-                        ? "No messages yet"
-                        : availableAgentIds.length > 0
-                          ? "Start typing to create a new thread"
-                          : "Select a thread from the sidebar"}
-                    </div>
-                  ) : (
-                    <div ref={chatContentRef} className="space-y-0">
-                      {hasHiddenChatItems && (
-                        <div className="flex justify-center pb-3">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="rounded-full"
-                            onClick={() => {
-                              setVisibleChatItemLimit((limit) =>
-                                Math.min(conversationItemCount, limit + VISIBLE_CHAT_ITEMS_STEP)
-                              );
-                            }}
-                          >
-                            Show older messages ({firstVisibleChatItemIndex})
-                          </Button>
-                        </div>
-                      )}
-                      {visibleConversationItems.map((entry) => (
-                        <div key={entry.key} style={{ paddingTop: `${entry.spacingTop}px` }}>
-                          <ConversationItem
-                            item={entry.item}
-                            isLast={entry.isLast}
-                            turnIsInProgress={entry.turnIsInProgress}
-                            previousItemType={entry.previousItemType}
-                            nextItemType={entry.nextItemType}
-                          />
-                        </div>
-                      ))}
-                    </div>
+              <div className="min-w-0">
+                <div className="text-sm font-medium truncate leading-5 flex items-center gap-1.5">
+                  {selectedThread
+                    ? threadLabel(selectedThread)
+                    : "No thread selected"}
+                  {selectedThread && activeAgentLabel && (
+                    <span className="shrink-0 h-5 w-5 rounded-md bg-muted/30 ring-1 ring-border/60 flex items-center justify-center overflow-hidden">
+                      <AgentFavicon
+                        agentId={activeThreadAgentId}
+                        label={activeAgentLabel}
+                        className="h-4 w-4"
+                      />
+                    </span>
                   )}
-                </motion.div>
-              </AnimatePresence>
+                </div>
+              </div>
             </div>
 
-            <AnimatePresence initial={false}>
-              {!isChatAtBottom && turns.length > 0 && (
+            <div className="flex items-center gap-0.5 shrink-0">
+              <IconBtn
+                onClick={() =>
+                  setActiveTab(activeTab === "debug" ? "chat" : "debug")
+                }
+                active={activeTab === "debug"}
+                title="Debug"
+              >
+                <Bug size={14} />
+              </IconBtn>
+              <IconBtn onClick={toggleTheme} title="Toggle theme">
+                {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
+              </IconBtn>
+            </div>
+          </header>
+
+          <div
+            className={
+              activeTab === "chat"
+                ? "flex-1 min-h-0 flex flex-col pt-14"
+                : "flex-1 min-h-0 flex flex-col"
+            }
+          >
+            {/* Error bar */}
+            <AnimatePresence>
+              {error && (
                 <motion.div
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 8 }}
-                  transition={{ duration: 0.18 }}
-                  className="absolute left-1/2 -translate-x-1/2 bottom-[7.25rem] md:bottom-[7.75rem] z-20"
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden shrink-0"
                 >
-                  <Button
-                    type="button"
-                    onClick={() => {
-                      if (!scrollRef.current) return;
-                      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-                      setIsChatAtBottom(true);
-                    }}
-                    size="icon"
-                    className="h-10 w-10 rounded-full border border-border bg-card text-foreground shadow-lg hover:bg-muted"
-                  >
-                    <ArrowDown size={16} />
-                  </Button>
+                  <div className="flex items-center justify-between px-4 py-2 bg-destructive/10 border-b border-destructive/20 text-sm text-destructive">
+                    <span className="truncate">{error}</span>
+                    <Button
+                      type="button"
+                      onClick={() => setError("")}
+                      variant="ghost"
+                      size="icon"
+                      className="ml-3 h-6 w-6 shrink-0 opacity-60 hover:opacity-100"
+                    >
+                      <X size={13} />
+                    </Button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+            <AnimatePresence>
+              {liveStateReductionError && activeTab === "chat" && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden shrink-0"
+                >
+                  <div className="px-4 py-2 bg-amber-500/10 border-b border-amber-500/30 text-sm text-amber-200">
+                    Live updates failed for this thread. Showing saved messages
+                    only.
+                    {liveStateReductionError.eventIndex !== null && (
+                      <span className="ml-2 text-xs text-amber-300/90">
+                        event {liveStateReductionError.eventIndex}
+                      </span>
+                    )}
+                    {liveStateReductionError.patchIndex !== null && (
+                      <span className="ml-1 text-xs text-amber-300/90">
+                        patch {liveStateReductionError.patchIndex}
+                      </span>
+                    )}
+                  </div>
                 </motion.div>
               )}
             </AnimatePresence>
 
-            {/* Input area */}
-            <div className="relative z-10 -mt-6 px-4 pt-6 pb-4 shrink-0">
-              <div
-                aria-hidden="true"
-                className="pointer-events-none absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-transparent via-background/85 to-background"
-              />
-              <div className="relative max-w-3xl mx-auto space-y-2">
+            {/* ── Chat tab ──────────────────────────────────────── */}
+            {activeTab === "chat" && (
+              <div className="relative flex-1 flex flex-col min-h-0">
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-x-0 -top-4 z-10 h-10 bg-gradient-to-b from-background from-20% via-background/60 via-60% to-transparent to-100%"
+                />
 
-                {/* Pending user input */}
-                <AnimatePresence>
-                  {activeRequest && canSubmitUserInputForActiveAgent && (
-                    <PendingRequestCard
-                      request={activeRequest}
-                      answerDraft={answerDraft}
-                      onDraftChange={handleAnswerChange}
-                      onSubmit={() => void submitPendingRequest()}
-                      onSkip={() => void skipPendingRequest()}
-                      isBusy={isBusy}
-                    />
-                  )}
-                </AnimatePresence>
+                {/* Conversation */}
+                <div ref={scrollRef} className="flex-1 overflow-y-auto">
+                  <AnimatePresence initial={false} mode="wait">
+                    <motion.div
+                      key={selectedThreadId ?? "__no_thread__"}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.14, ease: "easeOut" }}
+                      className="max-w-3xl mx-auto px-4 pt-4 pb-6"
+                    >
+                      {turns.length === 0 ? (
+                        <div className="text-center py-20 text-sm text-muted-foreground">
+                          {selectedThreadId
+                            ? "No messages yet"
+                            : availableAgentIds.length > 0
+                              ? "Start typing to create a new thread"
+                              : "Select a thread from the sidebar"}
+                        </div>
+                      ) : (
+                        <div ref={chatContentRef} className="space-y-0">
+                          {hasHiddenChatItems && (
+                            <div className="flex justify-center pb-3">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="rounded-full"
+                                onClick={() => {
+                                  setVisibleChatItemLimit((limit) =>
+                                    Math.min(
+                                      conversationItemCount,
+                                      limit + VISIBLE_CHAT_ITEMS_STEP,
+                                    ),
+                                  );
+                                }}
+                              >
+                                Show older messages ({firstVisibleChatItemIndex}
+                                )
+                              </Button>
+                            </div>
+                          )}
+                          {visibleConversationItems.map((entry) => (
+                            <div
+                              key={entry.key}
+                              style={{ paddingTop: `${entry.spacingTop}px` }}
+                            >
+                              <ConversationItem
+                                item={entry.item}
+                                isLast={entry.isLast}
+                                turnIsInProgress={entry.turnIsInProgress}
+                                previousItemType={entry.previousItemType}
+                                nextItemType={entry.nextItemType}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </motion.div>
+                  </AnimatePresence>
+                </div>
 
                 <AnimatePresence initial={false}>
-                  {isGenerating && (
+                  {!isChatAtBottom && turns.length > 0 && (
                     <motion.div
-                      initial={{ opacity: 0, y: 4 }}
+                      initial={{ opacity: 0, y: 8 }}
                       animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: 4 }}
-                      transition={{ duration: 0.15 }}
-                      className="px-1 flex items-center gap-1.5 text-xs text-muted-foreground"
+                      exit={{ opacity: 0, y: 8 }}
+                      transition={{ duration: 0.18 }}
+                      className="absolute left-1/2 -translate-x-1/2 bottom-[7.25rem] md:bottom-[7.75rem] z-20"
                     >
-                      <span className="reasoning-shimmer font-medium">Thinking…</span>
+                      <Button
+                        type="button"
+                        onClick={() => {
+                          if (!scrollRef.current) return;
+                          scrollRef.current.scrollTop =
+                            scrollRef.current.scrollHeight;
+                          setIsChatAtBottom(true);
+                        }}
+                        size="icon"
+                        className="h-10 w-10 rounded-full border border-border bg-card text-foreground shadow-lg hover:bg-muted"
+                      >
+                        <ArrowDown size={16} />
+                      </Button>
                     </motion.div>
                   )}
                 </AnimatePresence>
 
-                {/* Composer */}
-                <div className="flex flex-col gap-2">
-                  <ChatComposer
-                    canSend={canUseComposer}
-                    isBusy={isBusy}
-                    isGenerating={isGenerating}
-                    placeholder={
-                      selectedThreadId
-                        ? `Message ${activeAgentLabel}…`
-                        : `Message ${selectedAgentLabel}…`
-                    }
-                    onInterrupt={runInterrupt}
-                    onSend={submitMessage}
+                {/* Input area */}
+                <div className="relative z-10 -mt-6 px-4 pt-6 pb-0 shrink-0">
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-transparent via-background/85 to-background"
                   />
+                  <div className="relative max-w-3xl mx-auto space-y-2">
+                    <AnimatePresence mode="wait">
+                      {activeRequest && canSubmitUserInputForActiveAgent ? (
+                        <PendingRequestCard
+                          key="pending"
+                          request={activeRequest}
+                          answerDraft={answerDraft}
+                          onDraftChange={handleAnswerChange}
+                          onSubmit={() => void submitPendingRequest()}
+                          onSkip={() => void skipPendingRequest()}
+                          isBusy={isBusy}
+                        />
+                      ) : (
+                        <motion.div
+                          key="composer"
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: 8 }}
+                          transition={{ duration: 0.15 }}
+                          className="flex flex-col gap-2"
+                        >
+                          <AnimatePresence initial={false}>
+                            {isGenerating && (
+                              <motion.div
+                                initial={{ opacity: 0, y: 4 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: 4 }}
+                                transition={{ duration: 0.15 }}
+                                className="px-1 flex items-center gap-1.5 text-xs text-muted-foreground"
+                              >
+                                <span className="reasoning-shimmer font-medium">
+                                  Thinking…
+                                </span>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
 
-                  {/* Toolbar */}
-                  <div className="flex items-center gap-1 min-w-0 overflow-x-auto overflow-y-hidden whitespace-nowrap">
-                    {canSetCollaborationMode && canListCollaborationModes && (
-                      <Button
-                        type="button"
-                        onClick={() => {
-                          if (!planModeOption) return;
-                          const nextModeKey = isPlanModeEnabled
-                            ? (defaultModeOption?.mode ?? selectedModeKey)
-                            : planModeOption.mode;
-                          if (!nextModeKey) return;
-                          setSelectedModeKey(nextModeKey);
-                          void applyModeDraft({
-                            modeKey: nextModeKey,
-                            modelId: selectedModelId,
-                            reasoningEffort: selectedReasoningEffort
-                          });
-                        }}
-                        variant="ghost"
-                        size="sm"
-                        className={`h-8 shrink-0 rounded-full px-2 text-xs ${
-                          isPlanModeEnabled
-                            ? "bg-blue-500/15 text-blue-600 hover:bg-blue-500/20 dark:text-blue-300"
-                            : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
-                        }`}
-                        disabled={!selectedThreadId || !planModeOption}
-                      >
-                        {isPlanModeEnabled ? <CircleDot size={10} /> : <Circle size={10} />}
-                        Plan
-                      </Button>
-                    )}
-                    {canSetCollaborationMode && canListModels && (
-                      <Select
-                        value={selectedModelId || APP_DEFAULT_VALUE}
-                        onValueChange={(value) => {
-                          const nextModelId = value === APP_DEFAULT_VALUE ? "" : value;
-                          setSelectedModelId(nextModelId);
-                          void applyModeDraft({
-                            modeKey: selectedModeKey,
-                            modelId: nextModelId,
-                            reasoningEffort: selectedReasoningEffort
-                          });
-                        }}
-                        disabled={!selectedThreadId || !selectedModeKey}
-                      >
-                        <SelectTrigger className="h-8 w-[132px] sm:w-[176px] shrink-0 rounded-full border-0 bg-transparent dark:bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:text-foreground focus-visible:ring-0">
-                          <SelectValue placeholder="Model" />
-                        </SelectTrigger>
-                        <SelectContent position="popper">
-                          <SelectItem value={APP_DEFAULT_VALUE}>{ASSUMED_APP_DEFAULT_MODEL}</SelectItem>
-                          {modelOptionsWithoutAssumedDefault.map((option) => (
-                            <SelectItem key={option.id} value={option.id}>
-                              {option.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
-                    {canSetCollaborationMode && canListCollaborationModes && (
-                      <Select
-                        value={selectedReasoningEffort || APP_DEFAULT_VALUE}
-                        onValueChange={(value) => {
-                          const nextReasoningEffort = value === APP_DEFAULT_VALUE ? "" : value;
-                          setSelectedReasoningEffort(nextReasoningEffort);
-                          void applyModeDraft({
-                            modeKey: selectedModeKey,
-                            modelId: selectedModelId,
-                            reasoningEffort: nextReasoningEffort
-                          });
-                        }}
-                        disabled={!selectedThreadId || !selectedModeKey}
-                      >
-                        <SelectTrigger className="h-8 w-[104px] sm:w-[148px] shrink-0 rounded-full border-0 bg-transparent dark:bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:text-foreground focus-visible:ring-0">
-                          <SelectValue placeholder="Effort" />
-                        </SelectTrigger>
-                        <SelectContent position="popper">
-                          <SelectItem value={APP_DEFAULT_VALUE}>{ASSUMED_APP_DEFAULT_EFFORT}</SelectItem>
-                          {effortOptionsWithoutAssumedDefault.map((option) => (
-                            <SelectItem key={option} value={option}>
-                              {option}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
-                    {canSetCollaborationMode && (
-                      <span
-                        className={`inline-flex w-3 items-center justify-center text-xs text-muted-foreground transition-opacity ${
-                          isModeSyncing ? "opacity-100" : "opacity-0"
-                        }`}
-                      >
-                        <Loader2 size={10} className={isModeSyncing ? "animate-spin" : ""} />
-                      </span>
-                    )}
-                    {pendingRequests.length > 0 && (
-                      <span className="shrink-0 text-xs text-amber-500 dark:text-amber-400">
-                        {pendingRequests.length} pending
-                      </span>
-                    )}
+                          <ChatComposer
+                            canSend={canUseComposer}
+                            isBusy={isBusy}
+                            isGenerating={isGenerating}
+                            placeholder={
+                              selectedThreadId
+                                ? `Message ${activeAgentLabel}…`
+                                : `Message ${selectedAgentLabel}…`
+                            }
+                            onInterrupt={runInterrupt}
+                            onSend={submitMessage}
+                          />
+
+                          {/* Toolbar */}
+                          <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                            {canSetCollaborationMode &&
+                              canListCollaborationModes && (
+                                <Button
+                                  type="button"
+                                  onClick={() => {
+                                    if (!planModeOption) return;
+                                    const nextModeKey = isPlanModeEnabled
+                                      ? (defaultModeOption?.mode ??
+                                        selectedModeKey)
+                                      : planModeOption.mode;
+                                    if (!nextModeKey) return;
+                                    setSelectedModeKey(nextModeKey);
+                                    void applyModeDraft({
+                                      modeKey: nextModeKey,
+                                      modelId: selectedModelId,
+                                      reasoningEffort: selectedReasoningEffort,
+                                    });
+                                  }}
+                                  variant="ghost"
+                                  size="sm"
+                                  className={`h-8 shrink-0 rounded-full px-2 text-xs ${
+                                    isPlanModeEnabled
+                                      ? "bg-blue-500/15 text-blue-600 hover:bg-blue-500/20 dark:text-blue-300"
+                                      : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
+                                  }`}
+                                  disabled={
+                                    !selectedThreadId || !planModeOption
+                                  }
+                                >
+                                  {isPlanModeEnabled ? (
+                                    <CircleDot size={10} />
+                                  ) : (
+                                    <Circle size={10} />
+                                  )}
+                                  Plan
+                                </Button>
+                              )}
+                            {canSetCollaborationMode && canListModels && (
+                              <Select
+                                value={selectedModelId || APP_DEFAULT_VALUE}
+                                onValueChange={(value) => {
+                                  const nextModelId =
+                                    value === APP_DEFAULT_VALUE ? "" : value;
+                                  setSelectedModelId(nextModelId);
+                                  void applyModeDraft({
+                                    modeKey: selectedModeKey,
+                                    modelId: nextModelId,
+                                    reasoningEffort: selectedReasoningEffort,
+                                  });
+                                }}
+                                disabled={!selectedThreadId || !selectedModeKey}
+                              >
+                                <SelectTrigger className="h-8 w-[132px] sm:w-[176px] shrink-0 rounded-full border-0 bg-transparent dark:bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:text-foreground focus-visible:ring-0">
+                                  <SelectValue placeholder="Model" />
+                                </SelectTrigger>
+                                <SelectContent position="popper">
+                                  <SelectItem value={APP_DEFAULT_VALUE}>
+                                    {ASSUMED_APP_DEFAULT_MODEL}
+                                  </SelectItem>
+                                  {modelOptionsWithoutAssumedDefault.map(
+                                    (option) => (
+                                      <SelectItem
+                                        key={option.id}
+                                        value={option.id}
+                                      >
+                                        {option.label}
+                                      </SelectItem>
+                                    ),
+                                  )}
+                                </SelectContent>
+                              </Select>
+                            )}
+                            {canSetCollaborationMode &&
+                              canListCollaborationModes && (
+                                <Select
+                                  value={
+                                    selectedReasoningEffort || APP_DEFAULT_VALUE
+                                  }
+                                  onValueChange={(value) => {
+                                    const nextReasoningEffort =
+                                      value === APP_DEFAULT_VALUE ? "" : value;
+                                    setSelectedReasoningEffort(
+                                      nextReasoningEffort,
+                                    );
+                                    void applyModeDraft({
+                                      modeKey: selectedModeKey,
+                                      modelId: selectedModelId,
+                                      reasoningEffort: nextReasoningEffort,
+                                    });
+                                  }}
+                                  disabled={
+                                    !selectedThreadId || !selectedModeKey
+                                  }
+                                >
+                                  <SelectTrigger className="h-8 w-[104px] sm:w-[148px] shrink-0 rounded-full border-0 bg-transparent dark:bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:text-foreground focus-visible:ring-0">
+                                    <SelectValue placeholder="Effort" />
+                                  </SelectTrigger>
+                                  <SelectContent position="popper">
+                                    <SelectItem value={APP_DEFAULT_VALUE}>
+                                      {ASSUMED_APP_DEFAULT_EFFORT}
+                                    </SelectItem>
+                                    {effortOptionsWithoutAssumedDefault.map(
+                                      (option) => (
+                                        <SelectItem key={option} value={option}>
+                                          {option}
+                                        </SelectItem>
+                                      ),
+                                    )}
+                                  </SelectContent>
+                                </Select>
+                              )}
+                            {canSetCollaborationMode && (
+                              <span
+                                className={`inline-flex w-3 items-center justify-center text-xs text-muted-foreground transition-opacity ${
+                                  isModeSyncing ? "opacity-100" : "opacity-0"
+                                }`}
+                              >
+                                <Loader2
+                                  size={10}
+                                  className={
+                                    isModeSyncing ? "animate-spin" : ""
+                                  }
+                                />
+                              </span>
+                            )}
+                            {pendingRequests.length > 0 && (
+                              <span className="shrink-0 text-xs text-amber-500 dark:text-amber-400">
+                                {pendingRequests.length} pending
+                              </span>
+                            )}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
                 </div>
               </div>
-            </div>
-          </div>
-        )}
+            )}
 
-        {/* ── Debug tab ─────────────────────────────────────── */}
-        {activeTab === "debug" && (
-          <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-            <div className="flex-1 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_300px] min-h-0 divide-y md:divide-y-0 md:divide-x divide-border overflow-hidden">
+            {/* ── Debug tab ─────────────────────────────────────── */}
+            {activeTab === "debug" && (
+              <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+                <div className="flex-1 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_300px] min-h-0 divide-y md:divide-y-0 md:divide-x divide-border overflow-hidden">
+                  {/* Left: History */}
+                  <div className="flex flex-col min-h-0 overflow-hidden">
+                    <div className="flex items-center gap-2 px-4 py-3 border-b border-border shrink-0">
+                      <Activity size={13} className="text-muted-foreground" />
+                      <span className="text-sm font-medium">History</span>
+                      <span className="text-xs text-muted-foreground/60">
+                        {history.length} entries
+                      </span>
+                    </div>
 
-              {/* Left: History */}
-              <div className="flex flex-col min-h-0 overflow-hidden">
-                <div className="flex items-center gap-2 px-4 py-3 border-b border-border shrink-0">
-                  <Activity size={13} className="text-muted-foreground" />
-                  <span className="text-sm font-medium">History</span>
-                  <span className="text-xs text-muted-foreground/60">{history.length} entries</span>
-                </div>
-
-                <div className="flex-1 grid grid-cols-[200px_minmax(0,1fr)] min-h-0 divide-x divide-border overflow-hidden">
-                  {/* Entry list */}
-                  <div className="overflow-y-auto py-1">
-                    {history
-                      .slice()
-                      .reverse()
-                      .map((entry) => (
-                        <Button
-                          key={entry.id}
-                          type="button"
-                          onClick={() => setSelectedHistoryId(entry.id)}
-                          variant="ghost"
-                          className={`w-full h-auto flex-col items-start justify-start gap-0 rounded-none px-3 py-2 text-left transition-colors ${
-                            selectedHistoryId === entry.id
-                              ? "bg-muted text-foreground"
-                              : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                          }`}
-                        >
-                          <div className="flex items-center gap-1.5 mb-0.5">
-                            <span
-                              className={`text-[9px] px-1.5 py-0.5 rounded font-mono uppercase leading-4 ${
-                                entry.direction === "in"
-                                  ? "bg-success/15 text-success"
-                                  : entry.direction === "out"
-                                  ? "bg-blue-500/15 text-blue-400"
-                                  : "bg-muted text-muted-foreground"
+                    <div className="flex-1 grid grid-cols-[200px_minmax(0,1fr)] min-h-0 divide-x divide-border overflow-hidden">
+                      {/* Entry list */}
+                      <div className="overflow-y-auto py-1">
+                        {history
+                          .slice()
+                          .reverse()
+                          .map((entry) => (
+                            <Button
+                              key={entry.id}
+                              type="button"
+                              onClick={() => setSelectedHistoryId(entry.id)}
+                              variant="ghost"
+                              className={`w-full h-auto flex-col items-start justify-start gap-0 rounded-none px-3 py-2 text-left transition-colors ${
+                                selectedHistoryId === entry.id
+                                  ? "bg-muted text-foreground"
+                                  : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                               }`}
                             >
-                              {entry.source} {entry.direction}
-                            </span>
+                              <div className="flex items-center gap-1.5 mb-0.5">
+                                <span
+                                  className={`text-[9px] px-1.5 py-0.5 rounded font-mono uppercase leading-4 ${
+                                    entry.direction === "in"
+                                      ? "bg-success/15 text-success"
+                                      : entry.direction === "out"
+                                        ? "bg-blue-500/15 text-blue-400"
+                                        : "bg-muted text-muted-foreground"
+                                  }`}
+                                >
+                                  {entry.source} {entry.direction}
+                                </span>
+                              </div>
+                              <div className="text-[10px] text-muted-foreground/50 font-mono truncate">
+                                {entry.at}
+                              </div>
+                            </Button>
+                          ))}
+                      </div>
+
+                      {/* Payload detail */}
+                      <div className="overflow-y-auto p-3 space-y-3">
+                        {!historyDetail ? (
+                          <div className="text-xs text-muted-foreground py-4">
+                            Select an entry
                           </div>
-                          <div className="text-[10px] text-muted-foreground/50 font-mono truncate">
-                            {entry.at}
-                          </div>
-                        </Button>
-                      ))}
+                        ) : (
+                          <>
+                            <pre className="font-mono text-[11px] text-muted-foreground leading-5 whitespace-pre-wrap break-words">
+                              {JSON.stringify(
+                                historyDetail.fullPayload,
+                                null,
+                                2,
+                              )}
+                            </pre>
+                          </>
+                        )}
+                      </div>
+                    </div>
                   </div>
 
-                  {/* Payload detail */}
-                  <div className="overflow-y-auto p-3 space-y-3">
-                    {!historyDetail ? (
-                      <div className="text-xs text-muted-foreground py-4">Select an entry</div>
-                    ) : (
-                      <>
-                        <pre className="font-mono text-[11px] text-muted-foreground leading-5 whitespace-pre-wrap break-words">
-                          {JSON.stringify(historyDetail.fullPayload, null, 2)}
-                        </pre>
-                      </>
-                    )}
+                  {/* Right: Trace + Stream Events */}
+                  <div className="flex flex-col min-h-0 overflow-hidden divide-y divide-border">
+                    {/* Trace controls */}
+                    <div className="p-4 space-y-3 shrink-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">Trace</span>
+                        <span
+                          className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                            traceStatus?.active
+                              ? "bg-success/15 text-success"
+                              : "bg-muted text-muted-foreground"
+                          }`}
+                        >
+                          {traceStatus?.active ? "recording" : "idle"}
+                        </span>
+                      </div>
+                      <Input
+                        value={traceLabel}
+                        onChange={(e) => setTraceLabel(e.target.value)}
+                        placeholder="label"
+                        className="h-7 text-base md:text-xs"
+                      />
+                      <Input
+                        value={traceNote}
+                        onChange={(e) => setTraceNote(e.target.value)}
+                        placeholder="marker note"
+                        className="h-7 text-base md:text-xs"
+                      />
+                      <div className="flex gap-1.5">
+                        {(["Start", "Mark", "Stop"] as const).map((btn) => (
+                          <Button
+                            key={btn}
+                            type="button"
+                            onClick={() => {
+                              const action =
+                                btn === "Start"
+                                  ? startTrace(traceLabel)
+                                  : btn === "Mark"
+                                    ? markTrace(traceNote)
+                                    : stopTrace();
+                              void action.then(refreshAll);
+                            }}
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-xs"
+                          >
+                            {btn}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Stream events */}
+                    <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+                      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border shrink-0">
+                        <span className="text-xs font-medium">
+                          Stream Events
+                        </span>
+                        <span className="text-xs text-muted-foreground/60">
+                          {streamEvents.length}
+                        </span>
+                      </div>
+                      <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
+                        {streamEvents
+                          .slice()
+                          .reverse()
+                          .map((evt, i) => (
+                            <StreamEventCard key={i} event={evt} />
+                          ))}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
-
-              {/* Right: Trace + Stream Events */}
-              <div className="flex flex-col min-h-0 overflow-hidden divide-y divide-border">
-
-                {/* Trace controls */}
-                <div className="p-4 space-y-3 shrink-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium">Trace</span>
-                    <span
-                      className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
-                        traceStatus?.active
-                          ? "bg-success/15 text-success"
-                          : "bg-muted text-muted-foreground"
-                      }`}
-                    >
-                      {traceStatus?.active ? "recording" : "idle"}
-                    </span>
-                  </div>
-                  <Input
-                    value={traceLabel}
-                    onChange={(e) => setTraceLabel(e.target.value)}
-                    placeholder="label"
-                    className="h-7 text-base md:text-xs"
-                  />
-                  <Input
-                    value={traceNote}
-                    onChange={(e) => setTraceNote(e.target.value)}
-                    placeholder="marker note"
-                    className="h-7 text-base md:text-xs"
-                  />
-                  <div className="flex gap-1.5">
-                    {(["Start", "Mark", "Stop"] as const).map((btn) => (
-                      <Button
-                        key={btn}
-                        type="button"
-                        onClick={() => {
-                          const action =
-                            btn === "Start"
-                              ? startTrace(traceLabel)
-                              : btn === "Mark"
-                              ? markTrace(traceNote)
-                              : stopTrace();
-                          void action.then(refreshAll);
-                        }}
-                        variant="outline"
-                        size="sm"
-                        className="h-7 text-xs"
-                      >
-                        {btn}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Stream events */}
-                <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-                  <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border shrink-0">
-                    <span className="text-xs font-medium">Stream Events</span>
-                    <span className="text-xs text-muted-foreground/60">{streamEvents.length}</span>
-                  </div>
-                  <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
-                    {streamEvents
-                      .slice()
-                      .reverse()
-                      .map((evt, i) => (
-                        <StreamEventCard key={i} event={evt} />
-                      ))}
-                  </div>
-                </div>
-              </div>
-            </div>
+            )}
           </div>
-        )}
         </div>
-      </div>
       </div>
     </TooltipProvider>
   );

@@ -9,10 +9,17 @@ interface ReasoningBlockProps {
   isActive: boolean;
 }
 
-export function ReasoningBlock({ summary, text, isActive }: ReasoningBlockProps) {
+export function ReasoningBlock({
+  summary,
+  text,
+  isActive,
+}: ReasoningBlockProps) {
   const [expanded, setExpanded] = useState(false);
-  const sanitizedSummary = summary.map((line) => line.replaceAll("**", "").trim());
-  const currentLine = sanitizedSummary[sanitizedSummary.length - 1] ?? "Thinking…";
+  const sanitizedSummary = summary.map((line) =>
+    line.replaceAll("**", "").trim(),
+  );
+  const currentLine =
+    sanitizedSummary[sanitizedSummary.length - 1] ?? "Thinking…";
   const canExpand = sanitizedSummary.length > 1;
 
   return (
@@ -45,7 +52,10 @@ export function ReasoningBlock({ summary, text, isActive }: ReasoningBlockProps)
         )}
 
         {isActive ? (
-          <Loader2 size={12} className="ml-auto animate-spin shrink-0 opacity-60" />
+          <Loader2
+            size={12}
+            className="ml-auto animate-spin shrink-0 opacity-60"
+          />
         ) : canExpand ? (
           <ChevronRight
             size={12}
@@ -65,7 +75,10 @@ export function ReasoningBlock({ summary, text, isActive }: ReasoningBlockProps)
           >
             <div className="mt-2 ml-5 space-y-1 border-l border-border pl-3">
               {sanitizedSummary.map((line, i) => (
-                <p key={i} className="text-xs font-semibold text-muted-foreground leading-5">
+                <p
+                  key={i}
+                  className="text-xs font-semibold text-muted-foreground leading-5"
+                >
                   {line}
                 </p>
               ))}

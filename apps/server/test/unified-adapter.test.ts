@@ -4,14 +4,14 @@ import {
   UNIFIED_COMMAND_KINDS,
   type UnifiedCommand,
   type UnifiedCommandKind,
-  type UnifiedProviderId
+  type UnifiedProviderId,
 } from "@farfield/unified-surface";
 import type { ThreadConversationState } from "@farfield/protocol";
 import {
   AgentUnifiedProviderAdapter,
   FEATURE_ID_BY_COMMAND_KIND,
   UnifiedBackendFeatureError,
-  buildUnifiedFeatureMatrix
+  buildUnifiedFeatureMatrix,
 } from "../src/unified/adapter.js";
 import type { AgentAdapter, AgentCapabilities } from "../src/agents/types.js";
 
@@ -23,7 +23,7 @@ const SAMPLE_THREAD: ThreadConversationState = {
   updatedAt: 1700000100,
   title: "Thread",
   latestModel: null,
-  latestReasoningEffort: null
+  latestReasoningEffort: null,
 };
 
 const SAMPLE_THREAD_LIST_ITEM = {
@@ -32,7 +32,7 @@ const SAMPLE_THREAD_LIST_ITEM = {
   title: "Named Thread",
   createdAt: 1700000000,
   updatedAt: 1700000100,
-  source: "codex"
+  source: "codex",
 };
 
 const CODEx_CAPABILITIES: AgentCapabilities = {
@@ -41,7 +41,7 @@ const CODEx_CAPABILITIES: AgentCapabilities = {
   canSetCollaborationMode: true,
   canSubmitUserInput: true,
   canReadLiveState: true,
-  canReadStreamEvents: true
+  canReadStreamEvents: true,
 };
 
 const OPENCODE_CAPABILITIES: AgentCapabilities = {
@@ -50,7 +50,7 @@ const OPENCODE_CAPABILITIES: AgentCapabilities = {
   canSetCollaborationMode: false,
   canSubmitUserInput: false,
   canReadLiveState: false,
-  canReadStreamEvents: false
+  canReadStreamEvents: false,
 };
 
 function createCodexAdapter(): AgentAdapter {
@@ -69,76 +69,82 @@ function createCodexAdapter(): AgentAdapter {
     async listThreads() {
       return {
         data: [SAMPLE_THREAD_LIST_ITEM],
-        nextCursor: null
+        nextCursor: null,
       };
     },
     async createThread() {
       return {
         threadId: SAMPLE_THREAD.id,
-        thread: SAMPLE_THREAD_LIST_ITEM
+        thread: SAMPLE_THREAD_LIST_ITEM,
       };
     },
     async readThread() {
       return {
-        thread: SAMPLE_THREAD
+        thread: SAMPLE_THREAD,
       };
     },
     async sendMessage() {},
     async interrupt() {},
     async listModels() {
       return {
-        data: [{
-          id: "gpt-5.3-codex",
-          displayName: "GPT-5.3 Codex",
-          description: "Model",
-          supportedReasoningEfforts: ["low", "medium", "high"]
-        }]
+        data: [
+          {
+            id: "gpt-5.3-codex",
+            displayName: "GPT-5.3 Codex",
+            description: "Model",
+            supportedReasoningEfforts: ["low", "medium", "high"],
+          },
+        ],
       };
     },
     async listCollaborationModes() {
       return {
-        data: [{
-          name: "Plan",
-          mode: "plan",
-          settings: {
-            model: "gpt-5.3-codex",
-            reasoning_effort: "high",
-            developer_instructions: "plan mode"
-          }
-        }]
+        data: [
+          {
+            name: "Plan",
+            mode: "plan",
+            settings: {
+              model: "gpt-5.3-codex",
+              reasoning_effort: "high",
+              developer_instructions: "plan mode",
+            },
+          },
+        ],
       };
     },
     async setCollaborationMode(input) {
       return {
-        ownerClientId: input.ownerClientId ?? "owner-1"
+        ownerClientId: input.ownerClientId ?? "owner-1",
       };
     },
     async submitUserInput(input) {
       return {
         ownerClientId: input.ownerClientId ?? "owner-1",
-        requestId: input.requestId
+        requestId: input.requestId,
       };
     },
     async readLiveState() {
       return {
         ownerClientId: "owner-1",
         conversationState: SAMPLE_THREAD,
-        liveStateError: null
+        liveStateError: null,
       };
     },
     async readStreamEvents() {
       return {
         ownerClientId: "owner-1",
-        events: [{
-          type: "request",
-          requestId: "req-1",
-          method: "thread/read",
-          params: {
-            threadId: SAMPLE_THREAD.id
-          }
-        }]
+        events: [
+          {
+            type: "request",
+            requestId: "req-1",
+            method: "thread/read",
+            params: {
+              threadId: SAMPLE_THREAD.id,
+            },
+          },
+        ],
       };
-    }
+    },
   };
 }
 
@@ -157,11 +163,13 @@ function createOpenCodeAdapter(): AgentAdapter {
     },
     async listThreads() {
       return {
-        data: [{
-          ...SAMPLE_THREAD_LIST_ITEM,
-          source: "opencode"
-        }],
-        nextCursor: null
+        data: [
+          {
+            ...SAMPLE_THREAD_LIST_ITEM,
+            source: "opencode",
+          },
+        ],
+        nextCursor: null,
       };
     },
     async createThread() {
@@ -169,27 +177,30 @@ function createOpenCodeAdapter(): AgentAdapter {
         threadId: SAMPLE_THREAD.id,
         thread: {
           ...SAMPLE_THREAD_LIST_ITEM,
-          source: "opencode"
-        }
+          source: "opencode",
+        },
       };
     },
     async readThread() {
       return {
         thread: {
           ...SAMPLE_THREAD,
-          source: "opencode"
-        }
+          source: "opencode",
+        },
       };
     },
     async sendMessage() {},
     async interrupt() {},
     async listProjectDirectories() {
       return ["/tmp/project"];
-    }
+    },
   };
 }
 
-function createCommand(kind: UnifiedCommandKind, provider: UnifiedProviderId): UnifiedCommand {
+function createCommand(
+  kind: UnifiedCommandKind,
+  provider: UnifiedProviderId,
+): UnifiedCommand {
   switch (kind) {
     case "listThreads":
       return UnifiedCommandSchema.parse({
@@ -199,44 +210,44 @@ function createCommand(kind: UnifiedCommandKind, provider: UnifiedProviderId): U
         archived: false,
         all: true,
         maxPages: 10,
-        cursor: null
+        cursor: null,
       });
     case "createThread":
       return UnifiedCommandSchema.parse({
         kind,
         provider,
-        cwd: "/tmp/project"
+        cwd: "/tmp/project",
       });
     case "readThread":
       return UnifiedCommandSchema.parse({
         kind,
         provider,
         threadId: SAMPLE_THREAD.id,
-        includeTurns: true
+        includeTurns: true,
       });
     case "sendMessage":
       return UnifiedCommandSchema.parse({
         kind,
         provider,
         threadId: SAMPLE_THREAD.id,
-        text: "hello"
+        text: "hello",
       });
     case "interrupt":
       return UnifiedCommandSchema.parse({
         kind,
         provider,
-        threadId: SAMPLE_THREAD.id
+        threadId: SAMPLE_THREAD.id,
       });
     case "listModels":
       return UnifiedCommandSchema.parse({
         kind,
         provider,
-        limit: 50
+        limit: 50,
       });
     case "listCollaborationModes":
       return UnifiedCommandSchema.parse({
         kind,
-        provider
+        provider,
       });
     case "setCollaborationMode":
       return UnifiedCommandSchema.parse({
@@ -249,9 +260,9 @@ function createCommand(kind: UnifiedCommandKind, provider: UnifiedProviderId): U
           settings: {
             model: "gpt-5.3-codex",
             reasoningEffort: "high",
-            developerInstructions: "plan"
-          }
-        }
+            developerInstructions: "plan",
+          },
+        },
       });
     case "submitUserInput":
       return UnifiedCommandSchema.parse({
@@ -263,45 +274,55 @@ function createCommand(kind: UnifiedCommandKind, provider: UnifiedProviderId): U
         response: {
           answers: {
             question1: {
-              answers: ["yes"]
-            }
-          }
-        }
+              answers: ["yes"],
+            },
+          },
+        },
       });
     case "readLiveState":
       return UnifiedCommandSchema.parse({
         kind,
         provider,
-        threadId: SAMPLE_THREAD.id
+        threadId: SAMPLE_THREAD.id,
       });
     case "readStreamEvents":
       return UnifiedCommandSchema.parse({
         kind,
         provider,
         threadId: SAMPLE_THREAD.id,
-        limit: 20
+        limit: 20,
       });
     case "listProjectDirectories":
       return UnifiedCommandSchema.parse({
         kind,
-        provider
+        provider,
       });
   }
 }
 
 describe("unified provider adapters", () => {
   it("has full command handler coverage for both providers", () => {
-    const codexUnified = new AgentUnifiedProviderAdapter("codex", createCodexAdapter());
-    const opencodeUnified = new AgentUnifiedProviderAdapter("opencode", createOpenCodeAdapter());
+    const codexUnified = new AgentUnifiedProviderAdapter(
+      "codex",
+      createCodexAdapter(),
+    );
+    const opencodeUnified = new AgentUnifiedProviderAdapter(
+      "opencode",
+      createOpenCodeAdapter(),
+    );
 
-    expect(Object.keys(codexUnified.handlers).sort()).toEqual([...UNIFIED_COMMAND_KINDS].sort());
-    expect(Object.keys(opencodeUnified.handlers).sort()).toEqual([...UNIFIED_COMMAND_KINDS].sort());
+    expect(Object.keys(codexUnified.handlers).sort()).toEqual(
+      [...UNIFIED_COMMAND_KINDS].sort(),
+    );
+    expect(Object.keys(opencodeUnified.handlers).sort()).toEqual(
+      [...UNIFIED_COMMAND_KINDS].sort(),
+    );
   });
 
   it("builds a complete typed feature matrix", () => {
     const matrix = buildUnifiedFeatureMatrix({
       codex: createCodexAdapter(),
-      opencode: createOpenCodeAdapter()
+      opencode: createOpenCodeAdapter(),
     });
 
     expect(matrix.codex.listThreads.status).toBe("available");
@@ -313,31 +334,41 @@ describe("unified provider adapters", () => {
   });
 
   it("handles every command kind for both providers", async () => {
-    const codexUnified = new AgentUnifiedProviderAdapter("codex", createCodexAdapter());
-    const opencodeUnified = new AgentUnifiedProviderAdapter("opencode", createOpenCodeAdapter());
+    const codexUnified = new AgentUnifiedProviderAdapter(
+      "codex",
+      createCodexAdapter(),
+    );
+    const opencodeUnified = new AgentUnifiedProviderAdapter(
+      "opencode",
+      createOpenCodeAdapter(),
+    );
     const matrix = buildUnifiedFeatureMatrix({
       codex: createCodexAdapter(),
-      opencode: createOpenCodeAdapter()
+      opencode: createOpenCodeAdapter(),
     });
 
     for (const kind of UNIFIED_COMMAND_KINDS) {
       const featureId = FEATURE_ID_BY_COMMAND_KIND[kind];
       const codexAvailability = matrix.codex[featureId];
       if (codexAvailability.status === "available") {
-        const codexResult = await codexUnified.execute(createCommand(kind, "codex"));
+        const codexResult = await codexUnified.execute(
+          createCommand(kind, "codex"),
+        );
         expect(codexResult.kind).toBe(kind);
         if (codexResult.kind === "listThreads") {
           expect(codexResult.data[0]?.title).toBe("Named Thread");
         }
       } else {
-        await expect(codexUnified.execute(createCommand(kind, "codex"))).rejects.toBeInstanceOf(
-          UnifiedBackendFeatureError
-        );
+        await expect(
+          codexUnified.execute(createCommand(kind, "codex")),
+        ).rejects.toBeInstanceOf(UnifiedBackendFeatureError);
       }
 
       const opencodeAvailability = matrix.opencode[featureId];
       if (opencodeAvailability.status === "available") {
-        const opencodeResult = await opencodeUnified.execute(createCommand(kind, "opencode"));
+        const opencodeResult = await opencodeUnified.execute(
+          createCommand(kind, "opencode"),
+        );
         expect(opencodeResult.kind).toBe(kind);
         if (opencodeResult.kind === "listThreads") {
           expect(opencodeResult.data[0]?.title).toBe("Named Thread");
@@ -345,9 +376,9 @@ describe("unified provider adapters", () => {
         continue;
       }
 
-      await expect(opencodeUnified.execute(createCommand(kind, "opencode"))).rejects.toBeInstanceOf(
-        UnifiedBackendFeatureError
-      );
+      await expect(
+        opencodeUnified.execute(createCommand(kind, "opencode")),
+      ).rejects.toBeInstanceOf(UnifiedBackendFeatureError);
     }
   });
 });

@@ -14,7 +14,10 @@ interface DiffBlockProps {
 }
 
 type LineType = "add" | "remove" | "header" | "context";
-interface DiffLine { type: LineType; content: string }
+interface DiffLine {
+  type: LineType;
+  content: string;
+}
 
 function parseDiff(raw: string): DiffLine[] {
   const result: DiffLine[] = [];
@@ -38,30 +41,41 @@ function parseDiff(raw: string): DiffLine[] {
 }
 
 function kindMeta(kind: string) {
-  if (kind === "create") return { Icon: FilePlus, label: "created", cls: "text-success" };
-  if (kind === "delete") return { Icon: FileMinus, label: "deleted", cls: "text-danger" };
-  return { Icon: FileEdit, label: "modified", cls: "text-blue-400 dark:text-blue-400" };
+  if (kind === "create")
+    return { Icon: FilePlus, label: "created", cls: "text-success" };
+  if (kind === "delete")
+    return { Icon: FileMinus, label: "deleted", cls: "text-danger" };
+  return {
+    Icon: FileEdit,
+    label: "modified",
+    cls: "text-blue-400 dark:text-blue-400",
+  };
 }
 
 const LINE_STYLES: Record<LineType, string> = {
   add: "bg-success/8 dark:bg-success/10",
   remove: "bg-danger/8 dark:bg-danger/10",
   header: "bg-muted/60",
-  context: ""
+  context: "",
 };
 const TEXT_STYLES: Record<LineType, string> = {
   add: "text-success dark:text-success/90",
   remove: "text-danger dark:text-danger/90",
   header: "text-muted-foreground/60 italic",
-  context: "text-foreground/70"
+  context: "text-foreground/70",
 };
 const GUTTER_STYLES: Record<LineType, string> = {
   add: "text-success/50",
   remove: "text-danger/50",
   header: "text-muted-foreground/30",
-  context: "text-muted-foreground/25"
+  context: "text-muted-foreground/25",
 };
-const GUTTER_CHAR: Record<LineType, string> = { add: "+", remove: "−", header: "", context: " " };
+const GUTTER_CHAR: Record<LineType, string> = {
+  add: "+",
+  remove: "−",
+  header: "",
+  context: " ",
+};
 
 function DiffBlockComponent({ changes }: DiffBlockProps) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
@@ -86,7 +100,9 @@ function DiffBlockComponent({ changes }: DiffBlockProps) {
               className="h-auto w-full justify-start rounded-none bg-muted/40 px-3 py-2.5 text-left transition-colors hover:bg-muted/70"
             >
               <Icon size={12} className={`shrink-0 ${cls}`} />
-              <span className="font-mono text-xs font-medium text-foreground truncate">{fileName}</span>
+              <span className="font-mono text-xs font-medium text-foreground truncate">
+                {fileName}
+              </span>
               {dirPath && (
                 <span className="text-[11px] text-muted-foreground/40 truncate hidden sm:block">
                   {dirPath}
@@ -94,12 +110,18 @@ function DiffBlockComponent({ changes }: DiffBlockProps) {
               )}
               <div className="flex items-center gap-2 ml-auto shrink-0">
                 {added > 0 && (
-                  <span className="text-xs font-mono text-success">+{added}</span>
+                  <span className="text-xs font-mono text-success">
+                    +{added}
+                  </span>
                 )}
                 {removed > 0 && (
-                  <span className="text-xs font-mono text-danger">−{removed}</span>
+                  <span className="text-xs font-mono text-danger">
+                    −{removed}
+                  </span>
                 )}
-                <span className={`text-[10px] font-medium ${cls}`}>{label}</span>
+                <span className={`text-[10px] font-medium ${cls}`}>
+                  {label}
+                </span>
                 <ChevronRight
                   size={11}
                   className={`text-muted-foreground/50 transition-transform duration-150 ${isExpanded ? "rotate-90" : ""}`}
@@ -137,7 +159,9 @@ function DiffBlockComponent({ changes }: DiffBlockProps) {
                         </div>
                       ))
                     ) : (
-                      <div className="px-3 py-2 text-xs text-muted-foreground">No diff available</div>
+                      <div className="px-3 py-2 text-xs text-muted-foreground">
+                        No diff available
+                      </div>
                     )}
                   </div>
                 </motion.div>
@@ -150,7 +174,10 @@ function DiffBlockComponent({ changes }: DiffBlockProps) {
   );
 }
 
-function areDiffBlockPropsEqual(prev: DiffBlockProps, next: DiffBlockProps): boolean {
+function areDiffBlockPropsEqual(
+  prev: DiffBlockProps,
+  next: DiffBlockProps,
+): boolean {
   return prev.changes === next.changes;
 }
 

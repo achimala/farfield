@@ -19,13 +19,13 @@ import {
   type UnifiedFeatureId,
   type UnifiedProviderId,
   type UnifiedThread,
-  type UnifiedUserInputRequest
+  type UnifiedUserInputRequest,
 } from "@farfield/unified-surface";
 import { z } from "zod";
 
 const ApiEnvelopeSchema = z
   .object({
-    ok: z.boolean()
+    ok: z.boolean(),
   })
   .passthrough();
 
@@ -38,10 +38,10 @@ const ApiFailureEnvelopeSchema = z
         .object({
           code: z.string().optional(),
           message: z.string().optional(),
-          details: JsonValueSchema.optional()
+          details: JsonValueSchema.optional(),
         })
-        .passthrough()
-    ])
+        .passthrough(),
+    ]),
   })
   .passthrough();
 
@@ -56,9 +56,9 @@ const HealthResponseSchema = z
         gitCommit: z.string().nullable().optional(),
         lastError: z.string().nullable(),
         historyCount: z.number().int().nonnegative(),
-        threadOwnerCount: z.number().int().nonnegative()
+        threadOwnerCount: z.number().int().nonnegative(),
       })
-      .passthrough()
+      .passthrough(),
   })
   .passthrough();
 
@@ -69,23 +69,23 @@ const UnifiedThreadsEnvelopeSchema = z
     cursors: z
       .object({
         codex: z.string().nullable(),
-        opencode: z.string().nullable()
+        opencode: z.string().nullable(),
       })
-      .strict()
+      .strict(),
   })
   .strict();
 
 const UnifiedReadThreadEnvelopeSchema = z
   .object({
     ok: z.literal(true),
-    thread: UnifiedThreadSchema
+    thread: UnifiedThreadSchema,
   })
   .strict();
 
 const UnifiedFeaturesEnvelopeSchema = z
   .object({
     ok: z.literal(true),
-    features: UnifiedFeatureMatrixSchema
+    features: UnifiedFeatureMatrixSchema,
   })
   .strict();
 
@@ -102,12 +102,12 @@ const LiveStateResponseSchema = z
             kind: z.literal("reductionFailed"),
             message: z.string(),
             eventIndex: z.union([z.number().int().nonnegative(), z.null()]),
-            patchIndex: z.union([z.number().int().nonnegative(), z.null()])
+            patchIndex: z.union([z.number().int().nonnegative(), z.null()]),
           })
           .strict(),
-        z.null()
+        z.null(),
       ])
-      .nullable()
+      .nullable(),
   })
   .strict();
 
@@ -116,14 +116,14 @@ const StreamEventsResponseSchema = z
     ok: z.literal(true),
     threadId: z.string(),
     ownerClientId: z.string().nullable(),
-    events: z.array(JsonValueSchema)
+    events: z.array(JsonValueSchema),
   })
   .strict();
 
 const CreateThreadResponseSchema = z
   .object({
     threadId: z.string(),
-    thread: UnifiedThreadSchema
+    thread: UnifiedThreadSchema,
   })
   .strict();
 
@@ -132,10 +132,10 @@ const UserInputResponsePayloadSchema = z
     answers: z.record(
       z
         .object({
-          answers: z.array(z.string())
+          answers: z.array(z.string()),
         })
-        .strict()
-    )
+        .strict(),
+    ),
   })
   .strict();
 
@@ -149,7 +149,7 @@ const TraceStatusSchema = z
         startedAt: z.string(),
         stoppedAt: z.string().nullable(),
         eventCount: z.number().int().nonnegative(),
-        path: z.string()
+        path: z.string(),
       })
       .nullable(),
     recent: z.array(
@@ -159,9 +159,9 @@ const TraceStatusSchema = z
         startedAt: z.string(),
         stoppedAt: z.string().nullable(),
         eventCount: z.number().int().nonnegative(),
-        path: z.string()
-      })
-    )
+        path: z.string(),
+      }),
+    ),
   })
   .passthrough();
 
@@ -175,9 +175,9 @@ const HistoryListSchema = z
         source: z.enum(["ipc", "app", "system"]),
         direction: z.enum(["in", "out", "system"]),
         payload: JsonValueSchema,
-        meta: z.record(JsonValueSchema)
-      })
-    )
+        meta: z.record(JsonValueSchema),
+      }),
+    ),
   })
   .passthrough();
 
@@ -185,7 +185,7 @@ const HistoryDetailSchema = z
   .object({
     ok: z.literal(true),
     entry: HistoryListSchema.shape.history.element,
-    fullPayload: JsonValueSchema
+    fullPayload: JsonValueSchema,
   })
   .passthrough();
 
@@ -197,7 +197,7 @@ const AgentCapabilitiesSchema = z
     canSubmitUserInput: z.boolean(),
     canReadLiveState: z.boolean(),
     canReadStreamEvents: z.boolean(),
-    canListProjectDirectories: z.boolean()
+    canListProjectDirectories: z.boolean(),
   })
   .strict();
 
@@ -207,9 +207,12 @@ const AgentDescriptorSchema = z
     label: z.string(),
     enabled: z.boolean(),
     connected: z.boolean(),
-    features: z.record(UnifiedFeatureIdSchema, UnifiedFeatureAvailabilitySchema),
+    features: z.record(
+      UnifiedFeatureIdSchema,
+      UnifiedFeatureAvailabilitySchema,
+    ),
     capabilities: AgentCapabilitiesSchema,
-    projectDirectories: z.array(z.string())
+    projectDirectories: z.array(z.string()),
   })
   .strict();
 
@@ -217,7 +220,7 @@ const AgentsResponseSchema = z
   .object({
     ok: z.literal(true),
     agents: z.array(AgentDescriptorSchema),
-    defaultAgentId: UnifiedProviderIdSchema
+    defaultAgentId: UnifiedProviderIdSchema,
   })
   .strict();
 
@@ -227,35 +230,38 @@ const ThreadListResponseSchema = z
     cursors: z
       .object({
         codex: z.string().nullable(),
-        opencode: z.string().nullable()
+        opencode: z.string().nullable(),
       })
-      .strict()
+      .strict(),
   })
   .strict();
 
 const ReadThreadResponseSchema = z
   .object({
-    thread: UnifiedThreadSchema
+    thread: UnifiedThreadSchema,
   })
   .strict();
 
 const ModelsResponseSchema = z
   .object({
-    data: z.array(UnifiedModelSchema)
+    data: z.array(UnifiedModelSchema),
   })
   .strict();
 
 const CollaborationModesResponseSchema = z
   .object({
-    data: z.array(UnifiedCollaborationModeSchema)
+    data: z.array(UnifiedCollaborationModeSchema),
   })
   .strict();
 
-const PROVIDER_IDS = ["codex", "opencode"] as const satisfies ReadonlyArray<UnifiedProviderId>;
+const PROVIDER_IDS = [
+  "codex",
+  "opencode",
+] as const satisfies ReadonlyArray<UnifiedProviderId>;
 
 const PROVIDER_LABELS: Record<UnifiedProviderId, string> = {
   codex: "Codex",
-  opencode: "OpenCode"
+  opencode: "OpenCode",
 };
 
 export type AgentId = UnifiedProviderId;
@@ -274,12 +280,15 @@ class UnifiedCommandApiError extends Error {
   }
 }
 
-async function requestJson(path: string, init?: RequestInit): Promise<{ response: Response; payload: JsonValue }> {
+async function requestJson(
+  path: string,
+  init?: RequestInit,
+): Promise<{ response: Response; payload: JsonValue }> {
   const response = await fetch(path, init);
   const payload = JsonValueSchema.parse(await response.json());
   return {
     response,
-    payload
+    payload,
   };
 }
 
@@ -293,10 +302,16 @@ function readErrorMessage(payload: JsonValue): string {
     return parsed.data.error;
   }
 
-  return parsed.data.error.message ?? parsed.data.error.code ?? "Request failed";
+  return (
+    parsed.data.error.message ?? parsed.data.error.code ?? "Request failed"
+  );
 }
 
-async function requestEnvelope<T>(path: string, schema: z.ZodType<T>, init?: RequestInit): Promise<T> {
+async function requestEnvelope<T>(
+  path: string,
+  schema: z.ZodType<T>,
+  init?: RequestInit,
+): Promise<T> {
   const { response, payload } = await requestJson(path, init);
 
   if (!response.ok) {
@@ -311,14 +326,16 @@ async function requestEnvelope<T>(path: string, schema: z.ZodType<T>, init?: Req
   return schema.parse(payload);
 }
 
-async function runUnifiedCommand(command: UnifiedCommand): Promise<UnifiedCommandResult> {
+async function runUnifiedCommand(
+  command: UnifiedCommand,
+): Promise<UnifiedCommandResult> {
   const parsedCommand = UnifiedCommandSchema.parse(command);
   const { response, payload } = await requestJson("/api/unified/command", {
     method: "POST",
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
     },
-    body: JSON.stringify(parsedCommand)
+    body: JSON.stringify(parsedCommand),
   });
 
   if (!response.ok) {
@@ -330,24 +347,28 @@ async function runUnifiedCommand(command: UnifiedCommand): Promise<UnifiedComman
     throw new UnifiedCommandApiError(
       commandResponse.error.code,
       commandResponse.error.message,
-      commandResponse.error.details
+      commandResponse.error.details,
     );
   }
 
   if (commandResponse.result.kind !== parsedCommand.kind) {
     throw new Error(
-      `Unexpected unified command result: expected ${parsedCommand.kind}, received ${commandResponse.result.kind}`
+      `Unexpected unified command result: expected ${parsedCommand.kind}, received ${commandResponse.result.kind}`,
     );
   }
 
   return commandResponse.result;
 }
 
-function isFeatureAvailable(availability: UnifiedFeatureAvailability | undefined): boolean {
+function isFeatureAvailable(
+  availability: UnifiedFeatureAvailability | undefined,
+): boolean {
   return availability?.status === "available";
 }
 
-function isProviderEnabled(features: Partial<Record<UnifiedFeatureId, UnifiedFeatureAvailability>>): boolean {
+function isProviderEnabled(
+  features: Partial<Record<UnifiedFeatureId, UnifiedFeatureAvailability>>,
+): boolean {
   return Object.values(features).some((availability) => {
     if (!availability) {
       return false;
@@ -359,34 +380,51 @@ function isProviderEnabled(features: Partial<Record<UnifiedFeatureId, UnifiedFea
   });
 }
 
-function isProviderConnected(features: Partial<Record<UnifiedFeatureId, UnifiedFeatureAvailability>>): boolean {
-  return !Object.values(features).some((availability) => (
-    availability !== undefined
-    && availability.status === "unavailable"
-    && (availability.reason === "providerDisconnected" || availability.reason === "providerNotReady")
-  ));
+function isProviderConnected(
+  features: Partial<Record<UnifiedFeatureId, UnifiedFeatureAvailability>>,
+): boolean {
+  return !Object.values(features).some(
+    (availability) =>
+      availability !== undefined &&
+      availability.status === "unavailable" &&
+      (availability.reason === "providerDisconnected" ||
+        availability.reason === "providerNotReady"),
+  );
 }
 
 function buildCapabilities(
-  features: Partial<Record<UnifiedFeatureId, UnifiedFeatureAvailability>>
+  features: Partial<Record<UnifiedFeatureId, UnifiedFeatureAvailability>>,
 ): z.infer<typeof AgentCapabilitiesSchema> {
   return {
     canListModels: isFeatureAvailable(features["listModels"]),
-    canListCollaborationModes: isFeatureAvailable(features["listCollaborationModes"]),
-    canSetCollaborationMode: isFeatureAvailable(features["setCollaborationMode"]),
+    canListCollaborationModes: isFeatureAvailable(
+      features["listCollaborationModes"],
+    ),
+    canSetCollaborationMode: isFeatureAvailable(
+      features["setCollaborationMode"],
+    ),
     canSubmitUserInput: isFeatureAvailable(features["submitUserInput"]),
     canReadLiveState: isFeatureAvailable(features["readLiveState"]),
     canReadStreamEvents: isFeatureAvailable(features["readStreamEvents"]),
-    canListProjectDirectories: isFeatureAvailable(features["listProjectDirectories"])
+    canListProjectDirectories: isFeatureAvailable(
+      features["listProjectDirectories"],
+    ),
   };
 }
 
-export async function getHealth(): Promise<z.infer<typeof HealthResponseSchema>> {
+export async function getHealth(): Promise<
+  z.infer<typeof HealthResponseSchema>
+> {
   return requestEnvelope("/api/health", HealthResponseSchema);
 }
 
-export async function listAgents(): Promise<z.infer<typeof AgentsResponseSchema>> {
-  const featuresEnvelope = await requestEnvelope("/api/unified/features", UnifiedFeaturesEnvelopeSchema);
+export async function listAgents(): Promise<
+  z.infer<typeof AgentsResponseSchema>
+> {
+  const featuresEnvelope = await requestEnvelope(
+    "/api/unified/features",
+    UnifiedFeaturesEnvelopeSchema,
+  );
 
   const agentTasks = PROVIDER_IDS.map(async (providerId) => {
     const features = featuresEnvelope.features[providerId];
@@ -398,7 +436,7 @@ export async function listAgents(): Promise<z.infer<typeof AgentsResponseSchema>
       try {
         const result = await runUnifiedCommand({
           kind: "listProjectDirectories",
-          provider: providerId
+          provider: providerId,
         });
         if (result.kind === "listProjectDirectories") {
           projectDirectories = result.directories;
@@ -418,7 +456,7 @@ export async function listAgents(): Promise<z.infer<typeof AgentsResponseSchema>
       connected,
       features,
       capabilities: buildCapabilities(features),
-      projectDirectories
+      projectDirectories,
     };
   });
 
@@ -430,7 +468,7 @@ export async function listAgents(): Promise<z.infer<typeof AgentsResponseSchema>
   return AgentsResponseSchema.parse({
     ok: true,
     agents,
-    defaultAgentId
+    defaultAgentId,
   });
 }
 
@@ -450,16 +488,19 @@ export async function listThreads(options: {
     params.set("cursor", options.cursor);
   }
 
-  const payload = await requestEnvelope(`/api/unified/threads?${params.toString()}`, UnifiedThreadsEnvelopeSchema);
+  const payload = await requestEnvelope(
+    `/api/unified/threads?${params.toString()}`,
+    UnifiedThreadsEnvelopeSchema,
+  );
   return ThreadListResponseSchema.parse({
     data: payload.data,
-    cursors: payload.cursors
+    cursors: payload.cursors,
   });
 }
 
 export async function readThread(
   threadId: string,
-  options?: { includeTurns?: boolean; provider?: AgentId }
+  options?: { includeTurns?: boolean; provider?: AgentId },
 ): Promise<z.infer<typeof ReadThreadResponseSchema>> {
   const params = new URLSearchParams();
   if (typeof options?.provider === "string") {
@@ -469,20 +510,20 @@ export async function readThread(
   const query = params.toString();
   const payload = await requestEnvelope(
     `/api/unified/thread/${encodeURIComponent(threadId)}${query.length > 0 ? `?${query}` : ""}`,
-    UnifiedReadThreadEnvelopeSchema
+    UnifiedReadThreadEnvelopeSchema,
   );
 
   if (options?.includeTurns === false) {
     return ReadThreadResponseSchema.parse({
       thread: {
         ...payload.thread,
-        turns: []
-      }
+        turns: [],
+      },
     });
   }
 
   return ReadThreadResponseSchema.parse({
-    thread: payload.thread
+    thread: payload.thread,
   });
 }
 
@@ -506,7 +547,9 @@ export async function createThread(input?: {
     ...(input?.personality ? { personality: input.personality } : {}),
     ...(input?.sandbox ? { sandbox: input.sandbox } : {}),
     ...(input?.approvalPolicy ? { approvalPolicy: input.approvalPolicy } : {}),
-    ...(typeof input?.ephemeral === "boolean" ? { ephemeral: input.ephemeral } : {})
+    ...(typeof input?.ephemeral === "boolean"
+      ? { ephemeral: input.ephemeral }
+      : {}),
   });
 
   if (result.kind !== "createThread") {
@@ -515,16 +558,16 @@ export async function createThread(input?: {
 
   return CreateThreadResponseSchema.parse({
     threadId: result.threadId,
-    thread: result.thread
+    thread: result.thread,
   });
 }
 
 export async function listCollaborationModes(
-  provider: AgentId
+  provider: AgentId,
 ): Promise<z.infer<typeof CollaborationModesResponseSchema>> {
   const result = await runUnifiedCommand({
     kind: "listCollaborationModes",
-    provider
+    provider,
   });
 
   if (result.kind !== "listCollaborationModes") {
@@ -532,15 +575,17 @@ export async function listCollaborationModes(
   }
 
   return CollaborationModesResponseSchema.parse({
-    data: result.data
+    data: result.data,
   });
 }
 
-export async function listModels(provider: AgentId): Promise<z.infer<typeof ModelsResponseSchema>> {
+export async function listModels(
+  provider: AgentId,
+): Promise<z.infer<typeof ModelsResponseSchema>> {
   const result = await runUnifiedCommand({
     kind: "listModels",
     provider,
-    limit: 200
+    limit: 200,
   });
 
   if (result.kind !== "listModels") {
@@ -548,18 +593,18 @@ export async function listModels(provider: AgentId): Promise<z.infer<typeof Mode
   }
 
   return ModelsResponseSchema.parse({
-    data: result.data
+    data: result.data,
   });
 }
 
 export async function getLiveState(
   threadId: string,
-  provider: AgentId
+  provider: AgentId,
 ): Promise<z.infer<typeof LiveStateResponseSchema>> {
   const result = await runUnifiedCommand({
     kind: "readLiveState",
     provider,
-    threadId
+    threadId,
   });
 
   if (result.kind !== "readLiveState") {
@@ -571,19 +616,19 @@ export async function getLiveState(
     threadId: result.threadId,
     ownerClientId: result.ownerClientId,
     conversationState: result.conversationState,
-    liveStateError: result.liveStateError ?? null
+    liveStateError: result.liveStateError ?? null,
   });
 }
 
 export async function getStreamEvents(
   threadId: string,
-  provider: AgentId
+  provider: AgentId,
 ): Promise<z.infer<typeof StreamEventsResponseSchema>> {
   const result = await runUnifiedCommand({
     kind: "readStreamEvents",
     provider,
     threadId,
-    limit: 80
+    limit: 80,
   });
 
   if (result.kind !== "readStreamEvents") {
@@ -594,7 +639,7 @@ export async function getStreamEvents(
     ok: true,
     threadId: result.threadId,
     ownerClientId: result.ownerClientId,
-    events: result.events
+    events: result.events,
   });
 }
 
@@ -613,7 +658,9 @@ export async function sendMessage(input: {
     text: input.text,
     ...(input.ownerClientId ? { ownerClientId: input.ownerClientId } : {}),
     ...(input.cwd ? { cwd: input.cwd } : {}),
-    ...(typeof input.isSteering === "boolean" ? { isSteering: input.isSteering } : {})
+    ...(typeof input.isSteering === "boolean"
+      ? { isSteering: input.isSteering }
+      : {}),
   });
 
   if (result.kind !== "sendMessage") {
@@ -646,13 +693,18 @@ export async function setCollaborationMode(input: {
           ? { model: input.collaborationMode.settings.model }
           : {}),
         ...(input.collaborationMode.settings.reasoningEffort !== undefined
-          ? { reasoningEffort: input.collaborationMode.settings.reasoningEffort }
+          ? {
+              reasoningEffort: input.collaborationMode.settings.reasoningEffort,
+            }
           : {}),
         ...(input.collaborationMode.settings.developerInstructions !== undefined
-          ? { developerInstructions: input.collaborationMode.settings.developerInstructions }
-          : {})
-      }
-    }
+          ? {
+              developerInstructions:
+                input.collaborationMode.settings.developerInstructions,
+            }
+          : {}),
+      },
+    },
   });
 
   if (result.kind !== "setCollaborationMode") {
@@ -675,7 +727,7 @@ export async function submitUserInput(input: {
     threadId: input.threadId,
     ...(input.ownerClientId ? { ownerClientId: input.ownerClientId } : {}),
     requestId: input.requestId,
-    response: input.response
+    response: input.response,
   });
 
   if (result.kind !== "submitUserInput") {
@@ -692,7 +744,7 @@ export async function interruptThread(input: {
     kind: "interrupt",
     provider: input.provider,
     threadId: input.threadId,
-    ...(input.ownerClientId ? { ownerClientId: input.ownerClientId } : {})
+    ...(input.ownerClientId ? { ownerClientId: input.ownerClientId } : {}),
   });
 
   if (result.kind !== "interrupt") {
@@ -700,7 +752,9 @@ export async function interruptThread(input: {
   }
 }
 
-export async function getTraceStatus(): Promise<z.infer<typeof TraceStatusSchema>> {
+export async function getTraceStatus(): Promise<
+  z.infer<typeof TraceStatusSchema>
+> {
   return requestEnvelope("/api/debug/trace/status", TraceStatusSchema);
 }
 
@@ -711,8 +765,8 @@ export async function startTrace(label: string): Promise<void> {
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ label })
-    }
+      body: JSON.stringify({ label }),
+    },
   );
 }
 
@@ -723,8 +777,8 @@ export async function markTrace(note: string): Promise<void> {
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ note })
-    }
+      body: JSON.stringify({ note }),
+    },
   );
 }
 
@@ -735,21 +789,31 @@ export async function stopTrace(): Promise<void> {
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({})
-    }
+      body: JSON.stringify({}),
+    },
   );
 }
 
-export async function listDebugHistory(limit = 120): Promise<z.infer<typeof HistoryListSchema>> {
-  return requestEnvelope(`/api/debug/history?limit=${String(limit)}`, HistoryListSchema);
+export async function listDebugHistory(
+  limit = 120,
+): Promise<z.infer<typeof HistoryListSchema>> {
+  return requestEnvelope(
+    `/api/debug/history?limit=${String(limit)}`,
+    HistoryListSchema,
+  );
 }
 
-export async function getHistoryEntry(entryId: string): Promise<z.infer<typeof HistoryDetailSchema>> {
-  return requestEnvelope(`/api/debug/history/${encodeURIComponent(entryId)}`, HistoryDetailSchema);
+export async function getHistoryEntry(
+  entryId: string,
+): Promise<z.infer<typeof HistoryDetailSchema>> {
+  return requestEnvelope(
+    `/api/debug/history/${encodeURIComponent(entryId)}`,
+    HistoryDetailSchema,
+  );
 }
 
 export function getPendingUserInputRequests(
-  conversationState: UnifiedThread | null
+  conversationState: UnifiedThread | null,
 ): UnifiedUserInputRequest[] {
   if (!conversationState) {
     return [];
@@ -777,9 +841,18 @@ export function getPendingUserInputRequests(
   return requests;
 }
 
-export async function listFeatureMatrix(): Promise<z.infer<typeof UnifiedFeatureMatrixSchema>> {
-  const payload = await requestEnvelope("/api/unified/features", UnifiedFeaturesEnvelopeSchema);
+export async function listFeatureMatrix(): Promise<
+  z.infer<typeof UnifiedFeatureMatrixSchema>
+> {
+  const payload = await requestEnvelope(
+    "/api/unified/features",
+    UnifiedFeaturesEnvelopeSchema,
+  );
   return payload.features;
 }
 
-export { UnifiedFeatureIdSchema, UnifiedProviderIdSchema, UnifiedUserInputRequestIdSchema };
+export {
+  UnifiedFeatureIdSchema,
+  UnifiedProviderIdSchema,
+  UnifiedUserInputRequestIdSchema,
+};

@@ -9,7 +9,7 @@ import {
   Search,
   FolderOpen,
   FileText,
-  FileSearch
+  FileSearch,
 } from "lucide-react";
 import type { UnifiedItem } from "@farfield/unified-surface";
 import { Button } from "@/components/ui/button";
@@ -23,7 +23,7 @@ const ACTION_ICONS: Record<string, React.ElementType> = {
   write: FileText,
   read: FileSearch,
   readFile: FileSearch,
-  writeFile: FileText
+  writeFile: FileText,
 };
 
 function simplifyCommand(cmd: string): string {
@@ -39,7 +39,8 @@ function CommandBlockComponent({ item, isActive }: CommandBlockProps) {
   const [expanded, setExpanded] = useState(false);
   const isCompleted = item.status === "completed";
   const isSuccess = item.exitCode === 0 || item.exitCode == null;
-  const output = typeof item.aggregatedOutput === "string" ? item.aggregatedOutput : "";
+  const output =
+    typeof item.aggregatedOutput === "string" ? item.aggregatedOutput : "";
   const hasOutput = output.trim().length > 0;
   const hasActions = (item.commandActions?.length ?? 0) > 0;
 
@@ -95,11 +96,23 @@ function CommandBlockComponent({ item, isActive }: CommandBlockProps) {
                 <div className="px-3 py-2 space-y-1.5">
                   {item.commandActions!.map((action, i) => {
                     const Icon = ACTION_ICONS[action.type] ?? Terminal;
-                    const label = action.name ?? action.command ?? action.path ?? action.type;
+                    const label =
+                      action.name ??
+                      action.command ??
+                      action.path ??
+                      action.type;
                     return (
-                      <div key={i} className="flex items-start gap-2 text-xs text-muted-foreground">
-                        <Icon size={10} className="mt-0.5 shrink-0 opacity-60" />
-                        <code className="font-mono break-all leading-4">{label}</code>
+                      <div
+                        key={i}
+                        className="flex items-start gap-2 text-xs text-muted-foreground"
+                      >
+                        <Icon
+                          size={10}
+                          className="mt-0.5 shrink-0 opacity-60"
+                        />
+                        <code className="font-mono break-all leading-4">
+                          {label}
+                        </code>
                       </div>
                     );
                   })}
@@ -129,7 +142,9 @@ function CommandBlockComponent({ item, isActive }: CommandBlockProps) {
               )}
 
               {!hasActions && !hasOutput && (
-                <div className="px-3 py-2 text-xs text-muted-foreground">No output</div>
+                <div className="px-3 py-2 text-xs text-muted-foreground">
+                  No output
+                </div>
               )}
             </div>
           </motion.div>
@@ -139,8 +154,14 @@ function CommandBlockComponent({ item, isActive }: CommandBlockProps) {
   );
 }
 
-function areCommandBlockPropsEqual(prev: CommandBlockProps, next: CommandBlockProps): boolean {
+function areCommandBlockPropsEqual(
+  prev: CommandBlockProps,
+  next: CommandBlockProps,
+): boolean {
   return prev.item === next.item && prev.isActive === next.isActive;
 }
 
-export const CommandBlock = memo(CommandBlockComponent, areCommandBlockPropsEqual);
+export const CommandBlock = memo(
+  CommandBlockComponent,
+  areCommandBlockPropsEqual,
+);

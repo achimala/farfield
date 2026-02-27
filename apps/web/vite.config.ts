@@ -7,8 +7,8 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src")
-    }
+      "@": path.resolve(__dirname, "./src"),
+    },
   },
   server: {
     host: true,
@@ -16,11 +16,11 @@ export default defineConfig({
     port: 4312,
     proxy: {
       "/api": "http://127.0.0.1:4311",
-      "/events": "http://127.0.0.1:4311"
-    }
+      "/events": "http://127.0.0.1:4311",
+    },
   },
   test: {
     environment: "jsdom",
-    setupFiles: []
-  }
+    setupFiles: [],
+  },
 });

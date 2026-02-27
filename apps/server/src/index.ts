@@ -9,17 +9,17 @@ import type { IpcFrame } from "@farfield/protocol";
 import {
   UnifiedCommandSchema,
   type UnifiedEvent,
-  type UnifiedProviderId
+  type UnifiedProviderId,
 } from "@farfield/unified-surface";
 import {
   parseBody,
   TraceMarkBodySchema,
-  TraceStartBodySchema
+  TraceStartBodySchema,
 } from "./http-schemas.js";
 import { logger } from "./logger.js";
 import {
   parseServerCliOptions,
-  formatServerHelpText
+  formatServerHelpText,
 } from "./agents/cli-options.js";
 import { AgentRegistry } from "./agents/registry.js";
 import { ThreadIndex } from "./agents/thread-index.js";
@@ -29,7 +29,7 @@ import type { AgentAdapter } from "./agents/types.js";
 import {
   UnifiedBackendFeatureError,
   buildUnifiedFeatureMatrix,
-  createUnifiedProviderAdapters
+  createUnifiedProviderAdapters,
 } from "./unified/adapter.js";
 
 const HOST = process.env["HOST"] ?? "127.0.0.1";
@@ -94,7 +94,7 @@ function resolveGitCommitHash(): string | null {
   try {
     const hash = execFileSync("git", ["rev-parse", "--short", "HEAD"], {
       cwd: DEFAULT_WORKSPACE,
-      encoding: "utf8"
+      encoding: "utf8",
     }).trim();
     return hash.length > 0 ? hash : null;
   } catch {
@@ -131,14 +131,18 @@ function parseBoolean(value: string | null, fallback: boolean): boolean {
   return fallback;
 }
 
-function jsonResponse(res: ServerResponse, statusCode: number, body: unknown): void {
+function jsonResponse(
+  res: ServerResponse,
+  statusCode: number,
+  body: unknown,
+): void {
   const encoded = Buffer.from(JSON.stringify(body), "utf8");
   res.writeHead(statusCode, {
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": encoded.length,
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "content-type",
-    "Access-Control-Allow-Methods": "GET,POST,OPTIONS"
+    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
   });
   res.end(encoded);
 }
@@ -227,7 +231,7 @@ function pushHistory(
   source: HistoryEntry["source"],
   direction: HistoryEntry["direction"],
   payload: unknown,
-  meta: Record<string, unknown> = {}
+  meta: Record<string, unknown> = {},
 ): HistoryEntry {
   const entry: HistoryEntry = {
     id: randomUUID(),
@@ -235,7 +239,7 @@ function pushHistory(
     source,
     direction,
     payload,
-    meta
+    meta,
   };
 
   history.push(entry);
@@ -252,7 +256,10 @@ function pushHistory(
   return entry;
 }
 
-function pushSystem(message: string, details: Record<string, unknown> = {}): void {
+function pushSystem(
+  message: string,
+  details: Record<string, unknown> = {},
+): void {
   logger.info({ message, ...details }, "system-event");
   pushHistory("system", "system", { message, details });
 }
@@ -271,13 +278,13 @@ for (const agentId of configuredAgentIds) {
       reconnectDelayMs: IPC_RECONNECT_DELAY_MS,
       onStateChange: () => {
         broadcastRuntimeState();
-      }
+      },
     });
 
     codexAdapter.onIpcFrame((event) => {
       pushHistory("ipc", event.direction, event.frame, {
         method: event.method,
-        threadId: event.threadId
+        threadId: event.threadId,
       });
     });
 
@@ -294,7 +301,7 @@ for (const agentId of configuredAgentIds) {
 const registry = new AgentRegistry(adapters);
 const unifiedAdapters = createUnifiedProviderAdapters({
   codex: codexAdapter,
-  opencode: openCodeAdapter
+  opencode: openCodeAdapter,
 });
 
 function getRuntimeStateSnapshot(): Record<string, unknown> {
@@ -311,7 +318,7 @@ function getRuntimeStateSnapshot(): Record<string, unknown> {
     lastError: runtimeLastError ?? codexRuntimeState?.lastError ?? null,
     historyCount: history.length,
     threadOwnerCount: codexAdapter?.getThreadOwnerCount() ?? 0,
-    activeTrace: activeTrace?.summary ?? null
+    activeTrace: activeTrace?.summary ?? null,
   };
 }
 
@@ -326,17 +333,24 @@ function listUnifiedProviders(): UnifiedProviderId[] {
 function buildUnifiedProviderStateEvents(): UnifiedEvent[] {
   return listUnifiedProviders().map((provider) => {
     const adapter = resolveUnifiedAdapter(provider);
-    const connected = adapter ? registry.getAdapter(provider)?.isConnected() ?? false : false;
-    const enabled = adapter ? registry.getAdapter(provider)?.isEnabled() ?? false : false;
+    const connected = adapter
+      ? (registry.getAdapter(provider)?.isConnected() ?? false)
+      : false;
+    const enabled = adapter
+      ? (registry.getAdapter(provider)?.isEnabled() ?? false)
+      : false;
 
     return {
       kind: "providerStateChanged",
       provider,
       enabled,
       connected,
-      lastError: provider === "codex"
-        ? runtimeLastError ?? codexAdapter?.getRuntimeState().lastError ?? null
-        : runtimeLastError ?? null
+      lastError:
+        provider === "codex"
+          ? (runtimeLastError ??
+            codexAdapter?.getRuntimeState().lastError ??
+            null)
+          : (runtimeLastError ?? null),
     };
   });
 }
@@ -367,7 +381,9 @@ setInterval(() => {
   writeSseKeepalive();
 }, SSE_KEEPALIVE_INTERVAL_MS);
 
-function parseUnifiedProviderId(value: string | null): UnifiedProviderId | null {
+function parseUnifiedProviderId(
+  value: string | null,
+): UnifiedProviderId | null {
   if (value === "codex" || value === "opencode") {
     return value;
   }
@@ -393,7 +409,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && pathname === "/api/health") {
       jsonResponse(res, 200, {
         ok: true,
-        state: getRuntimeStateSnapshot()
+        state: getRuntimeStateSnapshot(),
       });
       return;
     }
@@ -404,7 +420,7 @@ const server = http.createServer(async (req, res) => {
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
         "X-Accel-Buffering": "no",
-        "Access-Control-Allow-Origin": "*"
+        "Access-Control-Allow-Origin": "*",
       });
       res.write("retry: 1000\n\n");
 
@@ -422,12 +438,12 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && pathname === "/api/unified/features") {
       const features = buildUnifiedFeatureMatrix({
         codex: codexAdapter,
-        opencode: openCodeAdapter
+        opencode: openCodeAdapter,
       });
 
       jsonResponse(res, 200, {
         ok: true,
-        features
+        features,
       });
       return;
     }
@@ -441,8 +457,8 @@ const server = http.createServer(async (req, res) => {
           ok: false,
           error: {
             code: "providerDisabled",
-            message: `Provider ${command.provider} is not available`
-          }
+            message: `Provider ${command.provider} is not available`,
+          },
         });
         return;
       }
@@ -462,13 +478,13 @@ const server = http.createServer(async (req, res) => {
             kind: "threadUpdated",
             threadId: result.thread.id,
             provider: result.thread.provider,
-            thread: result.thread
+            thread: result.thread,
           });
         }
 
         jsonResponse(res, 200, {
           ok: true,
-          result
+          result,
         });
       } catch (error) {
         if (error instanceof UnifiedBackendFeatureError) {
@@ -480,9 +496,9 @@ const server = http.createServer(async (req, res) => {
               details: {
                 provider: error.provider,
                 featureId: error.featureId,
-                reason: error.reason
-              }
-            }
+                reason: error.reason,
+              },
+            },
           });
           return;
         }
@@ -491,14 +507,14 @@ const server = http.createServer(async (req, res) => {
         broadcastUnifiedEvent({
           kind: "error",
           message,
-          code: "internalError"
+          code: "internalError",
         });
         jsonResponse(res, 500, {
           ok: false,
           error: {
             code: "internalError",
-            message
-          }
+            message,
+          },
         });
       }
       return;
@@ -524,7 +540,7 @@ const server = http.createServer(async (req, res) => {
       }> = [];
       const cursors: Record<UnifiedProviderId, string | null> = {
         codex: null,
-        opencode: null
+        opencode: null,
       };
 
       await Promise.all(
@@ -542,7 +558,7 @@ const server = http.createServer(async (req, res) => {
               archived,
               all,
               maxPages,
-              cursor
+              cursor,
             });
 
             cursors[provider] = result.nextCursor ?? null;
@@ -554,31 +570,41 @@ const server = http.createServer(async (req, res) => {
             logger.warn(
               {
                 provider,
-                error: toErrorMessage(error)
+                error: toErrorMessage(error),
               },
-              "unified-list-threads-failed"
+              "unified-list-threads-failed",
             );
           }
-        })
+        }),
       );
 
       jsonResponse(res, 200, {
         ok: true,
         data,
-        cursors
+        cursors,
       });
       return;
     }
 
-    if (req.method === "GET" && segments[0] === "api" && segments[1] === "unified" && segments[2] === "thread" && segments[3]) {
+    if (
+      req.method === "GET" &&
+      segments[0] === "api" &&
+      segments[1] === "unified" &&
+      segments[2] === "thread" &&
+      segments[3]
+    ) {
       const threadId = decodeURIComponent(segments[3]);
-      const providerFromQuery = parseUnifiedProviderId(url.searchParams.get("provider"));
-      const provider = providerFromQuery ?? parseUnifiedProviderId(threadIndex.resolve(threadId));
+      const providerFromQuery = parseUnifiedProviderId(
+        url.searchParams.get("provider"),
+      );
+      const provider =
+        providerFromQuery ??
+        parseUnifiedProviderId(threadIndex.resolve(threadId));
 
       if (!provider) {
         jsonResponse(res, 404, {
           ok: false,
-          error: `Thread ${threadId} is not registered`
+          error: `Thread ${threadId} is not registered`,
         });
         return;
       }
@@ -587,7 +613,7 @@ const server = http.createServer(async (req, res) => {
       if (!adapter) {
         jsonResponse(res, 503, {
           ok: false,
-          error: `Provider ${provider} is not available`
+          error: `Provider ${provider} is not available`,
         });
         return;
       }
@@ -597,19 +623,19 @@ const server = http.createServer(async (req, res) => {
           kind: "readThread",
           provider,
           threadId,
-          includeTurns: true
+          includeTurns: true,
         });
 
         threadIndex.register(result.thread.id, result.thread.provider);
         jsonResponse(res, 200, {
           ok: true,
-          thread: result.thread
+          thread: result.thread,
         });
       } catch (error) {
         const message = toErrorMessage(error);
         jsonResponse(res, 500, {
           ok: false,
-          error: message
+          error: message,
         });
       }
       return;
@@ -627,14 +653,17 @@ const server = http.createServer(async (req, res) => {
         const entryId = decodeURIComponent(segments[3]);
         const entry = history.find((item) => item.id === entryId) ?? null;
         if (!entry) {
-          jsonResponse(res, 404, { ok: false, error: "History entry not found" });
+          jsonResponse(res, 404, {
+            ok: false,
+            error: "History entry not found",
+          });
           return;
         }
 
         jsonResponse(res, 200, {
           ok: true,
           entry,
-          fullPayload: historyById.get(entryId) ?? null
+          fullPayload: historyById.get(entryId) ?? null,
         });
         return;
       }
@@ -643,7 +672,7 @@ const server = http.createServer(async (req, res) => {
         jsonResponse(res, 200, {
           ok: true,
           active: activeTrace?.summary ?? null,
-          recent: recentTraces
+          recent: recentTraces,
         });
         return;
       }
@@ -653,7 +682,7 @@ const server = http.createServer(async (req, res) => {
         if (activeTrace) {
           jsonResponse(res, 409, {
             ok: false,
-            error: "A trace is already active"
+            error: "A trace is already active",
           });
           return;
         }
@@ -669,22 +698,22 @@ const server = http.createServer(async (req, res) => {
           startedAt: new Date().toISOString(),
           stoppedAt: null,
           eventCount: 0,
-          path: tracePath
+          path: tracePath,
         };
 
         activeTrace = {
           summary,
-          stream
+          stream,
         };
 
         pushSystem("Trace started", {
           traceId: id,
-          label: body.label
+          label: body.label,
         });
 
         jsonResponse(res, 200, {
           ok: true,
-          trace: summary
+          trace: summary,
         });
         return;
       }
@@ -699,7 +728,7 @@ const server = http.createServer(async (req, res) => {
         const marker = {
           type: "trace-marker",
           at: new Date().toISOString(),
-          note: body.note
+          note: body.note,
         };
 
         activeTrace.stream.write(`${JSON.stringify(marker)}\n`);
@@ -730,7 +759,7 @@ const server = http.createServer(async (req, res) => {
 
         jsonResponse(res, 200, {
           ok: true,
-          trace: trace.summary
+          trace: trace.summary,
         });
         return;
       }
@@ -754,7 +783,7 @@ const server = http.createServer(async (req, res) => {
           "Content-Type": "application/x-ndjson",
           "Content-Length": data.length,
           "Content-Disposition": `attachment; filename="${trace.id}.ndjson"`,
-          "Access-Control-Allow-Origin": "*"
+          "Access-Control-Allow-Origin": "*",
         });
         res.end(data);
         return;
@@ -768,19 +797,19 @@ const server = http.createServer(async (req, res) => {
       {
         method: req.method ?? "unknown",
         url: req.url ?? "unknown",
-        error: runtimeLastError
+        error: runtimeLastError,
       },
-      "request-failed"
+      "request-failed",
     );
     pushSystem("Request failed", {
       error: runtimeLastError,
       method: req.method ?? "unknown",
-      url: req.url ?? "unknown"
+      url: req.url ?? "unknown",
     });
     broadcastRuntimeState();
     jsonResponse(res, 500, {
       ok: false,
-      error: runtimeLastError
+      error: runtimeLastError,
     });
   }
 });
@@ -791,7 +820,7 @@ async function start(): Promise<void> {
   pushSystem("Starting Farfield monitor server", {
     appExecutable: codexExecutable,
     socketPath: ipcSocketPath,
-    agentIds: configuredAgentIds
+    agentIds: configuredAgentIds,
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -810,7 +839,7 @@ async function start(): Promise<void> {
     url: `http://${HOST}:${PORT}`,
     appExecutable: codexExecutable,
     socketPath: ipcSocketPath,
-    agentIds: configuredAgentIds
+    agentIds: configuredAgentIds,
   });
 
   for (const adapter of registry.listAdapters()) {
@@ -818,25 +847,25 @@ async function start(): Promise<void> {
       await adapter.start();
       pushSystem("Agent connected", {
         agentId: adapter.id,
-        connected: adapter.isConnected()
+        connected: adapter.isConnected(),
       });
 
       if (adapter.id === "opencode" && openCodeAdapter) {
         pushSystem("OpenCode backend connected", {
-          url: openCodeAdapter.getUrl()
+          url: openCodeAdapter.getUrl(),
         });
       }
     } catch (error) {
       pushSystem("Agent failed to connect", {
         agentId: adapter.id,
-        error: toErrorMessage(error)
+        error: toErrorMessage(error),
       });
       logger.error(
         {
           agentId: adapter.id,
-          error: toErrorMessage(error)
+          error: toErrorMessage(error),
         },
-        "agent-start-failed"
+        "agent-start-failed",
       );
     }
   }

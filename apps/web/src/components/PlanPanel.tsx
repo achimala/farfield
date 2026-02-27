@@ -6,7 +6,7 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue
+  SelectValue,
 } from "@/components/ui/select";
 
 interface Mode {
@@ -52,7 +52,7 @@ export function PlanPanel({
   onApply,
   isBusy,
   hasThread,
-  hasMode
+  hasMode,
 }: PlanPanelProps) {
   return (
     <motion.div
@@ -68,10 +68,7 @@ export function PlanPanel({
         {/* Mode */}
         <div className="space-y-2">
           <Label htmlFor="plan-mode">Mode</Label>
-          <Select
-            value={selectedModeKey}
-            onValueChange={onModeChange}
-          >
+          <Select value={selectedModeKey} onValueChange={onModeChange}>
             <SelectTrigger id="plan-mode" className="w-full">
               <SelectValue placeholder="Select mode" />
             </SelectTrigger>

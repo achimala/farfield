@@ -13,13 +13,16 @@ describe("server cli options", () => {
   });
 
   it("keeps order and dedupes repeated agent ids", () => {
-    const parsed = parseServerCliOptions(["--agents", "opencode,codex,opencode"]);
+    const parsed = parseServerCliOptions([
+      "--agents",
+      "opencode,codex,opencode",
+    ]);
     expect(parsed.agentIds).toEqual(["opencode", "codex"]);
   });
 
   it("rejects unknown agent ids", () => {
     expect(() => parseServerCliOptions(["--agents=foo"])).toThrowError(
-      /Unknown agent id/
+      /Unknown agent id/,
     );
   });
 });

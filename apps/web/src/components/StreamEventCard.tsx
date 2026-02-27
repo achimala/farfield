@@ -11,10 +11,10 @@ const StreamEventFileChangeSchema = z
     kind: z
       .object({
         type: z.string(),
-        movePath: z.string().nullable().optional()
+        movePath: z.string().nullable().optional(),
       })
       .strict(),
-    diff: z.string().optional()
+    diff: z.string().optional(),
   })
   .strict();
 
@@ -24,14 +24,18 @@ const StreamEventSchema = z
     type: z.string().optional(),
     params: z
       .object({
-        changes: z.array(StreamEventFileChangeSchema).optional()
+        changes: z.array(StreamEventFileChangeSchema).optional(),
       })
       .passthrough()
-      .optional()
+      .optional(),
   })
   .passthrough();
 
-export function StreamEventCard({ event }: { event: JsonValue }): React.JSX.Element {
+export function StreamEventCard({
+  event,
+}: {
+  event: JsonValue;
+}): React.JSX.Element {
   const [open, setOpen] = useState(false);
 
   const parsed = StreamEventSchema.safeParse(event);
@@ -60,7 +64,9 @@ export function StreamEventCard({ event }: { event: JsonValue }): React.JSX.Elem
           size={10}
           className={`shrink-0 text-muted-foreground/60 transition-transform ${open ? "rotate-90" : ""}`}
         />
-        <span className="font-mono text-[11px] text-muted-foreground truncate">{label}</span>
+        <span className="font-mono text-[11px] text-muted-foreground truncate">
+          {label}
+        </span>
       </Button>
       {open && (
         <div className="border-t border-border px-2.5 py-2">

@@ -1,6 +1,9 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { UnifiedFeatureAvailability, UnifiedFeatureId } from "@farfield/unified-surface";
+import type {
+  UnifiedFeatureAvailability,
+  UnifiedFeatureId,
+} from "@farfield/unified-surface";
 import { App } from "../src/App";
 
 class MockEventSource {
@@ -13,12 +16,19 @@ class MockEventSource {
   }
 
   public close(): void {
-    MockEventSource.instances = MockEventSource.instances.filter((instance) => instance !== this);
+    MockEventSource.instances = MockEventSource.instances.filter(
+      (instance) => instance !== this,
+    );
   }
 
-  public static emit(payload: Record<string, object | string | number | boolean | null | undefined>): void {
+  public static emit(
+    payload: Record<
+      string,
+      object | string | number | boolean | null | undefined
+    >,
+  ): void {
     const event = new MessageEvent<string>("message", {
-      data: JSON.stringify(payload)
+      data: JSON.stringify(payload),
     });
     for (const instance of MockEventSource.instances) {
       instance.onmessage?.(event);
@@ -34,22 +44,28 @@ vi.stubGlobal("EventSource", MockEventSource);
 
 Element.prototype.scrollTo = vi.fn();
 window.scrollTo = vi.fn();
-vi.stubGlobal("ResizeObserver", class {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-});
+vi.stubGlobal(
+  "ResizeObserver",
+  class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  },
+);
 
-vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
-  matches: query === "(prefers-color-scheme: dark)",
-  media: query,
-  onchange: null,
-  addListener: vi.fn(),
-  removeListener: vi.fn(),
-  addEventListener: vi.fn(),
-  removeEventListener: vi.fn(),
-  dispatchEvent: vi.fn()
-})));
+vi.stubGlobal(
+  "matchMedia",
+  vi.fn((query: string) => ({
+    matches: query === "(prefers-color-scheme: dark)",
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })),
+);
 
 const FEATURE_IDS: UnifiedFeatureId[] = [
   "listThreads",
@@ -63,7 +79,7 @@ const FEATURE_IDS: UnifiedFeatureId[] = [
   "submitUserInput",
   "readLiveState",
   "readStreamEvents",
-  "listProjectDirectories"
+  "listProjectDirectories",
 ];
 
 type ProviderId = "codex" | "opencode";
@@ -87,7 +103,7 @@ const codexCapabilities: CapabilityFixture = {
   canSubmitUserInput: true,
   canReadLiveState: true,
   canReadStreamEvents: true,
-  canListProjectDirectories: true
+  canListProjectDirectories: true,
 };
 
 const opencodeCapabilities: CapabilityFixture = {
@@ -97,23 +113,23 @@ const opencodeCapabilities: CapabilityFixture = {
   canSubmitUserInput: false,
   canReadLiveState: false,
   canReadStreamEvents: false,
-  canListProjectDirectories: true
+  canListProjectDirectories: true,
 };
 
 function buildFeatureSet(
   capabilities: CapabilityFixture,
-  options?: { enabled?: boolean; connected?: boolean }
+  options?: { enabled?: boolean; connected?: boolean },
 ): FeatureSet {
   const enabled = options?.enabled ?? true;
   const connected = options?.connected ?? true;
 
   const unavailableReason: UnifiedFeatureAvailability = {
     status: "unavailable",
-    reason: enabled ? "providerDisconnected" : "providerDisabled"
+    reason: enabled ? "providerDisconnected" : "providerDisabled",
   };
 
   const available: UnifiedFeatureAvailability = {
-    status: "available"
+    status: "available",
   };
 
   const features: FeatureSet = {
@@ -122,27 +138,76 @@ function buildFeatureSet(
     readThread: enabled && connected ? available : unavailableReason,
     sendMessage: enabled && connected ? available : unavailableReason,
     interrupt: enabled && connected ? available : unavailableReason,
-    listModels: enabled && connected && capabilities.canListModels
-      ? available
-      : { status: "unavailable", reason: enabled && connected ? "unsupportedByProvider" : unavailableReason.reason },
-    listCollaborationModes: enabled && connected && capabilities.canListCollaborationModes
-      ? available
-      : { status: "unavailable", reason: enabled && connected ? "unsupportedByProvider" : unavailableReason.reason },
-    setCollaborationMode: enabled && connected && capabilities.canSetCollaborationMode
-      ? available
-      : { status: "unavailable", reason: enabled && connected ? "unsupportedByProvider" : unavailableReason.reason },
-    submitUserInput: enabled && connected && capabilities.canSubmitUserInput
-      ? available
-      : { status: "unavailable", reason: enabled && connected ? "unsupportedByProvider" : unavailableReason.reason },
-    readLiveState: enabled && connected && capabilities.canReadLiveState
-      ? available
-      : { status: "unavailable", reason: enabled && connected ? "unsupportedByProvider" : unavailableReason.reason },
-    readStreamEvents: enabled && connected && capabilities.canReadStreamEvents
-      ? available
-      : { status: "unavailable", reason: enabled && connected ? "unsupportedByProvider" : unavailableReason.reason },
-    listProjectDirectories: enabled && connected && capabilities.canListProjectDirectories
-      ? available
-      : { status: "unavailable", reason: enabled && connected ? "unsupportedByProvider" : unavailableReason.reason }
+    listModels:
+      enabled && connected && capabilities.canListModels
+        ? available
+        : {
+            status: "unavailable",
+            reason:
+              enabled && connected
+                ? "unsupportedByProvider"
+                : unavailableReason.reason,
+          },
+    listCollaborationModes:
+      enabled && connected && capabilities.canListCollaborationModes
+        ? available
+        : {
+            status: "unavailable",
+            reason:
+              enabled && connected
+                ? "unsupportedByProvider"
+                : unavailableReason.reason,
+          },
+    setCollaborationMode:
+      enabled && connected && capabilities.canSetCollaborationMode
+        ? available
+        : {
+            status: "unavailable",
+            reason:
+              enabled && connected
+                ? "unsupportedByProvider"
+                : unavailableReason.reason,
+          },
+    submitUserInput:
+      enabled && connected && capabilities.canSubmitUserInput
+        ? available
+        : {
+            status: "unavailable",
+            reason:
+              enabled && connected
+                ? "unsupportedByProvider"
+                : unavailableReason.reason,
+          },
+    readLiveState:
+      enabled && connected && capabilities.canReadLiveState
+        ? available
+        : {
+            status: "unavailable",
+            reason:
+              enabled && connected
+                ? "unsupportedByProvider"
+                : unavailableReason.reason,
+          },
+    readStreamEvents:
+      enabled && connected && capabilities.canReadStreamEvents
+        ? available
+        : {
+            status: "unavailable",
+            reason:
+              enabled && connected
+                ? "unsupportedByProvider"
+                : unavailableReason.reason,
+          },
+    listProjectDirectories:
+      enabled && connected && capabilities.canListProjectDirectories
+        ? available
+        : {
+            status: "unavailable",
+            reason:
+              enabled && connected
+                ? "unsupportedByProvider"
+                : unavailableReason.reason,
+          },
   };
 
   return features;
@@ -198,30 +263,42 @@ let threadsFixture: {
   };
 };
 
-let collaborationModesFixture: Record<ProviderId, Array<{
-  name: string;
-  mode: string;
-  model: string | null;
-  reasoningEffort: string | null;
-  developerInstructions: string | null;
-}>>;
+let collaborationModesFixture: Record<
+  ProviderId,
+  Array<{
+    name: string;
+    mode: string;
+    model: string | null;
+    reasoningEffort: string | null;
+    developerInstructions: string | null;
+  }>
+>;
 
-let modelsFixture: Record<ProviderId, Array<{
-  id: string;
-  displayName: string;
-  description: string;
-  defaultReasoningEffort: string | null;
-  supportedReasoningEfforts: string[];
-  hidden: boolean;
-  isDefault: boolean;
-}>>;
+let modelsFixture: Record<
+  ProviderId,
+  Array<{
+    id: string;
+    displayName: string;
+    description: string;
+    defaultReasoningEffort: string | null;
+    supportedReasoningEfforts: string[];
+    hidden: boolean;
+    isDefault: boolean;
+  }>
+>;
 
-let readThreadResolver: (threadId: string, provider: ProviderId | null) => {
+let readThreadResolver: (
+  threadId: string,
+  provider: ProviderId | null,
+) => {
   ok: true;
   thread: UnifiedThreadFixture;
 } | null;
 
-let liveStateResolver: (threadId: string, provider: ProviderId) => {
+let liveStateResolver: (
+  threadId: string,
+  provider: ProviderId,
+) => {
   kind: "readLiveState";
   threadId: string;
   ownerClientId: string | null;
@@ -229,7 +306,10 @@ let liveStateResolver: (threadId: string, provider: ProviderId) => {
   liveStateError: null;
 };
 
-function buildConversationStateFixture(threadId: string, modelId: string): UnifiedThreadFixture {
+function buildConversationStateFixture(
+  threadId: string,
+  modelId: string,
+): UnifiedThreadFixture {
   return {
     id: threadId,
     provider: "codex",
@@ -237,8 +317,8 @@ function buildConversationStateFixture(threadId: string, modelId: string): Unifi
       {
         id: "turn-1",
         status: "completed",
-        items: []
-      }
+        items: [],
+      },
     ],
     requests: [],
     updatedAt: 1700000000,
@@ -249,16 +329,21 @@ function buildConversationStateFixture(threadId: string, modelId: string): Unifi
       settings: {
         model: modelId,
         reasoningEffort: "medium",
-        developerInstructions: null
-      }
-    }
+        developerInstructions: null,
+      },
+    },
   };
 }
 
-function jsonResponse(payload: Record<string, object | string | number | boolean | null | undefined>): Response {
+function jsonResponse(
+  payload: Record<
+    string,
+    object | string | number | boolean | null | undefined
+  >,
+): Response {
   return {
     ok: true,
-    json: async () => payload
+    json: async () => payload,
   } as Response;
 }
 
@@ -268,14 +353,20 @@ beforeEach(() => {
   featureMatrixFixture = {
     ok: true,
     features: {
-      codex: buildFeatureSet(codexCapabilities, { enabled: true, connected: true }),
-      opencode: buildFeatureSet(opencodeCapabilities, { enabled: false, connected: false })
-    }
+      codex: buildFeatureSet(codexCapabilities, {
+        enabled: true,
+        connected: true,
+      }),
+      opencode: buildFeatureSet(opencodeCapabilities, {
+        enabled: false,
+        connected: false,
+      }),
+    },
   };
 
   projectDirectoriesFixture = {
     codex: ["/tmp/project"],
-    opencode: []
+    opencode: [],
   };
 
   threadsFixture = {
@@ -283,8 +374,8 @@ beforeEach(() => {
     data: [],
     cursors: {
       codex: null,
-      opencode: null
-    }
+      opencode: null,
+    },
   };
 
   collaborationModesFixture = {
@@ -294,17 +385,17 @@ beforeEach(() => {
         mode: "default",
         model: null,
         reasoningEffort: "medium",
-        developerInstructions: null
+        developerInstructions: null,
       },
       {
         name: "Plan",
         mode: "plan",
         model: null,
         reasoningEffort: "medium",
-        developerInstructions: "x"
-      }
+        developerInstructions: "x",
+      },
     ],
-    opencode: []
+    opencode: [],
   };
 
   modelsFixture = {
@@ -316,19 +407,20 @@ beforeEach(() => {
         defaultReasoningEffort: "medium",
         supportedReasoningEfforts: ["medium"],
         hidden: false,
-        isDefault: true
-      }
+        isDefault: true,
+      },
     ],
-    opencode: []
+    opencode: [],
   };
 
-  readThreadResolver = (_threadId: string, _provider: ProviderId | null) => null;
+  readThreadResolver = (_threadId: string, _provider: ProviderId | null) =>
+    null;
   liveStateResolver = (threadId: string, _provider: ProviderId) => ({
     kind: "readLiveState",
     threadId,
     ownerClientId: null,
     conversationState: null,
-    liveStateError: null
+    liveStateError: null,
   });
 });
 
@@ -352,8 +444,8 @@ vi.stubGlobal(
           ipcInitialized: true,
           lastError: null,
           historyCount: 0,
-          threadOwnerCount: 0
-        }
+          threadOwnerCount: 0,
+        },
       });
     }
 
@@ -366,12 +458,15 @@ vi.stubGlobal(
     }
 
     if (pathname.startsWith("/api/unified/thread/")) {
-      const segments = pathname.split("/").filter((segment) => segment.length > 0);
+      const segments = pathname
+        .split("/")
+        .filter((segment) => segment.length > 0);
       const threadId = segments[3] ? decodeURIComponent(segments[3]) : "";
       const providerParam = parsedUrl.searchParams.get("provider");
-      const provider = providerParam === "opencode" || providerParam === "codex"
-        ? providerParam
-        : null;
+      const provider =
+        providerParam === "opencode" || providerParam === "codex"
+          ? providerParam
+          : null;
       const readThread = readThreadResolver(threadId, provider);
       if (readThread) {
         return jsonResponse(readThread);
@@ -379,19 +474,21 @@ vi.stubGlobal(
     }
 
     if (pathname === "/api/unified/command") {
-      const body = init?.body ? JSON.parse(String(init.body)) as {
-        kind: string;
-        provider: ProviderId;
-        threadId?: string;
-      } : { kind: "unknown", provider: "codex" as const };
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as {
+            kind: string;
+            provider: ProviderId;
+            threadId?: string;
+          })
+        : { kind: "unknown", provider: "codex" as const };
 
       if (body.kind === "listProjectDirectories") {
         return jsonResponse({
           ok: true,
           result: {
             kind: "listProjectDirectories",
-            directories: projectDirectoriesFixture[body.provider]
-          }
+            directories: projectDirectoriesFixture[body.provider],
+          },
         });
       }
 
@@ -400,8 +497,8 @@ vi.stubGlobal(
           ok: true,
           result: {
             kind: "listCollaborationModes",
-            data: collaborationModesFixture[body.provider]
-          }
+            data: collaborationModesFixture[body.provider],
+          },
         });
       }
 
@@ -410,15 +507,15 @@ vi.stubGlobal(
           ok: true,
           result: {
             kind: "listModels",
-            data: modelsFixture[body.provider]
-          }
+            data: modelsFixture[body.provider],
+          },
         });
       }
 
       if (body.kind === "readLiveState") {
         return jsonResponse({
           ok: true,
-          result: liveStateResolver(body.threadId ?? "", body.provider)
+          result: liveStateResolver(body.threadId ?? "", body.provider),
         });
       }
 
@@ -429,16 +526,16 @@ vi.stubGlobal(
             kind: "readStreamEvents",
             threadId: body.threadId ?? "",
             ownerClientId: null,
-            events: []
-          }
+            events: [],
+          },
         });
       }
 
       return jsonResponse({
         ok: true,
         result: {
-          kind: body.kind
-        }
+          kind: body.kind,
+        },
       });
     }
 
@@ -446,19 +543,19 @@ vi.stubGlobal(
       return jsonResponse({
         ok: true,
         active: null,
-        recent: []
+        recent: [],
       });
     }
 
     if (pathname === "/api/debug/history") {
       return jsonResponse({
         ok: true,
-        history: []
+        history: [],
       });
     }
 
     return jsonResponse({ ok: true });
-  })
+  }),
 );
 
 describe("App", () => {
@@ -472,9 +569,15 @@ describe("App", () => {
     featureMatrixFixture = {
       ok: true,
       features: {
-        codex: buildFeatureSet(codexCapabilities, { enabled: false, connected: false }),
-        opencode: buildFeatureSet(opencodeCapabilities, { enabled: true, connected: true })
-      }
+        codex: buildFeatureSet(codexCapabilities, {
+          enabled: false,
+          connected: false,
+        }),
+        opencode: buildFeatureSet(opencodeCapabilities, {
+          enabled: true,
+          connected: true,
+        }),
+      },
     };
 
     render(<App />);
@@ -498,13 +601,13 @@ describe("App", () => {
           createdAt: 1700000000,
           updatedAt: 1700000001,
           cwd: "/tmp/site",
-          source: "codex"
-        }
+          source: "codex",
+        },
       ],
       cursors: {
         codex: null,
-        opencode: null
-      }
+        opencode: null,
+      },
     };
 
     render(<App />);
@@ -523,13 +626,13 @@ describe("App", () => {
           createdAt: 1700000000,
           updatedAt: 1700000001,
           cwd: "/tmp/project",
-          source: "codex"
-        }
+          source: "codex",
+        },
       ],
       cursors: {
         codex: null,
-        opencode: null
-      }
+        opencode: null,
+      },
     };
 
     render(<App />);
@@ -548,7 +651,7 @@ describe("App", () => {
           updatedAt: 1700000001,
           isGenerating: true,
           cwd: "/tmp/project",
-          source: "codex"
+          source: "codex",
         },
         {
           id: "thread-new",
@@ -557,13 +660,13 @@ describe("App", () => {
           createdAt: 1700000000,
           updatedAt: 1700000010,
           cwd: "/tmp/project",
-          source: "codex"
-        }
+          source: "codex",
+        },
       ],
       cursors: {
         codex: null,
-        opencode: null
-      }
+        opencode: null,
+      },
     };
 
     render(<App />);
@@ -578,7 +681,10 @@ describe("App", () => {
     if (!newerButton || !olderButton) {
       throw new Error("Missing thread buttons in sidebar");
     }
-    expect(newerButton.compareDocumentPosition(olderButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      newerButton.compareDocumentPosition(olderButton) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     expect(olderButton.querySelector("svg.animate-spin")).toBeTruthy();
   });
 
@@ -599,13 +705,13 @@ describe("App", () => {
           createdAt: 1700000000,
           updatedAt: 1700000000,
           cwd: "/tmp/project",
-          source: "codex"
-        }
+          source: "codex",
+        },
       ],
       cursors: {
         codex: null,
-        opencode: null
-      }
+        opencode: null,
+      },
     };
 
     modelsFixture = {
@@ -617,7 +723,7 @@ describe("App", () => {
           defaultReasoningEffort: "medium",
           supportedReasoningEfforts: ["medium"],
           hidden: false,
-          isDefault: false
+          isDefault: false,
         },
         {
           id: "gpt-new-codex",
@@ -626,10 +732,10 @@ describe("App", () => {
           defaultReasoningEffort: "medium",
           supportedReasoningEfforts: ["medium"],
           hidden: false,
-          isDefault: true
-        }
+          isDefault: true,
+        },
       ],
-      opencode: []
+      opencode: [],
     };
 
     readThreadResolver = (targetThreadId: string) => ({
@@ -638,7 +744,7 @@ describe("App", () => {
         readThreadCallCount += 1;
         latestObservedModel = modelId;
         return buildConversationStateFixture(targetThreadId, modelId);
-      })()
+      })(),
     });
 
     liveStateResolver = (targetThreadId: string, _provider: ProviderId) => ({
@@ -650,7 +756,7 @@ describe("App", () => {
         latestObservedModel = modelId;
         return buildConversationStateFixture(targetThreadId, modelId);
       })(),
-      liveStateError: null
+      liveStateError: null,
     });
 
     render(<App />);
@@ -666,12 +772,17 @@ describe("App", () => {
       kind: "threadUpdated",
       threadId,
       provider: "codex",
-      thread: buildConversationStateFixture(threadId, modelId)
+      thread: buildConversationStateFixture(threadId, modelId),
     });
 
-    await waitFor(() => {
-      expect(liveStateCallCount + readThreadCallCount).toBeGreaterThan(initialObservationCount);
-    }, { timeout: 3000 });
+    await waitFor(
+      () => {
+        expect(liveStateCallCount + readThreadCallCount).toBeGreaterThan(
+          initialObservationCount,
+        );
+      },
+      { timeout: 3000 },
+    );
     expect(latestObservedModel).toBe("gpt-new-codex");
   }, 15000);
 });
