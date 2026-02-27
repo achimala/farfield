@@ -243,6 +243,20 @@ function toErrorMessage(err: unknown): string {
   return String(err);
 }
 
+function isThreadNotFoundErrorMessage(message: string): boolean {
+  const normalized = message.trim().toLowerCase();
+  return (
+    normalized.includes("thread not found") ||
+    normalized.includes("thread is not registered") ||
+    normalized.includes("thread not loaded") ||
+    normalized.includes("conversation not found")
+  );
+}
+
+function isThreadNotFoundError(error: unknown): boolean {
+  return isThreadNotFoundErrorMessage(toErrorMessage(error));
+}
+
 function shouldRenderConversationItem(item: ConversationTurnItem): boolean {
   switch (item.type) {
     case "userMessage":
@@ -306,6 +320,7 @@ const DEFAULT_EFFORT_OPTIONS = [
   "high",
   "xhigh",
 ] as const;
+const EFFORT_ORDER: ReadonlyArray<string> = DEFAULT_EFFORT_OPTIONS;
 const INITIAL_VISIBLE_CHAT_ITEMS = 90;
 const VISIBLE_CHAT_ITEMS_STEP = 80;
 const APP_DEFAULT_VALUE = "__app_default__";
@@ -323,6 +338,28 @@ function agentFavicon(agentId: AgentId | null | undefined): string | null {
     return null;
   }
   return AGENT_FAVICON_BY_ID[agentId] ?? null;
+}
+
+function compareEffortOptions(left: string, right: string): number {
+  const leftIndex = EFFORT_ORDER.indexOf(left);
+  const rightIndex = EFFORT_ORDER.indexOf(right);
+  const leftKnown = leftIndex !== -1;
+  const rightKnown = rightIndex !== -1;
+
+  if (leftKnown && rightKnown) {
+    return leftIndex - rightIndex;
+  }
+  if (leftKnown) {
+    return -1;
+  }
+  if (rightKnown) {
+    return 1;
+  }
+  return left.localeCompare(right);
+}
+
+function sortEffortOptions(options: string[]): string[] {
+  return [...options].sort(compareEffortOptions);
 }
 
 function AgentFavicon({
@@ -998,19 +1035,46 @@ export function App(): React.JSX.Element {
     );
   }, [pendingRequests, selectedRequestId]);
 
+  const resolvedSelectedThreadProvider = useMemo((): AgentId | null => {
+    if (!selectedThreadId) {
+      return null;
+    }
+    if (selectedThread?.provider) {
+      return selectedThread.provider;
+    }
+
+    const readProvider =
+      readThreadState?.thread.id === selectedThreadId
+        ? readThreadState.thread.provider
+        : null;
+    if (readProvider) {
+      return readProvider;
+    }
+
+    const liveProvider =
+      liveState?.threadId === selectedThreadId
+        ? liveState.conversationState?.provider ?? null
+        : null;
+    if (liveProvider) {
+      return liveProvider;
+    }
+
+    return null;
+  }, [
+    liveState?.conversationState?.provider,
+    liveState?.threadId,
+    readThreadState?.thread.id,
+    readThreadState?.thread.provider,
+    selectedThread?.provider,
+    selectedThreadId,
+  ]);
+
   const activeThreadAgentId: AgentId = useMemo(
-    () =>
-      selectedThread?.provider ??
-      readThreadState?.thread.provider ??
-      liveState?.conversationState?.provider ??
-      selectedAgentId,
-    [
-      liveState?.conversationState?.provider,
-      readThreadState?.thread.provider,
-      selectedAgentId,
-      selectedThread?.provider,
-    ],
+    () => resolvedSelectedThreadProvider ?? selectedAgentId,
+    [resolvedSelectedThreadProvider, selectedAgentId],
   );
+  const hasResolvedSelectedThreadProvider =
+    !selectedThreadId || resolvedSelectedThreadProvider !== null;
   const activeAgentDescriptor = useMemo(
     () => agentsById[activeThreadAgentId] ?? selectedAgentDescriptor,
     [activeThreadAgentId, agentsById, selectedAgentDescriptor],
@@ -1063,7 +1127,7 @@ export function App(): React.JSX.Element {
     const le = conversationState?.latestReasoningEffort;
     if (le) vals.add(le);
     if (selectedReasoningEffort) vals.add(selectedReasoningEffort);
-    return Array.from(vals);
+    return sortEffortOptions(Array.from(vals));
   }, [
     conversationState?.latestReasoningEffort,
     modes,
@@ -1103,7 +1167,7 @@ export function App(): React.JSX.Element {
   const canUseComposer = isGenerating
     ? canInterruptForActiveAgent
     : selectedThreadId
-      ? canSendMessageForActiveAgent
+      ? hasResolvedSelectedThreadProvider && canSendMessageForActiveAgent
       : availableAgentIds.length > 0 &&
         canCreateThreadForSelectedAgent &&
         canSendMessageForActiveAgent;
@@ -1345,23 +1409,52 @@ export function App(): React.JSX.Element {
     async (threadId: string) => {
       const includeTurns =
         !pendingMaterializationThreadIdsRef.current.has(threadId);
-      const threadAgentId =
-        threadProviderByIdRef.current.get(threadId) ?? selectedAgentId;
+      const providerCandidates = new Set<AgentId>();
+      const knownProvider = threadProviderByIdRef.current.get(threadId);
+      if (knownProvider) {
+        providerCandidates.add(knownProvider);
+      }
+      providerCandidates.add(selectedAgentId);
+      for (const agentId of availableAgentIds) {
+        providerCandidates.add(agentId);
+      }
+
+      let threadAgentId: AgentId | null = null;
+      let read: ReadThreadResponse | null = null;
+      let notFoundError: unknown = null;
+      for (const provider of providerCandidates) {
+        try {
+          read = await readThread(threadId, { includeTurns, provider });
+          threadAgentId = provider;
+          break;
+        } catch (error) {
+          if (!isThreadNotFoundError(error)) {
+            throw error;
+          }
+          notFoundError = error;
+        }
+      }
+
+      if (!threadAgentId || !read) {
+        if (notFoundError) {
+          throw notFoundError;
+        }
+        throw new Error(`Thread ${threadId} is not available`);
+      }
+      threadProviderByIdRef.current.set(threadId, threadAgentId);
+
       const descriptor = agentsById[threadAgentId];
       const canReadLiveState = canUseFeature(descriptor, "readLiveState");
       const canReadStreamEvents = canUseFeature(descriptor, "readStreamEvents");
-      const [live, read] = await Promise.all([
-        canReadLiveState
-          ? getLiveState(threadId, threadAgentId)
-          : Promise.resolve({
-              ok: true as const,
-              threadId,
-              ownerClientId: null,
-              conversationState: null,
-              liveStateError: null,
-            }),
-        readThread(threadId, { includeTurns, provider: threadAgentId }),
-      ]);
+      const live = canReadLiveState
+        ? await getLiveState(threadId, threadAgentId)
+        : {
+            ok: true as const,
+            threadId,
+            ownerClientId: null,
+            conversationState: null,
+            liveStateError: null,
+          };
       const shouldLoadStreamEvents =
         canReadStreamEvents && activeTabRef.current === "debug";
       if (
@@ -1463,7 +1556,7 @@ export function App(): React.JSX.Element {
         });
       });
     },
-    [agentsById, selectedAgentId],
+    [agentsById, availableAgentIds, selectedAgentId],
   );
 
   const refreshAll = useCallback(async () => {
@@ -1482,9 +1575,11 @@ export function App(): React.JSX.Element {
   }, [selectedThreadId]);
 
   useEffect(() => {
-    threadProviderByIdRef.current = new Map(
-      threads.map((thread) => [thread.id, thread.provider]),
-    );
+    const next = new Map(threadProviderByIdRef.current);
+    for (const thread of threads) {
+      next.set(thread.id, thread.provider);
+    }
+    threadProviderByIdRef.current = next;
   }, [threads]);
 
   useEffect(() => {
@@ -2038,6 +2133,10 @@ export function App(): React.JSX.Element {
     async (draft: string) => {
       if (!draft.trim()) return;
       if (!canSendMessageForActiveAgent) return;
+      if (selectedThreadId && !hasResolvedSelectedThreadProvider) {
+        setError("Thread provider is still loading");
+        return;
+      }
 
       setIsBusy(true);
       try {
@@ -2070,6 +2169,7 @@ export function App(): React.JSX.Element {
     [
       activeThreadAgentId,
       canSendMessageForActiveAgent,
+      hasResolvedSelectedThreadProvider,
       refreshAll,
       selectedAgentId,
       selectedThreadId,
@@ -2083,6 +2183,10 @@ export function App(): React.JSX.Element {
       reasoningEffort: string;
     }) => {
       if (!selectedThreadId) {
+        return;
+      }
+      if (!hasResolvedSelectedThreadProvider) {
+        setError("Thread provider is still loading");
         return;
       }
 
@@ -2127,6 +2231,7 @@ export function App(): React.JSX.Element {
     },
     [
       activeThreadAgentId,
+      hasResolvedSelectedThreadProvider,
       isModeSyncing,
       loadSelectedThread,
       modes,
@@ -2136,6 +2241,10 @@ export function App(): React.JSX.Element {
 
   const submitPendingRequest = useCallback(async () => {
     if (!selectedThreadId || !activeRequest) return;
+    if (!hasResolvedSelectedThreadProvider) {
+      setError("Thread provider is still loading");
+      return;
+    }
     const answers: Record<string, { answers: string[] }> = {};
     for (const q of activeRequest.params.questions) {
       const cur = answerDraft[q.id] ?? { option: "", freeform: "" };
@@ -2161,12 +2270,17 @@ export function App(): React.JSX.Element {
     activeRequest,
     activeThreadAgentId,
     answerDraft,
+    hasResolvedSelectedThreadProvider,
     refreshAll,
     selectedThreadId,
   ]);
 
   const skipPendingRequest = useCallback(async () => {
     if (!selectedThreadId || !activeRequest) return;
+    if (!hasResolvedSelectedThreadProvider) {
+      setError("Thread provider is still loading");
+      return;
+    }
     setIsBusy(true);
     try {
       setError("");
@@ -2182,10 +2296,20 @@ export function App(): React.JSX.Element {
     } finally {
       setIsBusy(false);
     }
-  }, [activeRequest, activeThreadAgentId, refreshAll, selectedThreadId]);
+  }, [
+    activeRequest,
+    activeThreadAgentId,
+    hasResolvedSelectedThreadProvider,
+    refreshAll,
+    selectedThreadId,
+  ]);
 
   const runInterrupt = useCallback(async () => {
     if (!selectedThreadId || !canInterruptForActiveAgent) return;
+    if (!hasResolvedSelectedThreadProvider) {
+      setError("Thread provider is still loading");
+      return;
+    }
     setIsBusy(true);
     try {
       setError("");
@@ -2202,6 +2326,7 @@ export function App(): React.JSX.Element {
   }, [
     activeThreadAgentId,
     canInterruptForActiveAgent,
+    hasResolvedSelectedThreadProvider,
     refreshAll,
     selectedThreadId,
   ]);
@@ -2302,15 +2427,12 @@ export function App(): React.JSX.Element {
               </IconBtn>
             )}
             {viewport === "mobile" && (
-              <Button
-                type="button"
+              <IconBtn
                 onClick={() => setMobileSidebarOpen(false)}
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                title="Close sidebar"
               >
                 <X size={14} />
-              </Button>
+              </IconBtn>
             )}
           </div>
         </div>
@@ -2642,7 +2764,7 @@ export function App(): React.JSX.Element {
                 href="https://github.com/achimala/farfield"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="h-8 w-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+                className="h-8 w-8 rounded-lg inline-flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
               >
                 <Github size={14} />
               </a>
@@ -2688,7 +2810,7 @@ export function App(): React.JSX.Element {
                 damping: 36,
                 mass: 0.7,
               }}
-              className="hidden md:flex fixed left-0 top-[env(safe-area-inset-top)] bottom-[env(safe-area-inset-bottom)] z-30 w-64 flex-col border-r border-sidebar-border bg-sidebar shadow-xl"
+              className="hidden md:flex fixed left-0 top-[env(safe-area-inset-top)] bottom-[env(safe-area-inset-bottom)] z-30 w-64 flex-col border-r border-sidebar-border bg-sidebar/78 supports-[backdrop-filter]:bg-sidebar/62 backdrop-blur-xl shadow-xl"
             >
               {renderSidebarContent("desktop")}
             </motion.aside>
@@ -2709,7 +2831,7 @@ export function App(): React.JSX.Element {
                 damping: 36,
                 mass: 0.7,
               }}
-              className="md:hidden fixed left-0 top-[env(safe-area-inset-top)] bottom-[env(safe-area-inset-bottom)] z-50 w-64 flex flex-col border-r border-sidebar-border bg-sidebar shadow-xl"
+              className="md:hidden fixed left-0 top-[env(safe-area-inset-top)] bottom-[env(safe-area-inset-bottom)] z-50 w-64 flex flex-col border-r border-sidebar-border bg-sidebar/82 supports-[backdrop-filter]:bg-sidebar/68 backdrop-blur-xl shadow-xl"
             >
               {renderSidebarContent("mobile")}
             </motion.aside>
@@ -2944,7 +3066,9 @@ export function App(): React.JSX.Element {
                   />
                   <div className="relative max-w-3xl mx-auto space-y-2">
                     <AnimatePresence mode="wait">
-                      {activeRequest && canSubmitUserInputForActiveAgent ? (
+                      {activeRequest &&
+                      canSubmitUserInputForActiveAgent &&
+                      hasResolvedSelectedThreadProvider ? (
                         <PendingRequestCard
                           key="pending"
                           request={activeRequest}

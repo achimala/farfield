@@ -329,13 +329,18 @@ let liveStateResolver: (
 function buildConversationStateFixture(
   threadId: string,
   modelId: string,
-  options?: { updatedAt?: number; includePendingRequest?: boolean },
+  options?: {
+    updatedAt?: number;
+    includePendingRequest?: boolean;
+    provider?: ProviderId;
+  },
 ): UnifiedThreadFixture {
   const includePendingRequest = options?.includePendingRequest ?? false;
   const updatedAt = options?.updatedAt ?? 1700000000;
+  const provider = options?.provider ?? "codex";
   return {
     id: threadId,
-    provider: "codex",
+    provider,
     turns: [
       {
         id: "turn-1",
@@ -393,8 +398,21 @@ function jsonResponse(
   } as Response;
 }
 
+function jsonErrorResponse(
+  payload: Record<
+    string,
+    object | string | number | boolean | null | undefined
+  >,
+): Response {
+  return {
+    ok: false,
+    json: async () => payload,
+  } as Response;
+}
+
 beforeEach(() => {
   MockEventSource.reset();
+  window.history.replaceState(null, "", "/");
 
   featureMatrixFixture = {
     ok: true,
@@ -517,6 +535,10 @@ vi.stubGlobal(
       if (readThread) {
         return jsonResponse(readThread);
       }
+      return jsonErrorResponse({
+        ok: false,
+        error: `Thread ${threadId} is not registered`,
+      });
     }
 
     if (pathname === "/api/unified/command") {
@@ -682,7 +704,8 @@ describe("App", () => {
     };
 
     render(<App />);
-    expect(await screen.findByText("Pretty Thread Name")).toBeTruthy();
+    const matches = await screen.findAllByText("Pretty Thread Name");
+    expect(matches.length).toBeGreaterThan(0);
   });
 
   it("orders threads by recency and shows spinner for non-selected running thread", async () => {
@@ -717,8 +740,11 @@ describe("App", () => {
 
     render(<App />);
 
-    const newer = await screen.findByText("newer thread");
-    const older = await screen.findByText("older thread");
+    const newer = (await screen.findAllByText("newer thread"))[0];
+    const older = (await screen.findAllByText("older thread"))[0];
+    if (!newer || !older) {
+      throw new Error("Missing thread labels");
+    }
     const newerButton = newer.closest("button");
     const olderButton = older.closest("button");
 
@@ -880,4 +906,5 @@ describe("App", () => {
     expect(screen.getByText("Option A")).toBeTruthy();
     expect(screen.getByText("Option B")).toBeTruthy();
   });
+
 });
