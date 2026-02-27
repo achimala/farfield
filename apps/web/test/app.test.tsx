@@ -256,12 +256,12 @@ type UnifiedThreadFixture = {
   }>;
   updatedAt: number;
   latestModel: string;
-  latestReasoningEffort: string;
+  latestReasoningEffort: string | null;
   latestCollaborationMode: {
     mode: string;
     settings: {
       model: string;
-      reasoningEffort: string;
+      reasoningEffort: string | null;
       developerInstructions: null;
     };
   };
@@ -337,11 +337,16 @@ function buildConversationStateFixture(
     updatedAt?: number;
     includePendingRequest?: boolean;
     provider?: ProviderId;
+    latestReasoningEffort?: string | null;
+    collaborationModeReasoningEffort?: string | null;
   },
 ): UnifiedThreadFixture {
   const includePendingRequest = options?.includePendingRequest ?? false;
   const updatedAt = options?.updatedAt ?? 1700000000;
   const provider = options?.provider ?? "codex";
+  const latestReasoningEffort = options?.latestReasoningEffort ?? "medium";
+  const collaborationModeReasoningEffort =
+    options?.collaborationModeReasoningEffort ?? "medium";
   return {
     id: threadId,
     provider,
@@ -378,12 +383,12 @@ function buildConversationStateFixture(
       : [],
     updatedAt,
     latestModel: modelId,
-    latestReasoningEffort: "medium",
+    latestReasoningEffort,
     latestCollaborationMode: {
       mode: "default",
       settings: {
         model: modelId,
-        reasoningEffort: "medium",
+        reasoningEffort: collaborationModeReasoningEffort,
         developerInstructions: null,
       },
     },
@@ -936,6 +941,71 @@ describe("App", () => {
     expect(await screen.findByText("Pick one option")).toBeTruthy();
     expect(screen.getByText("Option A")).toBeTruthy();
     expect(screen.getByText("Option B")).toBeTruthy();
+  });
+
+  it("shows model default effort when thread effort fields are unset", async () => {
+    const threadId = "thread-effort-default";
+    const modelId = "gpt-5.3-codex";
+
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: threadId,
+          provider: "codex",
+          preview: "thread preview",
+          createdAt: 1700000000,
+          updatedAt: 1700000000,
+          cwd: "/tmp/project",
+          source: "codex",
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    modelsFixture = {
+      codex: [
+        {
+          id: modelId,
+          displayName: modelId,
+          description: "Default model",
+          defaultReasoningEffort: "xhigh",
+          supportedReasoningEfforts: ["minimal", "low", "medium", "high", "xhigh"],
+          hidden: false,
+          isDefault: true,
+        },
+      ],
+      opencode: [],
+    };
+
+    readThreadResolver = (targetThreadId: string) => ({
+      ok: true,
+      thread: buildConversationStateFixture(targetThreadId, modelId, {
+        latestReasoningEffort: null,
+        collaborationModeReasoningEffort: null,
+      }),
+    });
+
+    liveStateResolver = (targetThreadId: string, _provider: ProviderId) => ({
+      kind: "readLiveState",
+      threadId: targetThreadId,
+      ownerClientId: "client-1",
+      conversationState: buildConversationStateFixture(targetThreadId, modelId, {
+        latestReasoningEffort: null,
+        collaborationModeReasoningEffort: null,
+      }),
+      liveStateError: null,
+    });
+
+    render(<App />);
+    expect(await screen.findByText("xhigh")).toBeTruthy();
   });
 
 });

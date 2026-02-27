@@ -597,16 +597,26 @@ function readModeSelectionFromConversationState(
   }
 
   if (state.latestCollaborationMode) {
-    return {
-      modeKey: state.latestCollaborationMode.mode,
-      modelId: normalizeModeSettingValue(
+    const modelId =
+      normalizeModeSettingValue(
         state.latestCollaborationMode.settings.model,
         ASSUMED_APP_DEFAULT_MODEL,
-      ),
-      reasoningEffort: normalizeModeSettingValue(
+      ) ||
+      normalizeModeSettingValue(state.latestModel, ASSUMED_APP_DEFAULT_MODEL);
+    const reasoningEffort =
+      normalizeModeSettingValue(
         state.latestCollaborationMode.settings.reasoningEffort,
         ASSUMED_APP_DEFAULT_EFFORT,
-      ),
+      ) ||
+      normalizeModeSettingValue(
+        state.latestReasoningEffort,
+        ASSUMED_APP_DEFAULT_EFFORT,
+      );
+
+    return {
+      modeKey: state.latestCollaborationMode.mode,
+      modelId,
+      reasoningEffort,
     };
   }
 
@@ -1156,10 +1166,29 @@ export function App(): React.JSX.Element {
     modes,
     selectedReasoningEffort,
   ]);
-  const effortOptionsWithoutAssumedDefault = useMemo(
+  const appDefaultEffortLabel = useMemo(() => {
+    const activeModelId =
+      selectedModelId ||
+      normalizeNullableModeValue(conversationState?.latestModel) ||
+      models.find((entry) => entry.isDefault)?.id ||
+      "";
+    const modelDefaultEffort = normalizeNullableModeValue(
+      models.find((entry) => entry.id === activeModelId)
+        ?.defaultReasoningEffort ?? null,
+    );
+    if (modelDefaultEffort.length > 0) {
+      return modelDefaultEffort;
+    }
+    return ASSUMED_APP_DEFAULT_EFFORT;
+  }, [conversationState?.latestModel, models, selectedModelId]);
+  const effortOptionsWithoutAppDefault = useMemo(
     () =>
-      effortOptions.filter((option) => option !== ASSUMED_APP_DEFAULT_EFFORT),
-    [effortOptions],
+      effortOptions.filter(
+        (option) =>
+          option !== appDefaultEffortLabel ||
+          selectedReasoningEffort === option,
+      ),
+    [appDefaultEffortLabel, effortOptions, selectedReasoningEffort],
   );
 
   const modelOptions = useMemo(() => {
@@ -3237,9 +3266,9 @@ export function App(): React.JSX.Element {
                                   </SelectTrigger>
                                   <SelectContent position="popper">
                                     <SelectItem value={APP_DEFAULT_VALUE}>
-                                      {ASSUMED_APP_DEFAULT_EFFORT}
+                                      {appDefaultEffortLabel}
                                     </SelectItem>
-                                    {effortOptionsWithoutAssumedDefault.map(
+                                    {effortOptionsWithoutAppDefault.map(
                                       (option) => (
                                         <SelectItem key={option} value={option}>
                                           {option}
