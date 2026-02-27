@@ -1502,8 +1502,14 @@ export function App(): React.JSX.Element {
       threadProviderByIdRef.current.set(threadId, threadAgentId);
 
       const descriptor = agentsById[threadAgentId];
-      const canReadLiveState = canUseFeature(descriptor, "readLiveState");
-      const canReadStreamEvents = canUseFeature(descriptor, "readStreamEvents");
+      const canReadLiveState =
+        descriptor === undefined
+          ? threadAgentId === "codex"
+          : canUseFeature(descriptor, "readLiveState");
+      const canReadStreamEvents =
+        descriptor === undefined
+          ? threadAgentId === "codex"
+          : canUseFeature(descriptor, "readStreamEvents");
       const live = canReadLiveState
         ? await getLiveState(threadId, threadAgentId)
         : {
