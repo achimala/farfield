@@ -977,6 +977,11 @@ export class CodexAgentAdapter implements AgentAdapter {
       if (!isInvalidRequestAppServerRpcError(typedError)) {
         throw error;
       }
+
+      const stillLoaded = await this.isThreadLoaded(threadId);
+      if (stillLoaded) {
+        throw error;
+      }
     }
 
     await this.resumeThread(threadId);
