@@ -412,6 +412,20 @@ describe("sessionToThreadListItem", () => {
     expect(result.cwd).toBe("/tmp/project");
     expect(result.source).toBe("opencode");
   });
+
+  it("normalizes millisecond unix timestamps to seconds", () => {
+    const result = sessionToThreadListItem(
+      makeSession({
+        time: {
+          created: 1771181073448,
+          updated: 1771182751310
+        }
+      })
+    );
+
+    expect(result.createdAt).toBe(1771181073);
+    expect(result.updatedAt).toBe(1771182751);
+  });
 });
 
 describe("messagesToTurns", () => {
@@ -490,5 +504,21 @@ describe("sessionToConversationState", () => {
     expect(state.title).toBe("Test Session");
     expect(state.latestModel).toBe("anthropic/claude-sonnet");
     expect(state.source).toBe("opencode");
+  });
+
+  it("normalizes conversation timestamps from milliseconds to seconds", () => {
+    const state = sessionToConversationState(
+      makeSession({
+        time: {
+          created: 1771181073448,
+          updated: 1771182751310
+        }
+      }),
+      [],
+      new Map<string, Part[]>()
+    );
+
+    expect(state.createdAt).toBe(1771181073);
+    expect(state.updatedAt).toBe(1771182751);
   });
 });

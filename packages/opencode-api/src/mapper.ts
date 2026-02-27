@@ -239,8 +239,8 @@ export function sessionToThreadListItem(session: Session): MappedThreadListItem 
     id: session.id,
     preview: session.title || "(untitled)",
     title: session.title || null,
-    createdAt: session.time.created,
-    updatedAt: session.time.updated,
+    createdAt: normalizeUnixTimestampSeconds(session.time.created),
+    updatedAt: normalizeUnixTimestampSeconds(session.time.updated),
     cwd: session.directory,
     source: "opencode"
   };
@@ -261,8 +261,8 @@ export function sessionToConversationState(
     id: session.id,
     turns,
     requests: [],
-    createdAt: session.time.created,
-    updatedAt: session.time.updated,
+    createdAt: normalizeUnixTimestampSeconds(session.time.created),
+    updatedAt: normalizeUnixTimestampSeconds(session.time.updated),
     title: session.title || null,
     latestModel: lastAssistant
       ? `${lastAssistant.providerID}/${lastAssistant.modelID}`
@@ -270,6 +270,13 @@ export function sessionToConversationState(
     cwd: session.directory,
     source: "opencode"
   };
+}
+
+function normalizeUnixTimestampSeconds(value: number): number {
+  if (value >= 10_000_000_000) {
+    return Math.floor(value / 1000);
+  }
+  return Math.floor(value);
 }
 
 /**

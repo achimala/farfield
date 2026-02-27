@@ -556,8 +556,8 @@ function mapThreadSummary(
     ...(thread.isGenerating !== undefined
       ? { isGenerating: thread.isGenerating }
       : {}),
-    createdAt: thread.createdAt,
-    updatedAt: thread.updatedAt,
+    createdAt: normalizeUnixTimestampSeconds(thread.createdAt),
+    updatedAt: normalizeUnixTimestampSeconds(thread.updatedAt),
     ...(thread.cwd ? { cwd: thread.cwd } : {}),
     ...(thread.source ? { source: thread.source } : {}),
   };
@@ -611,8 +611,12 @@ function mapThread(
         ? { completed: request.completed }
         : {}),
     })),
-    ...(thread.createdAt !== undefined ? { createdAt: thread.createdAt } : {}),
-    ...(thread.updatedAt !== undefined ? { updatedAt: thread.updatedAt } : {}),
+    ...(thread.createdAt !== undefined
+      ? { createdAt: normalizeUnixTimestampSeconds(thread.createdAt) }
+      : {}),
+    ...(thread.updatedAt !== undefined
+      ? { updatedAt: normalizeUnixTimestampSeconds(thread.updatedAt) }
+      : {}),
     ...(thread.title !== undefined ? { title: thread.title } : {}),
     ...(thread.latestCollaborationMode !== undefined
       ? {
@@ -654,6 +658,13 @@ function mapThread(
     ...(thread.cwd ? { cwd: thread.cwd } : {}),
     ...(thread.source ? { source: thread.source } : {}),
   };
+}
+
+function normalizeUnixTimestampSeconds(value: number): number {
+  if (value >= 10_000_000_000) {
+    return Math.floor(value / 1000);
+  }
+  return Math.floor(value);
 }
 
 function mapTurnItem(

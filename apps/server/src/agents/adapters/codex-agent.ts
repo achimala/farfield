@@ -94,6 +94,7 @@ export class CodexAgentAdapter implements AgentAdapter {
     string,
     ThreadConversationState
   >();
+  private readonly reductionErrorSignatureByThreadId = new Map<string, string>();
   private readonly threadTitleById = new Map<string, string | null>();
   private readonly ipcFrameListeners = new Set<
     (event: CodexIpcFrameEvent) => void
@@ -406,7 +407,14 @@ export class CodexAgentAdapter implements AgentAdapter {
       this.appClient.readThread(input.threadId, input.includeTurns),
     );
     const parsedThread = parseThreadConversationState(result.thread);
-    this.streamSnapshotByThreadId.set(input.threadId, parsedThread);
+    const existingSnapshot = this.streamSnapshotByThreadId.get(input.threadId);
+    const shouldStoreSnapshot =
+      input.includeTurns ||
+      parsedThread.turns.length > 0 ||
+      existingSnapshot === undefined;
+    if (shouldStoreSnapshot) {
+      this.streamSnapshotByThreadId.set(input.threadId, parsedThread);
+    }
     this.setThreadTitle(input.threadId, parsedThread.title);
     return {
       thread: parsedThread,
@@ -610,25 +618,67 @@ export class CodexAgentAdapter implements AgentAdapter {
       };
     }
 
+    const reductionWindow = trimThreadStreamEventsForReduction(events);
+    const reductionEvents = reductionWindow.events;
+    const canUseSyntheticSnapshot =
+      !reductionWindow.hasSnapshot &&
+      snapshotState !== null &&
+      snapshotState.turns.length > 0;
+
     try {
-      const reductionInput = snapshotState
+      const reductionInput = canUseSyntheticSnapshot
         ? [
             buildSyntheticSnapshotEvent(
               threadId,
               ownerClientId ?? "farfield",
               snapshotState,
             ),
-            ...events,
+            ...reductionEvents,
           ]
-        : events;
+        : reductionEvents;
       const reduced = reduceThreadStreamEvents(reductionInput);
       const state = reduced.get(threadId);
+      this.reductionErrorSignatureByThreadId.delete(threadId);
       return {
         ownerClientId: state?.ownerClientId ?? ownerClientId ?? null,
         conversationState: state?.conversationState ?? snapshotState,
         liveStateError: null,
       };
     } catch (error) {
+      if (canUseSyntheticSnapshot) {
+        try {
+          const reduced = reduceThreadStreamEvents(reductionEvents);
+          const state = reduced.get(threadId);
+          this.reductionErrorSignatureByThreadId.delete(threadId);
+          return {
+            ownerClientId: state?.ownerClientId ?? ownerClientId ?? null,
+            conversationState: state?.conversationState ?? snapshotState,
+            liveStateError: null,
+          };
+        } catch (secondaryError) {
+          this.logReductionFailure(threadId, reductionEvents.length, secondaryError);
+          return {
+            ownerClientId,
+            conversationState: snapshotState,
+            liveStateError: null,
+          };
+        }
+      }
+
+      this.logReductionFailure(threadId, reductionEvents.length, error);
+      return {
+        ownerClientId,
+        conversationState: snapshotState,
+        liveStateError: null,
+      };
+    }
+  }
+
+  private logReductionFailure(
+    threadId: string,
+    eventCount: number,
+    error: unknown,
+  ): void {
       const details =
         error instanceof ThreadStreamReductionError
           ? {
@@ -637,26 +687,25 @@ export class CodexAgentAdapter implements AgentAdapter {
               patchIndex: error.details.patchIndex,
             }
           : null;
-      logger.error(
+
+      const signature = details
+        ? `${details.threadId}:${String(details.eventIndex)}:${String(details.patchIndex)}:${toErrorMessage(error)}`
+        : toErrorMessage(error);
+      const previous = this.reductionErrorSignatureByThreadId.get(threadId);
+      if (previous === signature) {
+        return;
+      }
+      this.reductionErrorSignatureByThreadId.set(threadId, signature);
+
+      logger.warn(
         {
           threadId,
-          eventCount: events.length,
+          eventCount,
           error: toErrorMessage(error),
           details,
         },
-        "codex-thread-stream-reduction-failed",
+        "codex-thread-stream-reduction-skipped",
       );
-      return {
-        ownerClientId,
-        conversationState: snapshotState,
-        liveStateError: {
-          kind: "reductionFailed",
-          message: toErrorMessage(error),
-          eventIndex: details?.eventIndex ?? null,
-          patchIndex: details?.patchIndex ?? null,
-        },
-      };
-    }
   }
 
   public async readStreamEvents(
@@ -1051,6 +1100,30 @@ function buildSyntheticSnapshotEvent(
       version: 0,
       type: "thread-stream-state-changed",
     },
+  };
+}
+
+function trimThreadStreamEventsForReduction(
+  events: ThreadStreamStateChangedBroadcast[],
+): { events: ThreadStreamStateChangedBroadcast[]; hasSnapshot: boolean } {
+  let latestSnapshotIndex = -1;
+  for (let index = 0; index < events.length; index += 1) {
+    const event = events[index];
+    if (event?.params.change.type === "snapshot") {
+      latestSnapshotIndex = index;
+    }
+  }
+
+  if (latestSnapshotIndex === -1) {
+    return {
+      events,
+      hasSnapshot: false,
+    };
+  }
+
+  return {
+    events: events.slice(latestSnapshotIndex),
+    hasSnapshot: true,
   };
 }
 

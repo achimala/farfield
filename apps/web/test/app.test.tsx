@@ -766,7 +766,6 @@ describe("App", () => {
     expect(latestObservedModel).toBe("gpt-old-codex");
 
     modelId = "gpt-new-codex";
-    const initialObservationCount = liveStateCallCount + readThreadCallCount;
 
     MockEventSource.emit({
       kind: "threadUpdated",
@@ -777,11 +776,9 @@ describe("App", () => {
 
     await waitFor(
       () => {
-        expect(liveStateCallCount + readThreadCallCount).toBeGreaterThan(
-          initialObservationCount,
-        );
+        expect(latestObservedModel).toBe("gpt-new-codex");
       },
-      { timeout: 3000 },
+      { timeout: 5000 },
     );
     expect(latestObservedModel).toBe("gpt-new-codex");
   }, 15000);

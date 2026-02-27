@@ -122,7 +122,7 @@ interface RefreshFlags {
 /* ── Helpers ────────────────────────────────────────────────── */
 function formatDate(value: number | string | null | undefined): string {
   if (typeof value === "number")
-    return new Date(value * 1000).toLocaleTimeString([], {
+    return new Date(normalizeUnixTimestampSeconds(value) * 1000).toLocaleTimeString([], {
       hour: "2-digit",
       minute: "2-digit",
     });
@@ -145,10 +145,10 @@ function threadLabel(thread: Thread): string {
 
 function threadRecencyTimestamp(thread: Thread): number {
   if (typeof thread.updatedAt === "number") {
-    return thread.updatedAt;
+    return normalizeUnixTimestampSeconds(thread.updatedAt);
   }
   if (typeof thread.createdAt === "number") {
-    return thread.createdAt;
+    return normalizeUnixTimestampSeconds(thread.createdAt);
   }
   return 0;
 }
@@ -160,7 +160,9 @@ function compareThreadsByRecency(left: Thread, right: Thread): number {
     return recencyDelta;
   }
 
-  const createdDelta = right.createdAt - left.createdAt;
+  const createdDelta =
+    normalizeUnixTimestampSeconds(right.createdAt) -
+    normalizeUnixTimestampSeconds(left.createdAt);
   if (createdDelta !== 0) {
     return createdDelta;
   }
@@ -170,6 +172,13 @@ function compareThreadsByRecency(left: Thread, right: Thread): number {
 
 function sortThreadsByRecency(threads: Thread[]): Thread[] {
   return [...threads].sort(compareThreadsByRecency);
+}
+
+function normalizeUnixTimestampSeconds(value: number): number {
+  if (value >= 10_000_000_000) {
+    return Math.floor(value / 1000);
+  }
+  return Math.floor(value);
 }
 
 function buildThreadSignature(thread: Thread): string {
@@ -795,6 +804,10 @@ export function App(): React.JSX.Element {
   const lastAppliedModeSignatureRef = useRef("");
   const hasHydratedAgentSelectionRef = useRef(false);
   const pendingMaterializationThreadIdsRef = useRef<Set<string>>(new Set());
+  const threadProviderByIdRef = useRef<Map<string, AgentId>>(new Map());
+  const loadSelectedThreadRef = useRef<
+    ((threadId: string) => Promise<void>) | null
+  >(null);
   const threadsSignatureRef = useRef<string[]>([]);
   const modesSignatureRef = useRef<string[]>([]);
   const modelsSignatureRef = useRef<string[]>([]);
@@ -1265,13 +1278,12 @@ export function App(): React.JSX.Element {
     async (threadId: string) => {
       const includeTurns =
         !pendingMaterializationThreadIdsRef.current.has(threadId);
-      const thread = threads.find((entry) => entry.id === threadId) ?? null;
-      const threadAgentId = thread?.provider ?? selectedAgentId;
+      const threadAgentId =
+        threadProviderByIdRef.current.get(threadId) ?? selectedAgentId;
       const descriptor = agentsById[threadAgentId];
       const canReadLiveState = canUseFeature(descriptor, "readLiveState");
       const canReadStreamEvents = canUseFeature(descriptor, "readStreamEvents");
-
-      const [live, stream, read] = await Promise.all([
+      const [live, read] = await Promise.all([
         canReadLiveState
           ? getLiveState(threadId, threadAgentId)
           : Promise.resolve({
@@ -1281,32 +1293,19 @@ export function App(): React.JSX.Element {
               conversationState: null,
               liveStateError: null,
             }),
-        canReadStreamEvents
-          ? getStreamEvents(threadId, threadAgentId)
-          : Promise.resolve({
-              ok: true as const,
-              threadId,
-              ownerClientId: null,
-              events: [],
-            }),
         readThread(threadId, { includeTurns, provider: threadAgentId }),
       ]);
+      const shouldLoadStreamEvents =
+        canReadStreamEvents && activeTabRef.current === "debug";
       if (
         (live.conversationState?.turns.length ?? 0) > 0 ||
         read.thread.turns.length > 0
       ) {
         pendingMaterializationThreadIdsRef.current.delete(threadId);
       }
+      const shouldUpdateSelectedThread =
+        selectedThreadIdRef.current === threadId;
       startTransition(() => {
-        setLiveState((prev) => {
-          if (
-            buildLiveStateSyncSignature(prev) ===
-            buildLiveStateSyncSignature(live)
-          ) {
-            return prev;
-          }
-          return live;
-        });
         setThreads((previousThreads) => {
           const nextIsGenerating = live.conversationState
             ? isThreadGeneratingState(live.conversationState)
@@ -1350,6 +1349,18 @@ export function App(): React.JSX.Element {
           threadsSignatureRef.current = nextSignature;
           return sortedThreads;
         });
+        if (!shouldUpdateSelectedThread) {
+          return;
+        }
+        setLiveState((prev) => {
+          if (
+            buildLiveStateSyncSignature(prev) ===
+            buildLiveStateSyncSignature(live)
+          ) {
+            return prev;
+          }
+          return live;
+        });
         setReadThreadState((prev) => {
           if (
             buildReadThreadSyncSignature(prev) ===
@@ -1359,6 +1370,17 @@ export function App(): React.JSX.Element {
           }
           return read;
         });
+      });
+
+      if (!shouldLoadStreamEvents) {
+        return;
+      }
+
+      const stream = await getStreamEvents(threadId, threadAgentId);
+      if (selectedThreadIdRef.current !== threadId) {
+        return;
+      }
+      startTransition(() => {
         setStreamEvents((prev) => {
           const prevLast = prev[prev.length - 1];
           const nextLast = stream.events[stream.events.length - 1];
@@ -1374,7 +1396,7 @@ export function App(): React.JSX.Element {
         });
       });
     },
-    [agentsById, selectedAgentId, threads],
+    [agentsById, selectedAgentId],
   );
 
   const refreshAll = useCallback(async () => {
@@ -1391,6 +1413,16 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     selectedThreadIdRef.current = selectedThreadId;
   }, [selectedThreadId]);
+
+  useEffect(() => {
+    threadProviderByIdRef.current = new Map(
+      threads.map((thread) => [thread.id, thread.provider]),
+    );
+  }, [threads]);
+
+  useEffect(() => {
+    loadSelectedThreadRef.current = loadSelectedThread;
+  }, [loadSelectedThread]);
 
   useEffect(() => {
     activeTabRef.current = activeTab;
@@ -1536,10 +1568,15 @@ export function App(): React.JSX.Element {
       setStreamEvents([]);
       return;
     }
-    void loadSelectedThread(selectedThreadId).catch((e) =>
-      setError(toErrorMessage(e)),
-    );
-  }, [loadSelectedThread, selectedThreadId]);
+    setLiveState(null);
+    setReadThreadState(null);
+    setStreamEvents([]);
+    const load = loadSelectedThreadRef.current;
+    if (!load) {
+      return;
+    }
+    void load(selectedThreadId).catch((e) => setError(toErrorMessage(e)));
+  }, [selectedThreadId]);
 
   useEffect(() => {
     let disposed = false;
