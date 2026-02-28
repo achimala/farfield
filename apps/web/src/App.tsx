@@ -423,132 +423,127 @@ function getConversationStateUpdatedAt(
   return state.updatedAt;
 }
 
-function hasExplicitModeSelectionInState(
-  state: NonNullable<ReadThreadResponse["thread"]> | null | undefined,
-): boolean {
-  if (!state) {
-    return false;
+function turnIdentity(
+  turn: NonNullable<ReadThreadResponse["thread"]>["turns"][number] | undefined,
+): string {
+  if (!turn) {
+    return "";
   }
-
-  const mode = state.latestCollaborationMode;
-  if (mode) {
-    const modeKey = normalizeNullableModeValue(mode.mode);
-    const model = normalizeNullableModeValue(mode.settings.model);
-    const effort = normalizeNullableModeValue(mode.settings.reasoningEffort);
-    if (modeKey.length > 0 || model.length > 0 || effort.length > 0) {
-      return true;
-    }
-  }
-
-  const latestModel = normalizeNullableModeValue(state.latestModel);
-  const latestEffort = normalizeNullableModeValue(state.latestReasoningEffort);
-  return latestModel.length > 0 || latestEffort.length > 0;
-}
-
-function countConversationItems(
-  state: NonNullable<ReadThreadResponse["thread"]> | null | undefined,
-): number {
-  if (!state) {
-    return -1;
-  }
-  let count = 0;
-  for (const turn of state.turns) {
-    count += turn.items.length;
-  }
-  return count;
+  return turn.id ?? turn.turnId ?? "";
 }
 
 function mergeUserInputRequests(
-  liveState: NonNullable<ReadThreadResponse["thread"]>,
   readState: NonNullable<ReadThreadResponse["thread"]>,
+  liveState: NonNullable<ReadThreadResponse["thread"]>,
 ): NonNullable<ReadThreadResponse["thread"]>["requests"] {
   type Request = NonNullable<ReadThreadResponse["thread"]>["requests"][number];
   const merged = new Map<string, Request>();
+  let changed = false;
 
-  for (const request of liveState.requests) {
+  for (const request of readState.requests) {
     const key = `${typeof request.id}:${String(request.id)}:${request.method}`;
     merged.set(key, request);
   }
 
-  for (const request of readState.requests) {
+  for (const request of liveState.requests) {
     const key = `${typeof request.id}:${String(request.id)}:${request.method}`;
     const existing = merged.get(key);
     if (!existing) {
       merged.set(key, request);
+      changed = true;
       continue;
     }
-    if (request.completed === true || existing.completed !== true) {
+
+    if (existing.completed === true && request.completed !== true) {
       merged.set(key, request);
+      changed = true;
+      continue;
     }
+
+    if (request.completed === true) {
+      merged.set(key, request);
+      if (request !== existing) {
+        changed = true;
+      }
+    }
+  }
+
+  if (!changed && merged.size === readState.requests.length) {
+    return readState.requests;
   }
 
   return Array.from(merged.values());
 }
 
-function withMergedRequests(
-  baseState: NonNullable<ReadThreadResponse["thread"]>,
-  liveState: NonNullable<ReadThreadResponse["thread"]>,
+function overlayLiveTurns(
   readState: NonNullable<ReadThreadResponse["thread"]>,
-): NonNullable<ReadThreadResponse["thread"]> {
-  const mergedRequests = mergeUserInputRequests(liveState, readState);
-  if (baseState.requests.length === mergedRequests.length) {
-    const allMatch = baseState.requests.every((request, index) => {
-      const mergedRequest = mergedRequests[index];
-      return mergedRequest !== undefined && mergedRequest === request;
-    });
-    if (allMatch) {
-      return baseState;
+  liveState: NonNullable<ReadThreadResponse["thread"]>,
+): NonNullable<ReadThreadResponse["thread"]>["turns"] {
+  const readTurns = readState.turns;
+  const liveTurns = liveState.turns;
+
+  if (liveTurns.length === 0) {
+    return readTurns;
+  }
+  if (readTurns.length === 0) {
+    return liveTurns;
+  }
+  if (liveTurns.length < readTurns.length) {
+    return readTurns;
+  }
+
+  const sharedLength = Math.min(readTurns.length, liveTurns.length);
+  for (let index = 0; index < sharedLength; index += 1) {
+    const readId = turnIdentity(readTurns[index]);
+    const liveId = turnIdentity(liveTurns[index]);
+    if (readId.length === 0 || liveId.length === 0 || readId !== liveId) {
+      return readTurns;
     }
   }
-  return {
-    ...baseState,
-    requests: mergedRequests,
-  };
+
+  if (liveTurns.length > readTurns.length) {
+    return [...readTurns, ...liveTurns.slice(readTurns.length)];
+  }
+
+  const readLastTurn = readTurns[readTurns.length - 1];
+  const liveLastTurn = liveTurns[liveTurns.length - 1];
+  if (!readLastTurn || !liveLastTurn) {
+    return readTurns;
+  }
+  if (liveLastTurn.items.length <= readLastTurn.items.length) {
+    return readTurns;
+  }
+
+  return [...readTurns.slice(0, -1), liveLastTurn];
 }
 
-function pickPreferredConversationState(
-  liveState: NonNullable<ReadThreadResponse["thread"]>,
+function mergeConversationStateForwardOnly(
   readState: NonNullable<ReadThreadResponse["thread"]>,
+  liveState: NonNullable<ReadThreadResponse["thread"]>,
 ): NonNullable<ReadThreadResponse["thread"]> {
-  const liveUpdatedAt = getConversationStateUpdatedAt(liveState);
-  const readUpdatedAt = getConversationStateUpdatedAt(readState);
+  const mergedTurns = overlayLiveTurns(readState, liveState);
+  const mergedRequests = mergeUserInputRequests(readState, liveState);
+  const mergedUpdatedAt = Math.max(
+    getConversationStateUpdatedAt(readState),
+    getConversationStateUpdatedAt(liveState),
+  );
+  const hasUpdatedAt = Number.isFinite(mergedUpdatedAt);
 
-  if (liveUpdatedAt > readUpdatedAt) {
-    return withMergedRequests(liveState, liveState, readState);
-  }
-  if (readUpdatedAt > liveUpdatedAt) {
-    return withMergedRequests(readState, liveState, readState);
-  }
-
-  const liveHasModeSelection = hasExplicitModeSelectionInState(liveState);
-  const readHasModeSelection = hasExplicitModeSelectionInState(readState);
-  if (liveHasModeSelection !== readHasModeSelection) {
-    return withMergedRequests(
-      liveHasModeSelection ? liveState : readState,
-      liveState,
-      readState,
-    );
+  if (mergedTurns === readState.turns && mergedRequests === readState.requests) {
+    return readState;
   }
 
-  if (liveState.turns.length !== readState.turns.length) {
-    return withMergedRequests(
-      liveState.turns.length > readState.turns.length ? liveState : readState,
-      liveState,
-      readState,
-    );
-  }
-
-  const liveItemCount = countConversationItems(liveState);
-  const readItemCount = countConversationItems(readState);
-  if (liveItemCount !== readItemCount) {
-    return withMergedRequests(
-      liveItemCount > readItemCount ? liveState : readState,
-      liveState,
-      readState,
-    );
-  }
-
-  return withMergedRequests(readState, liveState, readState);
+  return {
+    ...readState,
+    turns: mergedTurns,
+    requests: mergedRequests,
+    ...(hasUpdatedAt ? { updatedAt: mergedUpdatedAt } : {}),
+    latestModel: liveState.latestModel ?? readState.latestModel,
+    latestReasoningEffort:
+      liveState.latestReasoningEffort ?? readState.latestReasoningEffort,
+    latestCollaborationMode:
+      liveState.latestCollaborationMode ?? readState.latestCollaborationMode,
+  };
 }
 
 function buildModeSignature(
@@ -1039,11 +1034,15 @@ export function App(): React.JSX.Element {
   const conversationState = useMemo(() => {
     const liveConversationState = liveState?.conversationState ?? null;
     const readConversationState = readThreadState?.thread ?? null;
-    if (!liveConversationState) return readConversationState;
-    if (!readConversationState) return liveConversationState;
-    return pickPreferredConversationState(
-      liveConversationState,
+    if (!readConversationState) {
+      return liveConversationState;
+    }
+    if (!liveConversationState) {
+      return readConversationState;
+    }
+    return mergeConversationStateForwardOnly(
       readConversationState,
+      liveConversationState,
     );
   }, [liveState?.conversationState, readThreadState?.thread]);
 

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   UnifiedFeatureAvailability,
   UnifiedFeatureId,
+  UnifiedItem,
 } from "@farfield/unified-surface";
 import { App } from "../src/App";
 
@@ -231,7 +232,7 @@ type UnifiedThreadFixture = {
   turns: Array<{
     id: string;
     status: string;
-    items: [];
+    items: UnifiedItem[];
   }>;
   requests: Array<{
     id: string;
@@ -339,6 +340,7 @@ function buildConversationStateFixture(
     provider?: ProviderId;
     latestReasoningEffort?: string | null;
     collaborationModeReasoningEffort?: string | null;
+    turnItems?: UnifiedItem[];
   },
 ): UnifiedThreadFixture {
   const includePendingRequest = options?.includePendingRequest ?? false;
@@ -354,7 +356,7 @@ function buildConversationStateFixture(
       {
         id: "turn-1",
         status: "completed",
-        items: [],
+        items: options?.turnItems ?? [],
       },
     ],
     requests: includePendingRequest
@@ -941,6 +943,132 @@ describe("App", () => {
     expect(await screen.findByText("Pick one option")).toBeTruthy();
     expect(screen.getByText("Option A")).toBeTruthy();
     expect(screen.getByText("Option B")).toBeTruthy();
+  });
+
+  it("shows command items from read state when live state is newer but missing those items", async () => {
+    const threadId = "thread-missing-commands";
+    const commandItem: UnifiedItem = {
+      id: "command-1",
+      type: "commandExecution",
+      command: "bun run test",
+      status: "completed",
+      aggregatedOutput: "ok",
+      exitCode: 0,
+      durationMs: 123,
+    };
+
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: threadId,
+          provider: "codex",
+          preview: "thread preview",
+          createdAt: 1700000000,
+          updatedAt: 1700000500,
+          cwd: "/tmp/project",
+          source: "codex",
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    readThreadResolver = (targetThreadId: string) => ({
+      ok: true,
+      thread: buildConversationStateFixture(targetThreadId, "gpt-old-codex", {
+        updatedAt: 1700000000,
+        turnItems: [commandItem],
+      }),
+    });
+
+    liveStateResolver = (targetThreadId: string, _provider: ProviderId) => ({
+      kind: "readLiveState",
+      threadId: targetThreadId,
+      ownerClientId: "client-1",
+      conversationState: buildConversationStateFixture(
+        targetThreadId,
+        "gpt-old-codex",
+        {
+          updatedAt: 1700000500,
+          turnItems: [],
+        },
+      ),
+      liveStateError: null,
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("bun run test")).toBeTruthy();
+  });
+
+  it("shows command items from live state when they extend the same active turn", async () => {
+    const threadId = "thread-live-extends-turn";
+    const commandItem: UnifiedItem = {
+      id: "command-live-1",
+      type: "commandExecution",
+      command: "bun run lint",
+      status: "inProgress",
+      aggregatedOutput: "",
+      exitCode: null,
+      durationMs: null,
+    };
+
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: threadId,
+          provider: "codex",
+          preview: "thread preview",
+          createdAt: 1700000000,
+          updatedAt: 1700000500,
+          cwd: "/tmp/project",
+          source: "codex",
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    readThreadResolver = (targetThreadId: string) => ({
+      ok: true,
+      thread: buildConversationStateFixture(targetThreadId, "gpt-old-codex", {
+        updatedAt: 1700000000,
+        turnItems: [],
+      }),
+    });
+
+    liveStateResolver = (targetThreadId: string, _provider: ProviderId) => ({
+      kind: "readLiveState",
+      threadId: targetThreadId,
+      ownerClientId: "client-1",
+      conversationState: buildConversationStateFixture(
+        targetThreadId,
+        "gpt-old-codex",
+        {
+          updatedAt: 1700000500,
+          turnItems: [commandItem],
+        },
+      ),
+      liveStateError: null,
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("bun run lint")).toBeTruthy();
   });
 
   it("shows model default effort when thread effort fields are unset", async () => {
