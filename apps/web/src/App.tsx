@@ -432,6 +432,78 @@ function turnIdentity(
   return turn.id ?? turn.turnId ?? "";
 }
 
+function mergeTurnItemsForwardOnly(
+  readTurn: ConversationTurn,
+  liveTurn: ConversationTurn,
+): ConversationTurn["items"] {
+  const readItems = readTurn.items;
+  const liveItems = liveTurn.items;
+
+  if (liveItems.length === 0) {
+    return readItems;
+  }
+  if (readItems.length === 0) {
+    return liveItems;
+  }
+
+  const mergedItems = [...readItems];
+  const indexByItemId = new Map<string, number>();
+  let changed = false;
+
+  for (let index = 0; index < mergedItems.length; index += 1) {
+    const item = mergedItems[index];
+    if (!item) {
+      continue;
+    }
+    indexByItemId.set(item.id, index);
+  }
+
+  for (const liveItem of liveItems) {
+    const existingIndex = indexByItemId.get(liveItem.id);
+    if (existingIndex === undefined) {
+      indexByItemId.set(liveItem.id, mergedItems.length);
+      mergedItems.push(liveItem);
+      changed = true;
+      continue;
+    }
+
+    const existingItem = mergedItems[existingIndex];
+    if (existingItem !== liveItem) {
+      mergedItems[existingIndex] = liveItem;
+      changed = true;
+    }
+  }
+
+  if (!changed) {
+    return readItems;
+  }
+
+  return mergedItems;
+}
+
+function mergeTurnForwardOnly(
+  readTurn: ConversationTurn,
+  liveTurn: ConversationTurn,
+): ConversationTurn {
+  const mergedItems = mergeTurnItemsForwardOnly(readTurn, liveTurn);
+  const mergedStatus =
+    isTurnInProgressStatus(liveTurn.status) &&
+    !isTurnInProgressStatus(readTurn.status)
+      ? readTurn.status
+      : liveTurn.status;
+
+  if (mergedItems === readTurn.items && mergedStatus === readTurn.status) {
+    return readTurn;
+  }
+
+  return {
+    ...readTurn,
+    ...liveTurn,
+    status: mergedStatus,
+    items: mergedItems,
+  };
+}
+
 function mergeUserInputRequests(
   readState: NonNullable<ReadThreadResponse["thread"]>,
   liveState: NonNullable<ReadThreadResponse["thread"]>,
@@ -501,20 +573,32 @@ function overlayLiveTurns(
     }
   }
 
+  const mergedTurns: NonNullable<ReadThreadResponse["thread"]>["turns"] = [];
+  let changed = false;
+
+  for (let index = 0; index < sharedLength; index += 1) {
+    const readTurn = readTurns[index];
+    const liveTurn = liveTurns[index];
+    if (!readTurn || !liveTurn) {
+      continue;
+    }
+    const mergedTurn = mergeTurnForwardOnly(readTurn, liveTurn);
+    if (mergedTurn !== readTurn) {
+      changed = true;
+    }
+    mergedTurns.push(mergedTurn);
+  }
+
   if (liveTurns.length > readTurns.length) {
-    return [...readTurns, ...liveTurns.slice(readTurns.length)];
+    mergedTurns.push(...liveTurns.slice(readTurns.length));
+    changed = true;
   }
 
-  const readLastTurn = readTurns[readTurns.length - 1];
-  const liveLastTurn = liveTurns[liveTurns.length - 1];
-  if (!readLastTurn || !liveLastTurn) {
-    return readTurns;
-  }
-  if (liveLastTurn.items.length <= readLastTurn.items.length) {
+  if (!changed && mergedTurns.length === readTurns.length) {
     return readTurns;
   }
 
-  return [...readTurns.slice(0, -1), liveLastTurn];
+  return mergedTurns;
 }
 
 function mergeConversationStateForwardOnly(

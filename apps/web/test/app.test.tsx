@@ -1071,6 +1071,80 @@ describe("App", () => {
     expect(await screen.findByText("bun run lint")).toBeTruthy();
   });
 
+  it("keeps read command items when live turn is longer but omits those command entries", async () => {
+    const threadId = "thread-live-longer-but-missing-command";
+    const commandItem: UnifiedItem = {
+      id: "command-keep-1",
+      type: "commandExecution",
+      command: "git status --short",
+      status: "completed",
+      aggregatedOutput: " M apps/web/src/App.tsx",
+      exitCode: 0,
+      durationMs: 44,
+    };
+
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: threadId,
+          provider: "codex",
+          preview: "thread preview",
+          createdAt: 1700000000,
+          updatedAt: 1700000500,
+          cwd: "/tmp/project",
+          source: "codex",
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    readThreadResolver = (targetThreadId: string) => ({
+      ok: true,
+      thread: buildConversationStateFixture(targetThreadId, "gpt-old-codex", {
+        updatedAt: 1700000000,
+        turnItems: [commandItem],
+      }),
+    });
+
+    liveStateResolver = (targetThreadId: string, _provider: ProviderId) => ({
+      kind: "readLiveState",
+      threadId: targetThreadId,
+      ownerClientId: "client-1",
+      conversationState: buildConversationStateFixture(
+        targetThreadId,
+        "gpt-old-codex",
+        {
+          updatedAt: 1700000500,
+          turnItems: [
+            {
+              id: "agent-1",
+              type: "agentMessage",
+              text: "Update 1",
+            },
+            {
+              id: "agent-2",
+              type: "agentMessage",
+              text: "Update 2",
+            },
+          ],
+        },
+      ),
+      liveStateError: null,
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("git status --short")).toBeTruthy();
+  });
+
   it("shows model default effort when thread effort fields are unset", async () => {
     const threadId = "thread-effort-default";
     const modelId = "gpt-5.3-codex";
