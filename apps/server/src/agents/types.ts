@@ -118,6 +118,7 @@ export interface AgentDescriptor {
   connected: boolean;
   capabilities: AgentCapabilities;
   projectDirectories: string[];
+  projectLabels: Record<string, string>;
 }
 
 export interface AgentAdapter {

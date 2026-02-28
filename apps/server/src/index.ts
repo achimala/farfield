@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { AppServerRpcError, type SendRequestOptions } from "@farfield/api";
 import type { IpcFrame, IpcRequestFrame } from "@farfield/protocol";
+import { z } from "zod";
 import {
   InterruptBodySchema,
   AgentScopedQuerySchema,
@@ -38,6 +39,13 @@ const IPC_RECONNECT_DELAY_MS = 1_000;
 
 const TRACE_DIR = path.resolve(process.cwd(), "traces");
 const DEFAULT_WORKSPACE = path.resolve(process.cwd());
+const CODEX_GLOBAL_STATE_PATH = path.join(os.homedir(), ".codex", ".codex-global-state.json");
+
+const CodexGlobalStateSchema = z
+  .object({
+    "electron-workspace-root-labels": z.record(z.string()).default({})
+  })
+  .passthrough();
 
 interface HistoryEntry {
   id: string;
@@ -105,6 +113,27 @@ function resolveGitCommitHash(): string | null {
     return hash.length > 0 ? hash : null;
   } catch {
     return null;
+  }
+}
+
+function readCodexWorkspaceRootLabels(): Record<string, string> {
+  try {
+    if (!fs.existsSync(CODEX_GLOBAL_STATE_PATH)) {
+      return {};
+    }
+
+    const rawState = fs.readFileSync(CODEX_GLOBAL_STATE_PATH, "utf8");
+    const parsedState = CodexGlobalStateSchema.parse(JSON.parse(rawState));
+    return parsedState["electron-workspace-root-labels"];
+  } catch (error) {
+    logger.warn(
+      {
+        path: CODEX_GLOBAL_STATE_PATH,
+        error: toErrorMessage(error)
+      },
+      "codex-workspace-labels-read-failed"
+    );
+    return {};
   }
 }
 
@@ -382,14 +411,19 @@ for (const agentId of configuredAgentIds) {
 
 const registry = new AgentRegistry(adapters);
 
-function buildAgentDescriptor(adapter: AgentAdapter, projectDirectories: string[]): AgentDescriptor {
+function buildAgentDescriptor(
+  adapter: AgentAdapter,
+  projectDirectories: string[],
+  projectLabels: Record<string, string>
+): AgentDescriptor {
   return {
     id: adapter.id,
     label: adapter.label,
     enabled: adapter.isEnabled(),
     connected: adapter.isConnected(),
     capabilities: adapter.capabilities,
-    projectDirectories
+    projectDirectories,
+    projectLabels
   };
 }
 
@@ -561,15 +595,17 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && pathname === "/api/agents") {
+      const codexWorkspaceRootLabels = codexAdapter ? readCodexWorkspaceRootLabels() : {};
       const descriptors = await Promise.all(
         registry.listAdapters().map(async (adapter) => {
+          const projectLabels = adapter.id === "codex" ? codexWorkspaceRootLabels : {};
           if (!adapter.listProjectDirectories || !adapter.isConnected()) {
-            return buildAgentDescriptor(adapter, []);
+            return buildAgentDescriptor(adapter, [], projectLabels);
           }
 
           try {
             const projectDirectories = await adapter.listProjectDirectories();
-            return buildAgentDescriptor(adapter, projectDirectories);
+            return buildAgentDescriptor(adapter, projectDirectories, projectLabels);
           } catch (error) {
             logger.warn(
               {
@@ -578,7 +614,7 @@ const server = http.createServer(async (req, res) => {
               },
               "agent-project-directory-list-failed"
             );
-            return buildAgentDescriptor(adapter, []);
+            return buildAgentDescriptor(adapter, [], projectLabels);
           }
         })
       );
