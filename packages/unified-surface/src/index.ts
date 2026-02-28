@@ -489,9 +489,9 @@ export const UnifiedThreadSchema = z
     createdAt: NonNegativeIntSchema.optional(),
     updatedAt: NonNegativeIntSchema.optional(),
     title: NullableStringSchema.optional(),
-    latestCollaborationMode: z.union([UnifiedLatestCollaborationModeSchema, z.null()]).optional(),
-    latestModel: NullableStringSchema.optional(),
-    latestReasoningEffort: NullableStringSchema.optional(),
+    latestCollaborationMode: z.union([UnifiedLatestCollaborationModeSchema, z.null()]),
+    latestModel: NullableStringSchema,
+    latestReasoningEffort: NullableStringSchema,
     cwd: z.string().optional(),
     source: z.string().optional()
   })

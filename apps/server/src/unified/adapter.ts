@@ -618,43 +618,33 @@ function mapThread(
       ? { updatedAt: normalizeUnixTimestampSeconds(thread.updatedAt) }
       : {}),
     ...(thread.title !== undefined ? { title: thread.title } : {}),
-    ...(thread.latestCollaborationMode !== undefined
+    latestCollaborationMode: thread.latestCollaborationMode
       ? {
-          latestCollaborationMode: thread.latestCollaborationMode
-            ? {
-                mode: thread.latestCollaborationMode.mode,
-                settings: {
-                  ...(thread.latestCollaborationMode.settings.model !==
-                  undefined
-                    ? { model: thread.latestCollaborationMode.settings.model }
-                    : {}),
-                  ...(thread.latestCollaborationMode.settings
-                    .reasoning_effort !== undefined
-                    ? {
-                        reasoningEffort:
-                          thread.latestCollaborationMode.settings
-                            .reasoning_effort,
-                      }
-                    : {}),
-                  ...(thread.latestCollaborationMode.settings
-                    .developer_instructions !== undefined
-                    ? {
-                        developerInstructions:
-                          thread.latestCollaborationMode.settings
-                            .developer_instructions,
-                      }
-                    : {}),
-                },
-              }
-            : null,
+          mode: thread.latestCollaborationMode.mode,
+          settings: {
+            ...(thread.latestCollaborationMode.settings.model !== undefined
+              ? { model: thread.latestCollaborationMode.settings.model }
+              : {}),
+            ...(thread.latestCollaborationMode.settings.reasoning_effort !==
+            undefined
+              ? {
+                  reasoningEffort:
+                    thread.latestCollaborationMode.settings.reasoning_effort,
+                }
+              : {}),
+            ...(thread.latestCollaborationMode.settings
+              .developer_instructions !== undefined
+              ? {
+                  developerInstructions:
+                    thread.latestCollaborationMode.settings
+                      .developer_instructions,
+                }
+              : {}),
+          },
         }
-      : {}),
-    ...(thread.latestModel !== undefined
-      ? { latestModel: thread.latestModel }
-      : {}),
-    ...(thread.latestReasoningEffort !== undefined
-      ? { latestReasoningEffort: thread.latestReasoningEffort }
-      : {}),
+      : null,
+    latestModel: thread.latestModel ?? null,
+    latestReasoningEffort: thread.latestReasoningEffort ?? null,
     ...(thread.cwd ? { cwd: thread.cwd } : {}),
     ...(thread.source ? { source: thread.source } : {}),
   };
