@@ -203,6 +203,7 @@ if (parsedCli.showHelp) {
 }
 
 const configuredAgentIds = parsedCli.agentIds;
+const configuredUnifiedProviders: UnifiedProviderId[] = [...configuredAgentIds];
 const codexExecutable = resolveCodexExecutablePath();
 const ipcSocketPath = resolveIpcSocketPath();
 const gitCommit = resolveGitCommitHash();
@@ -326,7 +327,7 @@ function resolveUnifiedAdapter(provider: UnifiedProviderId) {
 }
 
 function listUnifiedProviders(): UnifiedProviderId[] {
-  return ["codex", "opencode"];
+  return configuredUnifiedProviders;
 }
 
 function buildUnifiedProviderStateEvents(): UnifiedEvent[] {
