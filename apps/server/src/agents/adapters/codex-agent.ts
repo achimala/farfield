@@ -407,6 +407,45 @@ export class CodexAgentAdapter implements AgentAdapter {
       throw new Error("Message text is required");
     }
 
+    const ownerClientId = (() => {
+      const mapped = this.threadOwnerById.get(input.threadId);
+      if (mapped && mapped.trim().length > 0) {
+        return mapped.trim();
+      }
+      if (input.ownerClientId && input.ownerClientId.trim().length > 0) {
+        return input.ownerClientId.trim();
+      }
+      if (this.lastKnownOwnerClientId && this.lastKnownOwnerClientId.trim()) {
+        return this.lastKnownOwnerClientId.trim();
+      }
+      return null;
+    })();
+
+    if (ownerClientId && this.isIpcReady()) {
+      this.threadOwnerById.set(input.threadId, ownerClientId);
+      try {
+        await this.service.sendMessage({
+          threadId: input.threadId,
+          ownerClientId,
+          text,
+          ...(input.cwd ? { cwd: input.cwd } : {}),
+          ...(typeof input.isSteering === "boolean"
+            ? { isSteering: input.isSteering }
+            : {}),
+        });
+        return;
+      } catch (error) {
+        logger.warn(
+          {
+            threadId: input.threadId,
+            ownerClientId,
+            error: toErrorMessage(error),
+          },
+          "codex-thread-follower-send-message-failed",
+        );
+      }
+    }
+
     const sendTurn = async (): Promise<void> => {
       if (input.isSteering === true) {
         const activeTurnId = await this.getActiveTurnId(input.threadId);

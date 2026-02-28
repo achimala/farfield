@@ -2298,7 +2298,14 @@ export function App(): React.JSX.Element {
           selectedThreadIdRef.current = threadId;
         }
 
-        await sendMessage({ provider: threadAgentId, threadId, text: draft });
+        await sendMessage({
+          provider: threadAgentId,
+          threadId,
+          text: draft,
+          ...(liveState?.ownerClientId
+            ? { ownerClientId: liveState.ownerClientId }
+            : {}),
+        });
         await refreshAll();
       } catch (e) {
         setError(toErrorMessage(e));
@@ -2310,6 +2317,7 @@ export function App(): React.JSX.Element {
       activeThreadAgentId,
       canSendMessageForActiveAgent,
       hasResolvedSelectedThreadProvider,
+      liveState?.ownerClientId,
       refreshAll,
       selectedAgentId,
       selectedThreadId,
