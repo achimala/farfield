@@ -13,7 +13,6 @@ import {
   Bug,
   Circle,
   CircleDot,
-  Columns2,
   Folder,
   FolderOpen,
   Github,
@@ -590,7 +589,6 @@ export function App(): React.JSX.Element {
     () => readProjectColors()
   );
   const [rateLimits, setRateLimits] = useState<AppServerGetAccountRateLimitsResponse | null>(null);
-  const [diffPanelOpen, setDiffPanelOpen] = useState(false);
   const [dragOverGroupKey, setDragOverGroupKey] = useState<string | null>(null);
   const [draggedGroupKey, setDraggedGroupKey] = useState<string | null>(null);
 
@@ -779,6 +777,7 @@ export function App(): React.JSX.Element {
   const canListModels = Boolean(activeAgentCapabilities?.canListModels);
   const canListCollaborationModes = Boolean(activeAgentCapabilities?.canListCollaborationModes);
   const canSubmitUserInputForActiveAgent = Boolean(activeAgentCapabilities?.canSubmitUserInput);
+  const showUsageBadges = activeThreadAgentId === "codex";
 
   const planModeOption = useMemo(
     () => modes.find((mode) => isPlanModeOption(mode)) ?? null,
@@ -2150,7 +2149,7 @@ export function App(): React.JSX.Element {
           </div>
 
           <div className="flex items-center gap-0.5 shrink-0">
-            {rateLimits && (() => {
+            {showUsageBadges && rateLimits && (() => {
               const rl = rateLimits.rateLimits;
               const windows: Array<{ label: string; usedPct: number; resetAt: number | null }> = [];
               if (rl.primary) {
@@ -2201,7 +2200,7 @@ export function App(): React.JSX.Element {
                 </div>
               );
             })()}
-            {sessionTokenUsage && (() => {
+            {showUsageBadges && sessionTokenUsage && (() => {
               const { contextTokens, sessionTotalTokens, contextWindow } = sessionTokenUsage;
               const usedPct = contextWindow && contextWindow > 0
                 ? Math.round(contextTokens / contextWindow * 100)
@@ -2228,12 +2227,12 @@ export function App(): React.JSX.Element {
                     <TooltipTrigger asChild>
                       <span className={`inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-muted/50 ${color}`}>
                         <Activity size={9} />
-                        {windowLabel ? `${contextLabel}/${windowLabel}` : contextLabel}
+                        Chat {windowLabel ? `${contextLabel}/${windowLabel}` : contextLabel}
                       </span>
                     </TooltipTrigger>
                     <TooltipContent>
                       <div className="text-xs space-y-0.5">
-                        <div className="font-medium">Context</div>
+                        <div className="font-medium">Current chat</div>
                         <div>{contextLabel} tokens in current context</div>
                         {windowLabel && (
                           <div className="text-muted-foreground">
@@ -2254,15 +2253,6 @@ export function App(): React.JSX.Element {
                 </div>
               );
             })()}
-            {activeTab === "chat" && selectedThread?.agentId === "codex" && (
-              <IconBtn
-                onClick={() => setDiffPanelOpen((v) => !v)}
-                active={diffPanelOpen}
-                title="Diff panel"
-              >
-                <Columns2 size={14} />
-              </IconBtn>
-            )}
             <IconBtn
               onClick={() => void refreshAll()}
               disabled={isBusy}
@@ -2335,7 +2325,7 @@ export function App(): React.JSX.Element {
         {/* ── Chat tab ──────────────────────────────────────── */}
         {activeTab === "chat" && (
           <div className="relative flex-1 flex min-h-0">
-            <div className={`relative flex-1 flex flex-col min-h-0 ${diffPanelOpen && selectedThread?.agentId === "codex" ? "md:w-[60%]" : "w-full"}`}>
+            <div className="relative flex-1 flex flex-col min-h-0 w-full">
             <div
               aria-hidden="true"
               className="pointer-events-none absolute inset-x-0 -top-4 z-10 h-[5.5rem] bg-gradient-to-b from-background from-52% via-background/78 via-82% to-transparent to-100%"
@@ -2577,85 +2567,6 @@ export function App(): React.JSX.Element {
               </div>
             </div>
           </div>
-
-          {/* Diff panel */}
-            {diffPanelOpen && selectedThread?.agentId === "codex" && (
-              <div className="hidden md:flex w-[40%] border-l border-border flex-col min-h-0 overflow-hidden">
-                <div className="flex items-center justify-between px-4 py-2.5 border-b border-border shrink-0">
-                  <span className="text-xs font-medium">Changes</span>
-                  <Button
-                    type="button"
-                    onClick={() => setDiffPanelOpen(false)}
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 text-muted-foreground hover:text-foreground"
-                  >
-                    <X size={12} />
-                  </Button>
-                </div>
-                <div className="flex-1 overflow-y-auto p-3">
-                  {(() => {
-                    const allChanges: Array<{ path: string; kindType: string; diff: string | undefined }> = [];
-                    for (const turn of turns) {
-                      for (const item of turn.items ?? []) {
-                        if (item.type === "fileChange") {
-                          for (const change of item.changes) {
-                            allChanges.push({
-                              path: change.path,
-                              kindType: change.kind.type,
-                              diff: change.diff
-                            });
-                          }
-                        }
-                      }
-                    }
-                    if (allChanges.length === 0) {
-                      return (
-                        <div className="text-xs text-muted-foreground text-center py-8">
-                          No file changes in this thread
-                        </div>
-                      );
-                    }
-                    return (
-                      <div className="space-y-1.5">
-                        {allChanges.map((change, i) => {
-                          const fileName = change.path.split("/").pop() ?? change.path;
-                          const isCreate = change.kindType === "create";
-                          const isDelete = change.kindType === "delete";
-                          return (
-                            <div
-                              key={`${change.path}-${i}`}
-                              className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs hover:bg-muted/60 transition-colors"
-                            >
-                              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                                isCreate ? "bg-success" : isDelete ? "bg-danger" : "bg-blue-400"
-                              }`} />
-                              <span className="font-mono truncate text-foreground/80">{fileName}</span>
-                              {change.diff && (
-                                <span className="ml-auto text-[10px] text-muted-foreground/50">
-                                  {change.diff.split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++")).length}+
-                                  {" "}
-                                  {change.diff.split("\n").filter((l) => l.startsWith("-") && !l.startsWith("---")).length}−
-                                </span>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    );
-                  })()}
-                </div>
-              </div>
-            )}
-
-            {/* OpenCode diff-not-available */}
-            {diffPanelOpen && selectedThread && selectedThread.agentId !== "codex" && (
-              <div className="hidden md:flex w-[40%] border-l border-border items-center justify-center">
-                <div className="text-xs text-muted-foreground text-center px-6">
-                  Diff panel is not available for this agent yet
-                </div>
-              </div>
-            )}
           </div>
         )}
 
