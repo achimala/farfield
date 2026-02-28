@@ -1,5 +1,3 @@
-import fs from "node:fs";
-import path from "node:path";
 import {
   AppServerClient,
   AppServerRpcError,
@@ -7,14 +5,12 @@ import {
   CodexMonitorService,
   DesktopIpcClient,
   reduceThreadStreamEvents,
-  ThreadStreamReductionError,
   type SendRequestOptions,
 } from "@farfield/api";
 import {
   parseThreadConversationState,
   parseThreadStreamStateChangedBroadcast,
   parseUserInputResponsePayload,
-  ProtocolValidationError,
   type IpcFrame,
   type IpcRequestFrame,
   type IpcResponseFrame,
@@ -66,9 +62,6 @@ export interface CodexAgentOptions {
 }
 
 const ANSI_ESCAPE_REGEX = /\u001B\[[0-?]*[ -/]*[@-~]/g;
-const INVALID_STREAM_EVENTS_LOG_PATH =
-  process.env["FARFIELD_INVALID_STREAM_LOG_PATH"] ??
-  path.resolve(process.cwd(), "invalid-thread-stream-events.jsonl");
 
 export class CodexAgentAdapter implements AgentAdapter {
   public readonly id = "codex";
@@ -94,7 +87,6 @@ export class CodexAgentAdapter implements AgentAdapter {
     string,
     ThreadConversationState
   >();
-  private readonly reductionErrorSignatureByThreadId = new Map<string, string>();
   private readonly threadTitleById = new Map<string, string | null>();
   private readonly ipcFrameListeners = new Set<
     (event: CodexIpcFrameEvent) => void
@@ -123,10 +115,6 @@ export class CodexAgentAdapter implements AgentAdapter {
       cwd: options.workspaceDir,
       onStderr: (line) => {
         const normalized = normalizeStderrLine(line);
-        if (isKnownBenignAppServerStderr(normalized)) {
-          logger.debug({ line: normalized }, "codex-app-server-stderr-ignored");
-          return;
-        }
         logger.error({ line: normalized }, "codex-app-server-stderr");
       },
     });
@@ -202,17 +190,14 @@ export class CodexAgentAdapter implements AgentAdapter {
         this.threadOwnerById.set(conversationId, sourceClientId);
       }
 
+      const parsedBroadcast = parseThreadStreamStateChangedBroadcast(frame);
+
       const current = this.streamEventsByThreadId.get(conversationId) ?? [];
       current.push(frame);
       if (current.length > 400) {
         current.splice(0, current.length - 400);
       }
       this.streamEventsByThreadId.set(conversationId, current);
-
-      const parsedBroadcast = parseIncomingThreadStreamBroadcast(frame);
-      if (!parsedBroadcast) {
-        return;
-      }
 
       if (parsedBroadcast.params.change.type !== "snapshot") {
         return;
@@ -548,43 +533,9 @@ export class CodexAgentAdapter implements AgentAdapter {
 
     const events: ReturnType<typeof parseThreadStreamStateChangedBroadcast>[] =
       [];
-    const validRawEvents: IpcFrame[] = [];
-    let invalidEventCount = 0;
-    let firstInvalidEventError: string | null = null;
-    let firstInvalidEventMessage: string | null = null;
 
     for (const event of rawEvents) {
-      try {
-        events.push(parseThreadStreamStateChangedBroadcast(event));
-        validRawEvents.push(event);
-      } catch (error) {
-        invalidEventCount += 1;
-        if (!firstInvalidEventError) {
-          firstInvalidEventError = toErrorMessage(error);
-          firstInvalidEventMessage = formatInvalidStreamEventMessage(
-            threadId,
-            event,
-            error,
-          );
-          logger.warn(firstInvalidEventMessage);
-          writeInvalidStreamEventDetail({
-            threadId,
-            error: firstInvalidEventError,
-            ...(error instanceof ProtocolValidationError
-              ? { issues: error.issues }
-              : {}),
-            frame: describeFrame(event),
-            loggedAt: new Date().toISOString(),
-          });
-        }
-      }
-    }
-
-    if (invalidEventCount > 0) {
-      logger.warn(
-        `[stream-mismatch-summary] thread=${threadId} pruned=${String(invalidEventCount)} total=${String(rawEvents.length)}${firstInvalidEventMessage ? ` first="${firstInvalidEventMessage}"` : ""}`,
-      );
-      this.streamEventsByThreadId.set(threadId, validRawEvents);
+      events.push(parseThreadStreamStateChangedBroadcast(event));
     }
 
     if (events.length === 0) {
@@ -602,99 +553,23 @@ export class CodexAgentAdapter implements AgentAdapter {
       snapshotState !== null &&
       snapshotState.turns.length > 0;
 
-    try {
-      const reductionInput = canUseSyntheticSnapshot
-        ? [
-            buildSyntheticSnapshotEvent(
-              threadId,
-              ownerClientId ?? "farfield",
-              snapshotState,
-            ),
-            ...reductionEvents,
-          ]
-        : reductionEvents;
-      const reduced = reduceThreadStreamEvents(reductionInput);
-      const state = reduced.get(threadId);
-      this.reductionErrorSignatureByThreadId.delete(threadId);
-      return {
-        ownerClientId: state?.ownerClientId ?? ownerClientId ?? null,
-        conversationState: state?.conversationState ?? snapshotState,
-        liveStateError: null,
-      };
-    } catch (error) {
-      if (canUseSyntheticSnapshot) {
-        try {
-          const reduced = reduceThreadStreamEvents(reductionEvents);
-          const state = reduced.get(threadId);
-          this.reductionErrorSignatureByThreadId.delete(threadId);
-          return {
-            ownerClientId: state?.ownerClientId ?? ownerClientId ?? null,
-            conversationState: state?.conversationState ?? snapshotState,
-            liveStateError: null,
-          };
-        } catch (secondaryError) {
-          const liveStateError = this.logReductionFailure(
+    const reductionInput = canUseSyntheticSnapshot
+      ? [
+          buildSyntheticSnapshotEvent(
             threadId,
-            reductionEvents.length,
-            secondaryError,
-          );
-          return {
-            ownerClientId,
-            conversationState: snapshotState,
-            liveStateError,
-          };
-        }
-      }
-
-      const liveStateError = this.logReductionFailure(
-        threadId,
-        reductionEvents.length,
-        error,
-      );
-      return {
-        ownerClientId,
-        conversationState: snapshotState,
-        liveStateError,
-      };
-    }
-  }
-
-  private logReductionFailure(
-    threadId: string,
-    eventCount: number,
-    error: unknown,
-  ): NonNullable<AgentThreadLiveState["liveStateError"]> {
-      const details =
-        error instanceof ThreadStreamReductionError
-          ? {
-              threadId: error.details.threadId,
-              eventIndex: error.details.eventIndex,
-              patchIndex: error.details.patchIndex,
-            }
-          : null;
-
-      const signature = details
-        ? `${details.threadId}:${String(details.eventIndex)}:${String(details.patchIndex)}:${toErrorMessage(error)}`
-        : toErrorMessage(error);
-      const previous = this.reductionErrorSignatureByThreadId.get(threadId);
-      if (previous !== signature) {
-        this.reductionErrorSignatureByThreadId.set(threadId, signature);
-        logger.warn(
-          {
-            threadId,
-            eventCount,
-            error: toErrorMessage(error),
-            details,
-          },
-          "codex-thread-stream-reduction-skipped",
-        );
-      }
-
-      return buildLiveStateReductionError(
-        toErrorMessage(error),
-        details?.eventIndex ?? null,
-        details?.patchIndex ?? null,
-      );
+            ownerClientId ?? "farfield",
+            snapshotState,
+          ),
+          ...reductionEvents,
+        ]
+      : reductionEvents;
+    const reduced = reduceThreadStreamEvents(reductionInput);
+    const state = reduced.get(threadId);
+    return {
+      ownerClientId: state?.ownerClientId ?? ownerClientId ?? null,
+      conversationState: state?.conversationState ?? snapshotState,
+      liveStateError: null,
+    };
   }
 
   public async readStreamEvents(
@@ -1061,19 +936,6 @@ function toErrorMessage(error: Error | string | unknown): string {
   return String(error);
 }
 
-function buildLiveStateReductionError(
-  message: string,
-  eventIndex: number | null,
-  patchIndex: number | null,
-): NonNullable<AgentThreadLiveState["liveStateError"]> {
-  return {
-    kind: "reductionFailed",
-    message,
-    eventIndex,
-    patchIndex,
-  };
-}
-
 const INVALID_REQUEST_ERROR_CODE = -32600;
 
 export function isInvalidRequestAppServerRpcError(
@@ -1087,40 +949,6 @@ export function isInvalidRequestAppServerRpcError(
 
 function normalizeStderrLine(line: string): string {
   return line.replace(ANSI_ESCAPE_REGEX, "").trim();
-}
-
-function describeFrame(frame: IpcFrame): string {
-  if (frame.type === "broadcast" || frame.type === "request") {
-    return `${frame.type}:${frame.method}`;
-  }
-  if (frame.type === "response") {
-    return `response:${frame.method ?? "unknown"}`;
-  }
-  return frame.type;
-}
-
-function formatInvalidStreamEventMessage(
-  threadId: string,
-  event: IpcFrame,
-  error: unknown,
-): string {
-  const frame = describeFrame(event);
-  if (error instanceof ProtocolValidationError) {
-    return `[stream-mismatch] thread=${threadId} frame=${frame} issues=${formatIssueList(error.issues)}`;
-  }
-  return `[stream-mismatch] thread=${threadId} frame=${frame} error=${toErrorMessage(error)}`;
-}
-
-function formatIssueList(issues: string[]): string {
-  if (issues.length === 0) {
-    return "unknown";
-  }
-  const maxIssues = 4;
-  const visible = issues.slice(0, maxIssues).join(" | ");
-  if (issues.length <= maxIssues) {
-    return visible;
-  }
-  return `${visible} | +${String(issues.length - maxIssues)} more`;
 }
 
 function isThreadStateGenerating(state: ThreadConversationState): boolean {
@@ -1146,16 +974,6 @@ function isThreadStateGenerating(state: ThreadConversationState): boolean {
   }
 
   return false;
-}
-
-function parseIncomingThreadStreamBroadcast(
-  frame: IpcFrame,
-): ThreadStreamStateChangedBroadcast | null {
-  try {
-    return parseThreadStreamStateChangedBroadcast(frame);
-  } catch {
-    return null;
-  }
 }
 
 function buildSyntheticSnapshotEvent(
@@ -1202,31 +1020,6 @@ function trimThreadStreamEventsForReduction(
     events: events.slice(latestSnapshotIndex),
     hasSnapshot: true,
   };
-}
-
-function isKnownBenignAppServerStderr(line: string): boolean {
-  return (
-    line.includes("codex_core::rollout::list") &&
-    line.includes("state db missing rollout path for thread")
-  );
-}
-
-function writeInvalidStreamEventDetail(detail: Record<string, unknown>): void {
-  try {
-    fs.appendFileSync(
-      INVALID_STREAM_EVENTS_LOG_PATH,
-      JSON.stringify(detail) + "\n",
-      { encoding: "utf8" },
-    );
-  } catch (error) {
-    logger.warn(
-      {
-        path: INVALID_STREAM_EVENTS_LOG_PATH,
-        error: toErrorMessage(error),
-      },
-      "codex-invalid-thread-stream-event-detail-write-failed",
-    );
-  }
 }
 
 function extractThreadId(frame: IpcFrame): string | null {

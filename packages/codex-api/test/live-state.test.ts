@@ -87,7 +87,7 @@ describe("live-state reducer", () => {
     expect(thread?.conversationState?.requests.length).toBe(1);
   });
 
-  it("keeps reducer alive when patches arrive before snapshot", () => {
+  it("throws when patches arrive before snapshot", () => {
     const patchEvent = parseThreadStreamStateChangedBroadcast({
       type: "broadcast",
       method: "thread-stream-state-changed",
@@ -133,11 +133,9 @@ describe("live-state reducer", () => {
       }
     });
 
-    const state = reduceThreadStreamEvents([patchEvent, snapshotEvent]);
-    const thread = state.get("thread-2");
-
-    expect(thread?.conversationState?.id).toBe("thread-2");
-    expect(thread?.conversationState?.turns.length).toBe(0);
+    expect(() => reduceThreadStreamEvents([patchEvent, snapshotEvent])).toThrow(
+      "patch event arrived before snapshot"
+    );
   });
 
   it("throws reduction error with raw payload details when patch introduces invalid item type", () => {

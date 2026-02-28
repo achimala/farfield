@@ -80,6 +80,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { z } from "zod";
 
 /* ── Types ─────────────────────────────────────────────────── */
 type Health = Awaited<ReturnType<typeof getHealth>>;
@@ -598,20 +599,12 @@ function readSidebarCollapsedGroupsFromStorage(): Record<string, boolean> {
     if (!raw) {
       return {};
     }
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return {};
-    }
-    const collapsed: Record<string, boolean> = {};
-    for (const [key, value] of Object.entries(
-      parsed as Record<string, unknown>,
-    )) {
-      if (typeof value === "boolean") {
-        collapsed[key] = value;
-      }
-    }
-    return collapsed;
-  } catch {
+    return z.record(z.boolean()).parse(JSON.parse(raw));
+  } catch (error) {
+    console.error(
+      "Failed to parse sidebar collapsed groups from local storage",
+      error,
+    );
     return {};
   }
 }
@@ -631,8 +624,8 @@ function writeSidebarCollapsedGroupsToStorage(
       SIDEBAR_COLLAPSED_GROUPS_STORAGE_KEY,
       JSON.stringify(value),
     );
-  } catch {
-    // Ignore storage errors.
+  } catch (error) {
+    console.error("Failed to persist sidebar collapsed groups", error);
   }
 }
 
@@ -909,18 +902,13 @@ export function App(): React.JSX.Element {
   }, [agentDescriptors, threads]);
   const conversationState = useMemo(() => {
     const liveConversationState = liveState?.conversationState ?? null;
-    const liveStateError = liveState?.liveStateError ?? null;
-    const canUseLiveConversationState =
-      liveConversationState !== null &&
-      (!liveStateError || liveStateError.kind !== "reductionFailed");
     const readConversationState = readThreadState?.thread ?? null;
-    if (canUseLiveConversationState) {
+    if (liveConversationState !== null) {
       return liveConversationState;
     }
-    return readConversationState ?? liveConversationState;
+    return readConversationState;
   }, [
     liveState?.conversationState,
-    liveState?.liveStateError,
     readThreadState?.thread,
   ]);
 
@@ -1773,6 +1761,11 @@ export function App(): React.JSX.Element {
             JSON.parse(event.data),
           );
           if (!parsedEventResult.success) {
+            setError(
+              `Invalid unified event payload: ${parsedEventResult.error.issues
+                .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+                .join(" | ")}`,
+            );
             refreshCore = true;
           } else {
             const parsedEvent = parsedEventResult.data;
@@ -1801,7 +1794,8 @@ export function App(): React.JSX.Element {
               refreshCore = true;
             }
           }
-        } catch {
+        } catch (error) {
+          setError(`Invalid unified event payload: ${toErrorMessage(error)}`);
           refreshCore = true;
         }
 
@@ -2896,8 +2890,7 @@ export function App(): React.JSX.Element {
                   className="overflow-hidden shrink-0"
                 >
                   <div className="px-4 py-2 bg-amber-500/10 border-b border-amber-500/30 text-sm text-amber-200">
-                    Live updates failed for this thread. Showing saved messages
-                    only.
+                    Live updates failed for this thread.
                     {liveStateReductionError.eventIndex !== null && (
                       <span className="ml-2 text-xs text-amber-300/90">
                         event {liveStateReductionError.eventIndex}

@@ -11,7 +11,6 @@ import {
   UnifiedThreadSchema,
   UnifiedThreadSummarySchema,
   UnifiedUserInputRequestIdSchema,
-  UnifiedUserInputRequestSchema,
   type JsonValue,
   type UnifiedCommand,
   type UnifiedCommandResult,
@@ -336,11 +335,15 @@ function readApiFailure(payload: JsonValue): {
 } {
   const parsed = ApiFailureEnvelopeSchema.safeParse(payload);
   if (!parsed.success) {
-    return {
-      code: null,
-      message: "Request failed",
-      details: undefined,
-    };
+    throw new ApiRequestError(
+      `Invalid API error envelope: ${parsed.error.issues
+        .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+        .join(" | ")}`,
+      {
+        code: "invalidApiErrorEnvelope",
+        details: payload,
+      },
+    );
   }
 
   if (typeof parsed.data.error === "string") {
@@ -873,26 +876,9 @@ export function getPendingUserInputRequests(
     return [];
   }
 
-  const requests: UnifiedUserInputRequest[] = [];
-
-  for (const request of conversationState.requests) {
-    const parsed = UnifiedUserInputRequestSchema.safeParse(request);
-    if (!parsed.success) {
-      continue;
-    }
-
-    if (parsed.data.method !== "item/tool/requestUserInput") {
-      continue;
-    }
-
-    if (parsed.data.completed === true) {
-      continue;
-    }
-
-    requests.push(parsed.data);
-  }
-
-  return requests;
+  return conversationState.requests.filter(
+    (request) => request.completed !== true,
+  );
 }
 
 export async function listFeatureMatrix(): Promise<

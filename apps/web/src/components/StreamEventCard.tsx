@@ -40,9 +40,14 @@ export function StreamEventCard({
 
   const parsed = StreamEventSchema.safeParse(event);
   if (!parsed.success) {
+    const issues = parsed.error.issues
+      .map((issue) =>
+        `${issue.path.length > 0 ? issue.path.join(".") : "(root)"}: ${issue.message}`,
+      )
+      .join(" | ");
     return (
-      <div className="text-xs font-mono text-muted-foreground px-2 py-1.5 rounded-md border border-border">
-        {typeof event === "string" ? event : JSON.stringify(event)}
+      <div className="text-xs font-mono text-red-500 px-2 py-1.5 rounded-md border border-red-300/60 bg-red-50/40 dark:bg-red-950/20">
+        {`Invalid stream event payload: ${issues}`}
       </div>
     );
   }

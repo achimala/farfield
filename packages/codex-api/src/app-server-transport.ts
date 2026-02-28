@@ -88,25 +88,8 @@ export class ChildProcessAppServerTransport implements AppServerTransport {
         return;
       }
 
-      let raw: unknown;
-      try {
-        raw = JSON.parse(trimmed);
-      } catch {
-        this.rejectAll(new AppServerTransportError("app-server returned invalid JSON"));
-        return;
-      }
-
-      let message;
-      try {
-        message = parseJsonRpcIncomingMessage(raw);
-      } catch (error) {
-        this.rejectAll(
-          new AppServerTransportError(
-            `app-server response schema mismatch: ${error instanceof Error ? error.message : String(error)}`
-          )
-        );
-        return;
-      }
+      const raw = JSON.parse(trimmed);
+      const message = parseJsonRpcIncomingMessage(raw);
 
       if (message.kind === "notification") {
         return;
@@ -141,11 +124,7 @@ export class ChildProcessAppServerTransport implements AppServerTransport {
         return;
       }
 
-      try {
-        this.onStderr?.(trimmed);
-      } catch {
-        // Never fail protocol requests because of stderr log handling.
-      }
+      this.onStderr?.(trimmed);
     });
 
     this.process = child;

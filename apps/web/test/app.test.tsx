@@ -935,7 +935,7 @@ describe("App", () => {
     expect(latestObservedModel).toBe("gpt-new-codex");
   }, 15000);
 
-  it("keeps pending user input visible when live reduction fails and read has pending request", async () => {
+  it("uses live pending requests when live reduction fails", async () => {
     const threadId = "thread-with-request";
 
     threadsFixture = {
@@ -991,12 +991,13 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Pick one option")).toBeTruthy();
-    expect(screen.getByText("Option A")).toBeTruthy();
-    expect(screen.getByText("Option B")).toBeTruthy();
+    expect(await screen.findByText("Live updates failed for this thread.")).toBeTruthy();
+    expect(screen.queryByText("Pick one option")).toBeNull();
+    expect(screen.queryByText("Option A")).toBeNull();
+    expect(screen.queryByText("Option B")).toBeNull();
   });
 
-  it("shows command items from read state when live reduction fails", async () => {
+  it("uses live turn items when live reduction fails", async () => {
     const threadId = "thread-missing-commands";
     const commandItem: UnifiedItem = {
       id: "command-1",
@@ -1061,7 +1062,8 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("bun run test")).toBeTruthy();
+    expect(await screen.findByText("Live updates failed for this thread.")).toBeTruthy();
+    expect(screen.queryByText("bun run test")).toBeNull();
   });
 
   it("renders thread items from live state when live state is healthy", async () => {
@@ -1135,7 +1137,7 @@ describe("App", () => {
     expect(screen.queryByText("read-canonical-item")).toBeNull();
   });
 
-  it("keeps read command items when live reduction fails and omits those command entries", async () => {
+  it("does not restore read command items when live reduction fails", async () => {
     const threadId = "thread-live-longer-but-missing-command";
     const commandItem: UnifiedItem = {
       id: "command-keep-1",
@@ -1211,7 +1213,8 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("git status --short")).toBeTruthy();
+    expect(await screen.findByText("Live updates failed for this thread.")).toBeTruthy();
+    expect(screen.queryByText("git status --short")).toBeNull();
   });
 
   it("does not duplicate items when read and live contain the same content with different item ids", async () => {
