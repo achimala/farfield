@@ -328,7 +328,14 @@ let liveStateResolver: (
   threadId: string;
   ownerClientId: string | null;
   conversationState: UnifiedThreadFixture | null;
-  liveStateError: null;
+  liveStateError:
+    | {
+        kind: "reductionFailed";
+        message: string;
+        eventIndex: number | null;
+        patchIndex: number | null;
+      }
+    | null;
 };
 
 function buildConversationStateFixture(
@@ -651,6 +658,45 @@ describe("App", () => {
     expect(await screen.findByText("No thread selected")).toBeTruthy();
   });
 
+  it("loads a direct thread route even when provider is not in current thread list page", async () => {
+    const threadId = "thread-direct-route";
+    window.history.replaceState(null, "", `/threads/${threadId}`);
+
+    threadsFixture = {
+      ok: true,
+      data: [],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    readThreadResolver = (
+      targetThreadId: string,
+      provider: ProviderId | null,
+    ) => ({
+      ok: true,
+      thread: buildConversationStateFixture(targetThreadId, "gpt-old-codex", {
+        provider: provider ?? "codex",
+        turnItems: [
+          {
+            id: "agent-hello-1",
+            type: "agentMessage",
+            text: "direct-route-loaded",
+          },
+        ],
+      }),
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("direct-route-loaded")).toBeTruthy();
+  });
+
   it("hides mode controls when capability is disabled", async () => {
     featureMatrixFixture = {
       ok: true,
@@ -889,7 +935,7 @@ describe("App", () => {
     expect(latestObservedModel).toBe("gpt-new-codex");
   }, 15000);
 
-  it("keeps pending user input visible when read state has request and live state does not", async () => {
+  it("keeps pending user input visible when live reduction fails and read has pending request", async () => {
     const threadId = "thread-with-request";
 
     threadsFixture = {
@@ -935,7 +981,12 @@ describe("App", () => {
           includePendingRequest: false,
         },
       ),
-      liveStateError: null,
+      liveStateError: {
+        kind: "reductionFailed",
+        message: "failed to reduce",
+        eventIndex: 2,
+        patchIndex: 0,
+      },
     });
 
     render(<App />);
@@ -945,7 +996,7 @@ describe("App", () => {
     expect(screen.getByText("Option B")).toBeTruthy();
   });
 
-  it("shows command items from read state when live state is newer but missing those items", async () => {
+  it("shows command items from read state when live reduction fails", async () => {
     const threadId = "thread-missing-commands";
     const commandItem: UnifiedItem = {
       id: "command-1",
@@ -1000,7 +1051,12 @@ describe("App", () => {
           turnItems: [],
         },
       ),
-      liveStateError: null,
+      liveStateError: {
+        kind: "reductionFailed",
+        message: "failed to reduce",
+        eventIndex: 3,
+        patchIndex: 1,
+      },
     });
 
     render(<App />);
@@ -1008,17 +1064,8 @@ describe("App", () => {
     expect(await screen.findByText("bun run test")).toBeTruthy();
   });
 
-  it("shows command items from live state when they extend the same active turn", async () => {
+  it("renders thread items from live state when live state is healthy", async () => {
     const threadId = "thread-live-extends-turn";
-    const commandItem: UnifiedItem = {
-      id: "command-live-1",
-      type: "commandExecution",
-      command: "bun run lint",
-      status: "inProgress",
-      aggregatedOutput: "",
-      exitCode: null,
-      durationMs: null,
-    };
 
     threadsFixture = {
       ok: true,
@@ -1047,7 +1094,13 @@ describe("App", () => {
       ok: true,
       thread: buildConversationStateFixture(targetThreadId, "gpt-old-codex", {
         updatedAt: 1700000000,
-        turnItems: [],
+        turnItems: [
+          {
+            id: "agent-read-1",
+            type: "agentMessage",
+            text: "read-canonical-item",
+          },
+        ],
       }),
     });
 
@@ -1060,7 +1113,17 @@ describe("App", () => {
         "gpt-old-codex",
         {
           updatedAt: 1700000500,
-          turnItems: [commandItem],
+          turnItems: [
+            {
+              id: "command-live-1",
+              type: "commandExecution",
+              command: "bun run lint",
+              status: "inProgress",
+              aggregatedOutput: "",
+              exitCode: null,
+              durationMs: null,
+            },
+          ],
         },
       ),
       liveStateError: null,
@@ -1069,9 +1132,10 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByText("bun run lint")).toBeTruthy();
+    expect(screen.queryByText("read-canonical-item")).toBeNull();
   });
 
-  it("keeps read command items when live turn is longer but omits those command entries", async () => {
+  it("keeps read command items when live reduction fails and omits those command entries", async () => {
     const threadId = "thread-live-longer-but-missing-command";
     const commandItem: UnifiedItem = {
       id: "command-keep-1",
@@ -1137,12 +1201,96 @@ describe("App", () => {
           ],
         },
       ),
-      liveStateError: null,
+      liveStateError: {
+        kind: "reductionFailed",
+        message: "failed to reduce",
+        eventIndex: 5,
+        patchIndex: 2,
+      },
     });
 
     render(<App />);
 
     expect(await screen.findByText("git status --short")).toBeTruthy();
+  });
+
+  it("does not duplicate items when read and live contain the same content with different item ids", async () => {
+    const threadId = "thread-no-duplicate-id-drift";
+
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: threadId,
+          provider: "codex",
+          preview: "thread preview",
+          createdAt: 1700000000,
+          updatedAt: 1700000500,
+          cwd: "/tmp/project",
+          source: "codex",
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    readThreadResolver = (targetThreadId: string) => ({
+      ok: true,
+      thread: buildConversationStateFixture(targetThreadId, "gpt-old-codex", {
+        updatedAt: 1700000000,
+        turnItems: [
+          {
+            id: "read-user-1",
+            type: "userMessage",
+            content: [{ type: "text", text: "duplicate-check-user" }],
+          },
+          {
+            id: "read-agent-1",
+            type: "agentMessage",
+            text: "duplicate-check-agent",
+          },
+        ],
+      }),
+    });
+
+    liveStateResolver = (targetThreadId: string, _provider: ProviderId) => ({
+      kind: "readLiveState",
+      threadId: targetThreadId,
+      ownerClientId: "client-1",
+      conversationState: buildConversationStateFixture(
+        targetThreadId,
+        "gpt-old-codex",
+        {
+          updatedAt: 1700000500,
+          turnItems: [
+            {
+              id: "live-user-1",
+              type: "userMessage",
+              content: [{ type: "text", text: "duplicate-check-user" }],
+            },
+            {
+              id: "live-agent-1",
+              type: "agentMessage",
+              text: "duplicate-check-agent",
+            },
+          ],
+        },
+      ),
+      liveStateError: null,
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("duplicate-check-user")).toBeTruthy();
+    expect(await screen.findByText("duplicate-check-agent")).toBeTruthy();
+    expect(screen.getAllByText("duplicate-check-user").length).toBe(1);
+    expect(screen.getAllByText("duplicate-check-agent").length).toBe(1);
   });
 
   it("shows model default effort when thread effort fields are unset", async () => {

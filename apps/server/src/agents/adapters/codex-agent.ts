@@ -423,27 +423,16 @@ export class CodexAgentAdapter implements AgentAdapter {
 
     if (ownerClientId && this.isIpcReady()) {
       this.threadOwnerById.set(input.threadId, ownerClientId);
-      try {
-        await this.service.sendMessage({
-          threadId: input.threadId,
-          ownerClientId,
-          text,
-          ...(input.cwd ? { cwd: input.cwd } : {}),
-          ...(typeof input.isSteering === "boolean"
-            ? { isSteering: input.isSteering }
-            : {}),
-        });
-        return;
-      } catch (error) {
-        logger.warn(
-          {
-            threadId: input.threadId,
-            ownerClientId,
-            error: toErrorMessage(error),
-          },
-          "codex-thread-follower-send-message-failed",
-        );
-      }
+      await this.service.sendMessage({
+        threadId: input.threadId,
+        ownerClientId,
+        text,
+        ...(input.cwd ? { cwd: input.cwd } : {}),
+        ...(typeof input.isSteering === "boolean"
+          ? { isSteering: input.isSteering }
+          : {}),
+      });
+      return;
     }
 
     const sendTurn = async (): Promise<void> => {
@@ -591,15 +580,6 @@ export class CodexAgentAdapter implements AgentAdapter {
       }
     }
 
-    const invalidEventsLiveStateError =
-      invalidEventCount > 0
-        ? buildLiveStateReductionError(
-            `Dropped ${String(invalidEventCount)} invalid stream event(s) while reconstructing live state`,
-            null,
-            null,
-          )
-        : null;
-
     if (invalidEventCount > 0) {
       logger.warn(
         `[stream-mismatch-summary] thread=${threadId} pruned=${String(invalidEventCount)} total=${String(rawEvents.length)}${firstInvalidEventMessage ? ` first="${firstInvalidEventMessage}"` : ""}`,
@@ -611,7 +591,7 @@ export class CodexAgentAdapter implements AgentAdapter {
       return {
         ownerClientId,
         conversationState: snapshotState,
-        liveStateError: invalidEventsLiveStateError,
+        liveStateError: null,
       };
     }
 
@@ -639,7 +619,7 @@ export class CodexAgentAdapter implements AgentAdapter {
       return {
         ownerClientId: state?.ownerClientId ?? ownerClientId ?? null,
         conversationState: state?.conversationState ?? snapshotState,
-        liveStateError: invalidEventsLiveStateError,
+        liveStateError: null,
       };
     } catch (error) {
       if (canUseSyntheticSnapshot) {
@@ -650,7 +630,7 @@ export class CodexAgentAdapter implements AgentAdapter {
           return {
             ownerClientId: state?.ownerClientId ?? ownerClientId ?? null,
             conversationState: state?.conversationState ?? snapshotState,
-            liveStateError: invalidEventsLiveStateError,
+            liveStateError: null,
           };
         } catch (secondaryError) {
           const liveStateError = this.logReductionFailure(

@@ -46,7 +46,6 @@ import {
   startTrace,
   stopTrace,
   submitUserInput,
-  ApiRequestError,
   type AgentId,
 } from "@/lib/api";
 import {
@@ -421,213 +420,6 @@ function getConversationStateUpdatedAt(
     return Number.NEGATIVE_INFINITY;
   }
   return state.updatedAt;
-}
-
-function turnIdentity(
-  turn: NonNullable<ReadThreadResponse["thread"]>["turns"][number] | undefined,
-): string {
-  if (!turn) {
-    return "";
-  }
-  return turn.id ?? turn.turnId ?? "";
-}
-
-function mergeTurnItemsForwardOnly(
-  readTurn: ConversationTurn,
-  liveTurn: ConversationTurn,
-): ConversationTurn["items"] {
-  const readItems = readTurn.items;
-  const liveItems = liveTurn.items;
-
-  if (liveItems.length === 0) {
-    return readItems;
-  }
-  if (readItems.length === 0) {
-    return liveItems;
-  }
-
-  const mergedItems = [...readItems];
-  const indexByItemId = new Map<string, number>();
-  let changed = false;
-
-  for (let index = 0; index < mergedItems.length; index += 1) {
-    const item = mergedItems[index];
-    if (!item) {
-      continue;
-    }
-    indexByItemId.set(item.id, index);
-  }
-
-  for (const liveItem of liveItems) {
-    const existingIndex = indexByItemId.get(liveItem.id);
-    if (existingIndex === undefined) {
-      indexByItemId.set(liveItem.id, mergedItems.length);
-      mergedItems.push(liveItem);
-      changed = true;
-      continue;
-    }
-
-    const existingItem = mergedItems[existingIndex];
-    if (existingItem !== liveItem) {
-      mergedItems[existingIndex] = liveItem;
-      changed = true;
-    }
-  }
-
-  if (!changed) {
-    return readItems;
-  }
-
-  return mergedItems;
-}
-
-function mergeTurnForwardOnly(
-  readTurn: ConversationTurn,
-  liveTurn: ConversationTurn,
-): ConversationTurn {
-  const mergedItems = mergeTurnItemsForwardOnly(readTurn, liveTurn);
-  const mergedStatus =
-    isTurnInProgressStatus(liveTurn.status) &&
-    !isTurnInProgressStatus(readTurn.status)
-      ? readTurn.status
-      : liveTurn.status;
-
-  if (mergedItems === readTurn.items && mergedStatus === readTurn.status) {
-    return readTurn;
-  }
-
-  return {
-    ...readTurn,
-    ...liveTurn,
-    status: mergedStatus,
-    items: mergedItems,
-  };
-}
-
-function mergeUserInputRequests(
-  readState: NonNullable<ReadThreadResponse["thread"]>,
-  liveState: NonNullable<ReadThreadResponse["thread"]>,
-): NonNullable<ReadThreadResponse["thread"]>["requests"] {
-  type Request = NonNullable<ReadThreadResponse["thread"]>["requests"][number];
-  const merged = new Map<string, Request>();
-  let changed = false;
-
-  for (const request of readState.requests) {
-    const key = `${typeof request.id}:${String(request.id)}:${request.method}`;
-    merged.set(key, request);
-  }
-
-  for (const request of liveState.requests) {
-    const key = `${typeof request.id}:${String(request.id)}:${request.method}`;
-    const existing = merged.get(key);
-    if (!existing) {
-      merged.set(key, request);
-      changed = true;
-      continue;
-    }
-
-    if (existing.completed === true && request.completed !== true) {
-      merged.set(key, request);
-      changed = true;
-      continue;
-    }
-
-    if (request.completed === true) {
-      merged.set(key, request);
-      if (request !== existing) {
-        changed = true;
-      }
-    }
-  }
-
-  if (!changed && merged.size === readState.requests.length) {
-    return readState.requests;
-  }
-
-  return Array.from(merged.values());
-}
-
-function overlayLiveTurns(
-  readState: NonNullable<ReadThreadResponse["thread"]>,
-  liveState: NonNullable<ReadThreadResponse["thread"]>,
-): NonNullable<ReadThreadResponse["thread"]>["turns"] {
-  const readTurns = readState.turns;
-  const liveTurns = liveState.turns;
-
-  if (liveTurns.length === 0) {
-    return readTurns;
-  }
-  if (readTurns.length === 0) {
-    return liveTurns;
-  }
-  if (liveTurns.length < readTurns.length) {
-    return readTurns;
-  }
-
-  const sharedLength = Math.min(readTurns.length, liveTurns.length);
-  for (let index = 0; index < sharedLength; index += 1) {
-    const readId = turnIdentity(readTurns[index]);
-    const liveId = turnIdentity(liveTurns[index]);
-    if (readId.length === 0 || liveId.length === 0 || readId !== liveId) {
-      return readTurns;
-    }
-  }
-
-  const mergedTurns: NonNullable<ReadThreadResponse["thread"]>["turns"] = [];
-  let changed = false;
-
-  for (let index = 0; index < sharedLength; index += 1) {
-    const readTurn = readTurns[index];
-    const liveTurn = liveTurns[index];
-    if (!readTurn || !liveTurn) {
-      continue;
-    }
-    const mergedTurn = mergeTurnForwardOnly(readTurn, liveTurn);
-    if (mergedTurn !== readTurn) {
-      changed = true;
-    }
-    mergedTurns.push(mergedTurn);
-  }
-
-  if (liveTurns.length > readTurns.length) {
-    mergedTurns.push(...liveTurns.slice(readTurns.length));
-    changed = true;
-  }
-
-  if (!changed && mergedTurns.length === readTurns.length) {
-    return readTurns;
-  }
-
-  return mergedTurns;
-}
-
-function mergeConversationStateForwardOnly(
-  readState: NonNullable<ReadThreadResponse["thread"]>,
-  liveState: NonNullable<ReadThreadResponse["thread"]>,
-): NonNullable<ReadThreadResponse["thread"]> {
-  const mergedTurns = overlayLiveTurns(readState, liveState);
-  const mergedRequests = mergeUserInputRequests(readState, liveState);
-  const mergedUpdatedAt = Math.max(
-    getConversationStateUpdatedAt(readState),
-    getConversationStateUpdatedAt(liveState),
-  );
-  const hasUpdatedAt = Number.isFinite(mergedUpdatedAt);
-
-  if (mergedTurns === readState.turns && mergedRequests === readState.requests) {
-    return readState;
-  }
-
-  return {
-    ...readState,
-    turns: mergedTurns,
-    requests: mergedRequests,
-    ...(hasUpdatedAt ? { updatedAt: mergedUpdatedAt } : {}),
-    latestModel: liveState.latestModel ?? readState.latestModel,
-    latestReasoningEffort:
-      liveState.latestReasoningEffort ?? readState.latestReasoningEffort,
-    latestCollaborationMode:
-      liveState.latestCollaborationMode ?? readState.latestCollaborationMode,
-  };
 }
 
 function buildModeSignature(
@@ -1117,18 +909,20 @@ export function App(): React.JSX.Element {
   }, [agentDescriptors, threads]);
   const conversationState = useMemo(() => {
     const liveConversationState = liveState?.conversationState ?? null;
+    const liveStateError = liveState?.liveStateError ?? null;
+    const canUseLiveConversationState =
+      liveConversationState !== null &&
+      (!liveStateError || liveStateError.kind !== "reductionFailed");
     const readConversationState = readThreadState?.thread ?? null;
-    if (!readConversationState) {
+    if (canUseLiveConversationState) {
       return liveConversationState;
     }
-    if (!liveConversationState) {
-      return readConversationState;
-    }
-    return mergeConversationStateForwardOnly(
-      readConversationState,
-      liveConversationState,
-    );
-  }, [liveState?.conversationState, readThreadState?.thread]);
+    return readConversationState ?? liveConversationState;
+  }, [
+    liveState?.conversationState,
+    liveState?.liveStateError,
+    readThreadState?.thread,
+  ]);
 
   const pendingRequests = useMemo(() => {
     if (!conversationState) return [] as PendingRequest[];
@@ -1566,22 +1360,17 @@ export function App(): React.JSX.Element {
 
   const loadSelectedThread = useCallback(
     async (threadId: string) => {
-      const threadAgentId = threadProviderByIdRef.current.get(threadId);
-      if (!threadAgentId) {
-        throw new ApiRequestError(
-          `Thread ${threadId} has no registered provider`,
-          {
-            code: "threadProviderMissing",
-            details: {
-              threadId,
-            },
-          },
-        );
-      }
-      const read = await readThread(threadId, {
-        includeTurns: true,
-        provider: threadAgentId,
-      });
+      let threadAgentId = threadProviderByIdRef.current.get(threadId) ?? null;
+      const read =
+        threadAgentId === null
+          ? await readThread(threadId, {
+              includeTurns: true,
+            })
+          : await readThread(threadId, {
+              includeTurns: true,
+              provider: threadAgentId,
+            });
+      threadAgentId = read.thread.provider;
       threadProviderByIdRef.current.set(threadId, threadAgentId);
 
       const descriptor = agentsById[threadAgentId];
