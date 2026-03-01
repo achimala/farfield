@@ -24,9 +24,11 @@ if (!parsedEnv.success) {
 }
 const apiOrigin =
   parsedEnv.data.FARFIELD_API_ORIGIN ?? "http://127.0.0.1:4311";
-const reactCompilerEnabled =
-  parsedEnv.data.REACT_COMPILER === "1" ||
-  parsedEnv.data.REACT_COMPILER === "true";
+const reactCompilerOverride =
+  parsedEnv.data.REACT_COMPILER === undefined
+    ? null
+    : parsedEnv.data.REACT_COMPILER === "1" ||
+        parsedEnv.data.REACT_COMPILER === "true";
 const reactProfilingEnabled =
   parsedEnv.data.REACT_PROFILING === "1" ||
   parsedEnv.data.REACT_PROFILING === "true";
@@ -39,55 +41,62 @@ if (reactProfilingEnabled) {
   resolveAlias["react-dom/client"] = "react-dom/profiling";
 }
 
-export default defineConfig({
-  plugins: [
-    react(
-      reactCompilerEnabled
-        ? {
-            babel: {
-              plugins: ["babel-plugin-react-compiler"],
-            },
-          }
-        : undefined,
-    ),
-    tailwindcss(),
-    VitePWA({
-      registerType: "autoUpdate",
-      manifest: {
-        name: "Farfield",
-        short_name: "Farfield",
-        start_url: "/",
-        display: "standalone",
-        theme_color: "#0a0a0b",
-        background_color: "#0a0a0b"
+export default defineConfig(({ command }) => {
+  const reactCompilerEnabled =
+    reactCompilerOverride === null
+      ? command === "build"
+      : reactCompilerOverride;
+
+  return {
+    plugins: [
+      react(
+        reactCompilerEnabled
+          ? {
+              babel: {
+                plugins: ["babel-plugin-react-compiler"],
+              },
+            }
+          : undefined,
+      ),
+      tailwindcss(),
+      VitePWA({
+        registerType: "autoUpdate",
+        manifest: {
+          name: "Farfield",
+          short_name: "Farfield",
+          start_url: "/",
+          display: "standalone",
+          theme_color: "#0a0a0b",
+          background_color: "#0a0a0b"
+        },
+        workbox: {
+          globPatterns: ["**/*.{js,css,html,svg,png,woff2}"]
+        }
+      })
+    ],
+    resolve: {
+      alias: resolveAlias,
+    },
+    server: {
+      host: true,
+      allowedHosts: true,
+      port: 4312,
+      proxy: {
+        "/api": apiOrigin,
+        "/events": apiOrigin,
       },
-      workbox: {
-        globPatterns: ["**/*.{js,css,html,svg,png,woff2}"]
-      }
-    })
-  ],
-  resolve: {
-    alias: resolveAlias,
-  },
-  server: {
-    host: true,
-    allowedHosts: true,
-    port: 4312,
-    proxy: {
-      "/api": apiOrigin,
-      "/events": apiOrigin,
     },
-  },
-  preview: {
-    host: "127.0.0.1",
-    port: 4312,
-    proxy: {
-      "/api": apiOrigin,
-      "/events": apiOrigin,
+    preview: {
+      host: "127.0.0.1",
+      port: 4312,
+      proxy: {
+        "/api": apiOrigin,
+        "/events": apiOrigin,
+      },
     },
-  },
-  test: {
-    environment: "jsdom",
-    setupFiles: [],
-  },
+    test: {
+      environment: "jsdom",
+      setupFiles: [],
+    },
+  };
 });
