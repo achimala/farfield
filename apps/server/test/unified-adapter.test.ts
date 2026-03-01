@@ -381,4 +381,67 @@ describe("unified provider adapters", () => {
       ).rejects.toBeInstanceOf(UnifiedBackendFeatureError);
     }
   });
+
+  it("maps only user input requests into unified thread requests", async () => {
+    const threadWithMixedRequests: ThreadConversationState = {
+      ...SAMPLE_THREAD,
+      requests: [
+        {
+          id: "request-1",
+          method: "item/tool/requestUserInput",
+          params: {
+            threadId: SAMPLE_THREAD.id,
+            turnId: "turn-1",
+            itemId: "item-1",
+            questions: [
+              {
+                id: "question-1",
+                header: "Choose",
+                question: "Pick one",
+                options: [{ label: "A", description: "Option A" }],
+                isOther: false,
+                isSecret: false,
+              },
+            ],
+          },
+          completed: false,
+        },
+        {
+          id: "request-2",
+          method: "item/tool/call",
+          params: {
+            arguments: { value: "example" },
+            callId: "call-1",
+            threadId: SAMPLE_THREAD.id,
+            tool: "toolName",
+            turnId: "turn-1",
+          },
+        },
+      ],
+    };
+
+    const adapter = createCodexAdapter();
+    adapter.readThread = async () => ({
+      thread: threadWithMixedRequests,
+    });
+    const unified = new AgentUnifiedProviderAdapter("codex", adapter);
+
+    const result = await unified.execute(
+      UnifiedCommandSchema.parse({
+        kind: "readThread",
+        provider: "codex",
+        threadId: SAMPLE_THREAD.id,
+        includeTurns: true,
+      }),
+    );
+
+    expect(result.kind).toBe("readThread");
+    if (result.kind !== "readThread") {
+      return;
+    }
+
+    expect(result.thread.requests).toHaveLength(1);
+    expect(result.thread.requests[0]?.method).toBe("item/tool/requestUserInput");
+    expect(result.thread.requests[0]?.params.questions[0]?.id).toBe("question-1");
+  });
 });
