@@ -48,6 +48,7 @@
         "react-syntax-highlighter": "^16.1.0",
         "remark-gfm": "^4.0.1",
         "tailwind-merge": "^2.5.5",
+        "workbox-window": "^7.4.0",
         "zod": "^3.24.1",
       },
       "devDependencies": {
