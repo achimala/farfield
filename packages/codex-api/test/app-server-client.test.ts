@@ -2,6 +2,59 @@ import { describe, expect, it, vi } from "vitest";
 import { AppServerClient } from "../src/app-server-client.js";
 import type { AppServerTransport } from "../src/app-server-transport.js";
 
+const START_THREAD_RESPONSE = {
+  thread: {
+    id: "thread-1",
+    preview: "New thread",
+    createdAt: 1,
+    updatedAt: 1,
+    source: "opencode",
+  },
+  model: "gpt-test",
+  modelProvider: "openai",
+  cwd: "/tmp/project",
+  approvalPolicy: "never",
+  sandbox: "danger-full-access",
+  reasoningEffort: null,
+};
+
+describe("AppServerClient.startThread", () => {
+  it("sets ephemeral to false when it is not provided", async () => {
+    const transport: AppServerTransport = {
+      request: vi.fn().mockResolvedValue(START_THREAD_RESPONSE),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const client = new AppServerClient(transport);
+    await client.startThread({
+      cwd: "/tmp/project",
+    });
+
+    expect(transport.request).toHaveBeenCalledWith("thread/start", {
+      cwd: "/tmp/project",
+      ephemeral: false,
+    });
+  });
+
+  it("keeps explicit ephemeral=true", async () => {
+    const transport: AppServerTransport = {
+      request: vi.fn().mockResolvedValue(START_THREAD_RESPONSE),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const client = new AppServerClient(transport);
+    await client.startThread({
+      cwd: "/tmp/project",
+      ephemeral: true,
+    });
+
+    expect(transport.request).toHaveBeenCalledWith("thread/start", {
+      cwd: "/tmp/project",
+      ephemeral: true,
+    });
+  });
+});
+
 describe("AppServerClient.sendUserMessage", () => {
   it("sends the expected request payload", async () => {
     const transport: AppServerTransport = {

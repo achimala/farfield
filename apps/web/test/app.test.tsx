@@ -68,6 +68,29 @@ vi.stubGlobal(
   })),
 );
 
+const localStorageBacking = new Map<string, string>();
+vi.stubGlobal("localStorage", {
+  getItem: vi.fn((key: string): string | null => {
+    return localStorageBacking.get(key) ?? null;
+  }),
+  setItem: vi.fn((key: string, value: string): void => {
+    localStorageBacking.set(key, value);
+  }),
+  removeItem: vi.fn((key: string): void => {
+    localStorageBacking.delete(key);
+  }),
+  clear: vi.fn((): void => {
+    localStorageBacking.clear();
+  }),
+  key: vi.fn((index: number): string | null => {
+    const keys = [...localStorageBacking.keys()];
+    return keys[index] ?? null;
+  }),
+  get length(): number {
+    return localStorageBacking.size;
+  },
+});
+
 const FEATURE_IDS: UnifiedFeatureId[] = [
   "listThreads",
   "createThread",
@@ -429,6 +452,7 @@ function jsonErrorResponse(
 beforeEach(() => {
   MockEventSource.reset();
   window.history.replaceState(null, "", "/");
+  localStorageBacking.clear();
 
   featureMatrixFixture = {
     ok: true,
@@ -664,13 +688,23 @@ describe("App", () => {
     expect(await screen.findByText("No thread selected")).toBeTruthy();
   });
 
-  it("loads a direct thread route even when provider is not in current thread list page", async () => {
+  it("keeps a direct thread route selected when it is readable but not in current thread list page", async () => {
     const threadId = "thread-direct-route";
     window.history.replaceState(null, "", `/threads/${threadId}`);
 
     threadsFixture = {
       ok: true,
-      data: [],
+      data: [
+        {
+          id: "thread-listed",
+          provider: "codex",
+          preview: "listed thread",
+          createdAt: 1700000000,
+          updatedAt: 1700000001,
+          cwd: "/tmp/project",
+          source: "codex",
+        },
+      ],
       cursors: {
         codex: null,
         opencode: null,
@@ -684,23 +718,110 @@ describe("App", () => {
     readThreadResolver = (
       targetThreadId: string,
       provider: ProviderId | null,
-    ) => ({
-      ok: true,
-      thread: buildConversationStateFixture(targetThreadId, "gpt-old-codex", {
-        provider: provider ?? "codex",
-        turnItems: [
-          {
-            id: "agent-hello-1",
-            type: "agentMessage",
-            text: "direct-route-loaded",
-          },
-        ],
-      }),
-    });
+    ) => {
+      if (targetThreadId === threadId) {
+        return {
+          ok: true,
+          thread: buildConversationStateFixture(targetThreadId, "gpt-old-codex", {
+            provider: provider ?? "codex",
+            turnItems: [
+              {
+                id: "agent-hello-1",
+                type: "agentMessage",
+                text: "direct-route-loaded",
+              },
+            ],
+          }),
+        };
+      }
+      if (targetThreadId === "thread-listed") {
+        return {
+          ok: true,
+          thread: buildConversationStateFixture(targetThreadId, "gpt-old-codex", {
+            provider: provider ?? "codex",
+            turnItems: [
+              {
+                id: "agent-listed-1",
+                type: "agentMessage",
+                text: "listed-thread-loaded",
+              },
+            ],
+          }),
+        };
+      }
+      return null;
+    };
 
     render(<App />);
 
     expect(await screen.findByText("direct-route-loaded")).toBeTruthy();
+    await waitFor(() =>
+      expect(window.location.pathname).toBe(`/threads/${threadId}`),
+    );
+    expect(screen.queryByText("listed-thread-loaded")).toBeNull();
+  });
+
+  it("does not auto-switch to another listed thread when route thread is missing", async () => {
+    const missingThreadId = "thread-missing-route";
+    const listedThreadId = "thread-listed";
+    window.history.replaceState(null, "", `/threads/${missingThreadId}`);
+
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: listedThreadId,
+          provider: "codex",
+          preview: "listed thread",
+          createdAt: 1700000000,
+          updatedAt: 1700000001,
+          cwd: "/tmp/project",
+          source: "codex",
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    readThreadResolver = (
+      targetThreadId: string,
+      provider: ProviderId | null,
+    ) => {
+      if (targetThreadId !== listedThreadId) {
+        return null;
+      }
+      return {
+        ok: true,
+        thread: buildConversationStateFixture(
+          listedThreadId,
+          "gpt-old-codex",
+          {
+            provider: provider ?? "codex",
+            turnItems: [
+              {
+                id: "agent-listed-1",
+                type: "agentMessage",
+                text: "listed-thread-loaded",
+              },
+            ],
+          },
+        ),
+      };
+    };
+
+    render(<App />);
+
+    expect(await screen.findByText("listed thread")).toBeTruthy();
+    await waitFor(() =>
+      expect(window.location.pathname).toBe(`/threads/${missingThreadId}`),
+    );
+    expect(screen.queryByText("listed-thread-loaded")).toBeNull();
   });
 
   it("hides mode controls when capability is disabled", async () => {

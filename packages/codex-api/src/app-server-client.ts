@@ -207,7 +207,10 @@ export class AppServerClient {
   }
 
   public async startThread(options: StartThreadOptions): Promise<AppServerStartThreadResponse> {
-    const request = AppServerStartThreadRequestSchema.parse(options);
+    const request = AppServerStartThreadRequestSchema.parse({
+      ...options,
+      ephemeral: options.ephemeral ?? false
+    });
     const result = await this.transport.request("thread/start", request);
     return parseWithSchema(AppServerStartThreadResponseSchema, result, "AppServerStartThreadResponse");
   }

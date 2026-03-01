@@ -1001,7 +1001,7 @@ async function start(): Promise<void> {
     };
 
     server.once("error", onError);
-    server.listen(PORT, HOST, () => {
+    server.listen({ port: PORT, host: HOST, exclusive: true }, () => {
       server.off("error", onError);
       resolve();
     });

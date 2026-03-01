@@ -3,6 +3,7 @@ import {
   AppServerRpcError,
   AppServerTransportError,
   CodexMonitorService,
+  DesktopIpcError,
   DesktopIpcClient,
   reduceThreadStreamEvents,
   ThreadStreamReductionError,
@@ -362,9 +363,7 @@ export class CodexAgentAdapter implements AgentAdapter {
         ...(input.approvalPolicy
           ? { approvalPolicy: input.approvalPolicy }
           : {}),
-        ...(typeof input.ephemeral === "boolean"
-          ? { ephemeral: input.ephemeral }
-          : {}),
+        ephemeral: input.ephemeral ?? false,
       }),
     );
     this.setThreadTitle(result.thread.id, result.thread.title);
@@ -396,23 +395,29 @@ export class CodexAgentAdapter implements AgentAdapter {
       result = await readThreadWithOption(input.includeTurns);
     } catch (error) {
       const typedError = error instanceof Error ? error : null;
-      const shouldHandleNotMaterialized =
-        input.includeTurns &&
-        isThreadNotMaterializedIncludeTurnsAppServerRpcError(typedError);
-      if (!shouldHandleNotMaterialized) {
+      const shouldTryResume =
+        isThreadNotLoadedAppServerRpcError(typedError) ||
+        (input.includeTurns &&
+          (isThreadNotMaterializedIncludeTurnsAppServerRpcError(typedError) ||
+            isThreadNoRolloutIncludeTurnsAppServerRpcError(typedError)));
+      if (!shouldTryResume) {
         throw error;
       }
 
       try {
         await this.resumeThread(input.threadId);
-        result = await readThreadWithOption(true);
+        result = await readThreadWithOption(input.includeTurns);
       } catch (resumeRetryError) {
         const typedResumeRetryError =
           resumeRetryError instanceof Error ? resumeRetryError : null;
         const shouldRetryWithoutTurns =
-          isThreadNotMaterializedIncludeTurnsAppServerRpcError(
+          input.includeTurns &&
+          (isThreadNotMaterializedIncludeTurnsAppServerRpcError(
             typedResumeRetryError,
-          );
+          ) ||
+            isThreadNoRolloutIncludeTurnsAppServerRpcError(
+              typedResumeRetryError,
+            ));
         if (!shouldRetryWithoutTurns) {
           throw resumeRetryError;
         }
@@ -462,16 +467,38 @@ export class CodexAgentAdapter implements AgentAdapter {
 
     if (ownerClientId && this.isIpcReady()) {
       this.threadOwnerById.set(input.threadId, ownerClientId);
-      await this.service.sendMessage({
-        threadId: input.threadId,
-        ownerClientId,
-        text,
-        ...(input.cwd ? { cwd: input.cwd } : {}),
-        ...(typeof input.isSteering === "boolean"
-          ? { isSteering: input.isSteering }
-          : {}),
-      });
-      return;
+      try {
+        await this.service.sendMessage({
+          threadId: input.threadId,
+          ownerClientId,
+          text,
+          ...(input.cwd ? { cwd: input.cwd } : {}),
+          ...(typeof input.isSteering === "boolean"
+            ? { isSteering: input.isSteering }
+            : {}),
+        });
+        return;
+      } catch (error) {
+        const typedError = error instanceof Error ? error : null;
+        if (!isIpcNoClientFoundError(typedError)) {
+          throw error;
+        }
+        const mappedOwnerClientId = this.threadOwnerById.get(input.threadId);
+        if (mappedOwnerClientId === ownerClientId) {
+          this.threadOwnerById.delete(input.threadId);
+        }
+        if (this.lastKnownOwnerClientId === ownerClientId) {
+          this.lastKnownOwnerClientId = null;
+        }
+        logger.info(
+          {
+            threadId: input.threadId,
+            ownerClientId,
+            error: toErrorMessage(error),
+          },
+          "thread-owner-unreachable-send-via-app-server",
+        );
+      }
     }
 
     const sendTurn = async (): Promise<void> => {
@@ -1081,6 +1108,43 @@ export function isThreadNotMaterializedIncludeTurnsAppServerRpcError(
     normalized.includes("not materialized yet") &&
     normalized.includes("includeturns")
   );
+}
+
+export function isThreadNotLoadedAppServerRpcError(
+  error: Error | null,
+): boolean {
+  if (!isInvalidRequestAppServerRpcError(error)) {
+    return false;
+  }
+  if (!error) {
+    return false;
+  }
+  const normalized = error.message.trim().toLowerCase();
+  return normalized.includes("thread not loaded");
+}
+
+export function isThreadNoRolloutIncludeTurnsAppServerRpcError(
+  error: Error | null,
+): boolean {
+  if (!isInvalidRequestAppServerRpcError(error)) {
+    return false;
+  }
+  if (!error) {
+    return false;
+  }
+  const normalized = error.message.trim().toLowerCase();
+  return (
+    normalized.includes("no rollout found for thread id") &&
+    normalized.includes("app-server error -32600")
+  );
+}
+
+export function isIpcNoClientFoundError(error: Error | null): boolean {
+  if (!(error instanceof DesktopIpcError)) {
+    return false;
+  }
+  const normalized = error.message.trim().toLowerCase();
+  return normalized.includes("no-client-found");
 }
 
 function normalizeStderrLine(line: string): string {

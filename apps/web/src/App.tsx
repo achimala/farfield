@@ -94,6 +94,7 @@ type AgentsResponse = Awaited<ReturnType<typeof listAgents>>;
 type TraceStatus = Awaited<ReturnType<typeof getTraceStatus>>;
 type HistoryResponse = Awaited<ReturnType<typeof listDebugHistory>>;
 type HistoryDetail = Awaited<ReturnType<typeof getHistoryEntry>>;
+type CreatedThread = Awaited<ReturnType<typeof createThread>>["thread"];
 type PendingRequest = ReturnType<typeof getPendingUserInputRequests>[number];
 type PendingRequestId = PendingRequest["id"];
 type Thread = SidebarThreadsResponse["rows"][number];
@@ -233,6 +234,43 @@ function buildThreadSignature(thread: Thread): string {
 
 function buildThreadsSignature(threads: Thread[]): string[] {
   return threads.map(buildThreadSignature);
+}
+
+function buildOptimisticThreadSummary(
+  threadId: string,
+  provider: AgentId,
+  thread: CreatedThread,
+): Thread {
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const createdAt =
+    typeof thread.createdAt === "number"
+      ? normalizeUnixTimestampSeconds(thread.createdAt)
+      : nowSeconds;
+  const updatedAt =
+    typeof thread.updatedAt === "number"
+      ? normalizeUnixTimestampSeconds(thread.updatedAt)
+      : createdAt;
+  const normalizedTitle =
+    typeof thread.title === "string" ? thread.title.trim() : "";
+  const preview = normalizedTitle.length > 0 ? normalizedTitle : "New thread";
+  const title =
+    thread.title === undefined
+      ? undefined
+      : thread.title === null
+        ? null
+        : thread.title;
+
+  return {
+    id: threadId,
+    provider,
+    preview,
+    createdAt,
+    updatedAt,
+    ...(title !== undefined ? { title } : {}),
+    ...(thread.cwd ? { cwd: thread.cwd } : {}),
+    ...(thread.source ? { source: thread.source } : {}),
+    isGenerating: false,
+  };
 }
 
 function mergeIncomingThreads(
@@ -380,7 +418,7 @@ const SIDEBAR_COLLAPSED_GROUPS_STORAGE_KEY =
 const AGENT_CACHE_TTL_MS = 30_000;
 const PROVIDER_CATALOG_CACHE_TTL_MS = 20_000;
 const CORE_REFRESH_INTERVAL_MS = 5_000;
-const SELECTED_THREAD_REFRESH_INTERVAL_MS = 3_000;
+const SELECTED_THREAD_REFRESH_INTERVAL_MS = 1_000;
 const MOBILE_SIDEBAR_WIDTH_PX = 256;
 const MOBILE_SWIPE_EDGE_PX = 24;
 const MOBILE_SIDEBAR_TOGGLE_THRESHOLD_PX = 88;
@@ -865,6 +903,7 @@ export function App(): React.JSX.Element {
   const lastAppliedModeSignatureRef = useRef("");
   const hasHydratedAgentSelectionRef = useRef(false);
   const threadProviderByIdRef = useRef<Map<string, AgentId>>(new Map());
+  const optimisticSelectedThreadIdsRef = useRef<Set<string>>(new Set());
   const loadCoreDataRef = useRef<(() => Promise<void>) | null>(null);
   const loadSelectedThreadRef = useRef<
     (
@@ -922,6 +961,32 @@ export function App(): React.JSX.Element {
     [threadListErrors],
   );
   const selectedAgentLabel = selectedAgentDescriptor?.label ?? "Agent";
+  const upsertSidebarThread = useCallback((threadSummary: Thread) => {
+    setThreads((previousThreads) => {
+      const nextThreads = (() => {
+        const existingIndex = previousThreads.findIndex(
+          (thread) => thread.id === threadSummary.id,
+        );
+        if (existingIndex === -1) {
+          return sortThreadsByRecency([threadSummary, ...previousThreads]);
+        }
+        const mergedThread = {
+          ...previousThreads[existingIndex],
+          ...threadSummary,
+        };
+        const next = [...previousThreads];
+        next[existingIndex] = mergedThread;
+        return sortThreadsByRecency(next);
+      })();
+
+      const nextSignature = buildThreadsSignature(nextThreads);
+      if (signaturesMatch(threadsSignatureRef.current, nextSignature)) {
+        return previousThreads;
+      }
+      threadsSignatureRef.current = nextSignature;
+      return nextThreads;
+    });
+  }, []);
   const groupedThreads = useMemo(() => {
     type Group = {
       key: string;
@@ -1349,6 +1414,12 @@ export function App(): React.JSX.Element {
 
     const nt = await sidebarPromise;
     const incomingThreads = sortThreadsByRecency(nt.rows);
+    const optimisticSelectedThreadIds = optimisticSelectedThreadIdsRef.current;
+    if (optimisticSelectedThreadIds.size > 0) {
+      for (const thread of incomingThreads) {
+        optimisticSelectedThreadIds.delete(thread.id);
+      }
+    }
     const nextThreadProviders = new Map(threadProviderByIdRef.current);
     for (const thread of incomingThreads) {
       nextThreadProviders.set(thread.id, thread.provider);
@@ -1362,12 +1433,27 @@ export function App(): React.JSX.Element {
         incomingThreads,
         previousThreads,
       );
-      const nextThreadsSignature = buildThreadsSignature(nextThreads);
+      const existingIds = new Set(nextThreads.map((thread) => thread.id));
+      for (const thread of previousThreads) {
+        if (existingIds.has(thread.id)) {
+          continue;
+        }
+        const shouldKeepThread =
+          optimisticSelectedThreadIdsRef.current.has(thread.id) ||
+          thread.id === selectedThreadIdRef.current;
+        if (!shouldKeepThread) {
+          continue;
+        }
+        existingIds.add(thread.id);
+        nextThreads.push(thread);
+      }
+      const sortedThreads = sortThreadsByRecency(nextThreads);
+      const nextThreadsSignature = buildThreadsSignature(sortedThreads);
       if (signaturesMatch(threadsSignatureRef.current, nextThreadsSignature)) {
         return previousThreads;
       }
       threadsSignatureRef.current = nextThreadsSignature;
-      return nextThreads;
+      return sortedThreads;
     });
 
     const [healthResult, agentsResult, traceResult, historyResult] =
@@ -1543,7 +1629,27 @@ export function App(): React.JSX.Element {
       });
     }
     setSelectedThreadId((cur) => {
-      if (cur) return cur;
+      if (cur) {
+        return cur;
+      }
+      if (selectedThreadIdRef.current) {
+        const listedThreadStillExists = incomingThreads.some(
+          (threadSummary) => threadSummary.id === selectedThreadIdRef.current,
+        );
+        const hasOptimisticSelection = optimisticSelectedThreadIdsRef.current.has(
+          selectedThreadIdRef.current,
+        );
+        const hasLoadedThreadState = threadViewStateCacheRef.current.has(
+          selectedThreadIdRef.current,
+        );
+        if (
+          listedThreadStillExists ||
+          hasOptimisticSelection ||
+          hasLoadedThreadState
+        ) {
+          return selectedThreadIdRef.current;
+        }
+      }
       if (preferredAgentId) {
         const preferredThread = incomingThreads.find(
           (thread) => thread.provider === preferredAgentId,
@@ -1645,7 +1751,7 @@ export function App(): React.JSX.Element {
         descriptor === undefined
           ? threadAgentId === "codex"
           : canUseFeature(descriptor, "readStreamEvents");
-      const shouldReadTurns = includeTurns || !canReadLiveState;
+      let shouldReadTurns = includeTurns || !canReadLiveState;
 
       if (shouldReadTurns && !includeTurns) {
         read = await readThread(threadId, {
@@ -1663,6 +1769,14 @@ export function App(): React.JSX.Element {
             conversationState: null,
             liveStateError: null,
           };
+
+      if (!shouldReadTurns && live.conversationState === null) {
+        read = await readThread(threadId, {
+          includeTurns: true,
+          provider: threadAgentId,
+        });
+        shouldReadTurns = true;
+      }
       const shouldLoadStreamEvents =
         includeStreamEvents &&
         canReadStreamEvents &&
@@ -1954,7 +2068,7 @@ export function App(): React.JSX.Element {
         return;
       }
       void load(selectedThreadId, {
-        includeTurns: false,
+        includeTurns: true,
         includeStreamEvents: activeTabRef.current === "debug",
       }).catch((e) =>
         setError(toErrorMessage(e)),
@@ -2089,7 +2203,7 @@ export function App(): React.JSX.Element {
               const loadThread = loadSelectedThreadRef.current;
               if (loadThread) {
                 await loadThread(selectedThreadIdRef.current, {
-                  includeTurns: false,
+                  includeTurns: true,
                   includeStreamEvents: activeTabRef.current === "debug",
                 });
               }
@@ -2487,6 +2601,14 @@ export function App(): React.JSX.Element {
           threadId = created.threadId;
           threadAgentId = selectedAgentId;
           threadProviderByIdRef.current.set(threadId, threadAgentId);
+          optimisticSelectedThreadIdsRef.current.add(threadId);
+          upsertSidebarThread(
+            buildOptimisticThreadSummary(
+              threadId,
+              threadAgentId,
+              created.thread,
+            ),
+          );
           setSelectedThreadId(threadId);
           selectedThreadIdRef.current = threadId;
         }
@@ -2514,6 +2636,7 @@ export function App(): React.JSX.Element {
       refreshAll,
       selectedAgentId,
       selectedThreadId,
+      upsertSidebarThread,
     ],
   );
 
@@ -2725,6 +2848,14 @@ export function App(): React.JSX.Element {
           agentId: targetAgentId,
         });
         threadProviderByIdRef.current.set(created.threadId, targetAgentId);
+        optimisticSelectedThreadIdsRef.current.add(created.threadId);
+        upsertSidebarThread(
+          buildOptimisticThreadSummary(
+            created.threadId,
+            targetAgentId,
+            created.thread,
+          ),
+        );
         setSelectedThreadId(created.threadId);
         selectedThreadIdRef.current = created.threadId;
         closeMobileSidebar();
@@ -2735,7 +2866,7 @@ export function App(): React.JSX.Element {
         setIsBusy(false);
       }
     },
-    [agentsById, closeMobileSidebar, refreshAll, selectedAgentId],
+    [agentsById, closeMobileSidebar, refreshAll, selectedAgentId, upsertSidebarThread],
   );
 
   const createThreadForSingleAgent = useCallback(
