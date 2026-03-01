@@ -1,6 +1,8 @@
 import {
   assertNever,
   type ThreadConversationState,
+  type UserInputRequest,
+  UserInputRequestSchema,
 } from "@farfield/protocol";
 import {
   JsonValueSchema,
@@ -31,13 +33,14 @@ type UnifiedCommandResultByKind<K extends UnifiedCommandKind> = Extract<
   { kind: K }
 >;
 
-function isUserInputRequest(
+function maybeParseUserInputRequest(
   request: ThreadConversationState["requests"][number],
-): request is Extract<
-  ThreadConversationState["requests"][number],
-  { method: "item/tool/requestUserInput" }
-> {
-  return request.method === "item/tool/requestUserInput";
+): UserInputRequest | null {
+  const result = UserInputRequestSchema.safeParse(request);
+  if (!result.success) {
+    return null;
+  }
+  return result.data;
 }
 
 type UnifiedCommandHandler<K extends UnifiedCommandKind> = (
@@ -601,7 +604,8 @@ function mapThread(
       items: turn.items.map(mapTurnItem),
     })),
     requests: thread.requests
-      .filter(isUserInputRequest)
+      .map((request) => maybeParseUserInputRequest(request))
+      .filter((request) => request !== null)
       .map((request) => ({
         id: request.id,
         method: request.method,

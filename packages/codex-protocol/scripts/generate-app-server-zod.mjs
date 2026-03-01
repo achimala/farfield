@@ -53,6 +53,18 @@ const schemaTargets = [
     exportName: "SendUserMessageResponseSchema"
   },
   {
+    id: "request-id",
+    source: path.join(vendorRoot, "stable", "json", "RequestId.json"),
+    fileName: "RequestIdSchema.ts",
+    exportName: "RequestIdSchema"
+  },
+  {
+    id: "tool-request-user-input-params",
+    source: path.join(vendorRoot, "stable", "json", "ToolRequestUserInputParams.json"),
+    fileName: "ToolRequestUserInputParamsSchema.ts",
+    exportName: "ToolRequestUserInputParamsSchema"
+  },
+  {
     id: "tool-request-user-input-response",
     source: path.join(vendorRoot, "stable", "json", "ToolRequestUserInputResponse.json"),
     fileName: "ToolRequestUserInputResponseSchema.ts",

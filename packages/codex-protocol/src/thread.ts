@@ -8,7 +8,9 @@ import {
 } from "./common.js";
 import { ProtocolValidationError } from "./errors.js";
 import {
+  RequestIdSchema as GeneratedRequestIdSchema,
   ServerRequestSchema as GeneratedServerRequestSchema,
+  ToolRequestUserInputParamsSchema as GeneratedToolRequestUserInputParamsSchema,
   ToolRequestUserInputResponseSchema
 } from "./generated/app-server/index.js";
 
@@ -378,54 +380,23 @@ export const TurnItemSchema = z.discriminatedUnion("type", [
   ModelChangedItemSchema
 ]);
 
-export const UserInputOptionSchema = z
-  .object({
-    label: z.string(),
-    description: z.string()
-  })
-  .passthrough();
-
-export const UserInputRequestIdSchema = z.union([
-  NonNegativeIntSchema,
-  NonEmptyStringSchema
-]);
-
-export const UserInputQuestionSchema = z
-  .object({
-    id: NonEmptyStringSchema,
-    header: z.string(),
-    question: z.string(),
-    isOther: z.boolean().optional().default(false),
-    isSecret: z.boolean().optional().default(false),
-    options: z
-      .union([z.array(UserInputOptionSchema), z.null()])
-      .optional()
-      .transform((value) => value ?? [])
-  })
-  .passthrough();
-
-export const UserInputRequestParamsSchema = z
-  .object({
-    threadId: NonEmptyStringSchema,
-    turnId: NonEmptyStringSchema,
-    itemId: NonEmptyStringSchema,
-    questions: z.array(UserInputQuestionSchema)
-  })
-  .passthrough();
+export const UserInputRequestIdSchema = GeneratedRequestIdSchema;
 
 export const UserInputRequestSchema = z
   .object({
     method: z.literal("item/tool/requestUserInput"),
     id: UserInputRequestIdSchema,
-    params: UserInputRequestParamsSchema,
+    params: GeneratedToolRequestUserInputParamsSchema,
     completed: z.boolean().optional()
   })
   .passthrough();
 
-export const ThreadConversationRequestSchema = z.union([
-  UserInputRequestSchema,
-  GeneratedServerRequestSchema
-]);
+export const ThreadConversationRequestSchema = z
+  .object({
+    completed: z.boolean().optional()
+  })
+  .passthrough()
+  .and(GeneratedServerRequestSchema);
 
 export const ThreadTurnSchema = z
   .object({
@@ -550,8 +521,14 @@ export type ThreadConversationState = z.infer<typeof ThreadConversationStateSche
 export type ThreadStreamPatch = z.infer<typeof ThreadStreamPatchSchema>;
 export type ThreadStreamStateChangedParams = z.infer<typeof ThreadStreamStateChangedParamsSchema>;
 
-export function isUserInputRequest(request: ThreadConversationRequest): request is UserInputRequest {
-  return request.method === "item/tool/requestUserInput";
+export function maybeParseUserInputRequest(
+  request: ThreadConversationRequest
+): UserInputRequest | null {
+  const result = UserInputRequestSchema.safeParse(request);
+  if (!result.success) {
+    return null;
+  }
+  return result.data;
 }
 
 export function parseThreadConversationState(value: unknown): ThreadConversationState {

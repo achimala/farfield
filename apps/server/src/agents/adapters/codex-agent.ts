@@ -204,19 +204,7 @@ export class CodexAgentAdapter implements AgentAdapter {
       }
       this.streamEventsByThreadId.set(conversationId, current);
 
-      let parsedBroadcast: ThreadStreamStateChangedBroadcast;
-      try {
-        parsedBroadcast = parseThreadStreamStateChangedBroadcast(frame);
-      } catch (error) {
-        logger.warn(
-          {
-            conversationId,
-            error: toErrorMessage(error),
-          },
-          "thread-stream-broadcast-parse-failed",
-        );
-        return;
-      }
+      const parsedBroadcast = parseThreadStreamStateChangedBroadcast(frame);
 
       if (parsedBroadcast.params.change.type !== "snapshot") {
         return;
@@ -577,17 +565,7 @@ export class CodexAgentAdapter implements AgentAdapter {
       [];
 
     for (const event of rawEvents) {
-      try {
-        events.push(parseThreadStreamStateChangedBroadcast(event));
-      } catch (error) {
-        logger.warn(
-          {
-            threadId,
-            error: toErrorMessage(error),
-          },
-          "thread-stream-event-parse-failed",
-        );
-      }
+      events.push(parseThreadStreamStateChangedBroadcast(event));
     }
 
     if (events.length === 0) {
