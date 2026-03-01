@@ -124,7 +124,9 @@ interface RefreshFlags {
 /* ── Helpers ────────────────────────────────────────────────── */
 function formatDate(value: number | string | null | undefined): string {
   if (typeof value === "number")
-    return new Date(normalizeUnixTimestampSeconds(value) * 1000).toLocaleTimeString([], {
+    return new Date(
+      normalizeUnixTimestampSeconds(value) * 1000,
+    ).toLocaleTimeString([], {
       hour: "2-digit",
       minute: "2-digit",
     });
@@ -907,10 +909,7 @@ export function App(): React.JSX.Element {
       return liveConversationState;
     }
     return readConversationState;
-  }, [
-    liveState?.conversationState,
-    readThreadState?.thread,
-  ]);
+  }, [liveState?.conversationState, readThreadState?.thread]);
 
   const pendingRequests = useMemo(() => {
     if (!conversationState) return [] as PendingRequest[];
@@ -951,7 +950,7 @@ export function App(): React.JSX.Element {
 
     const liveProvider =
       liveState?.threadId === selectedThreadId
-        ? liveState.conversationState?.provider ?? null
+        ? (liveState.conversationState?.provider ?? null)
         : null;
     if (liveProvider) {
       return liveProvider;
@@ -2957,8 +2956,14 @@ export function App(): React.JSX.Element {
                             </div>
                           )}
                           {visibleConversationItems.map((entry) => (
-                            <div
+                            <motion.div
                               key={entry.key}
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: "auto" }}
+                              transition={{
+                                duration: 0.35,
+                                ease: [0.16, 1, 0.3, 1],
+                              }}
                               style={{ paddingTop: `${entry.spacingTop}px` }}
                             >
                               <ConversationItem
@@ -2968,7 +2973,7 @@ export function App(): React.JSX.Element {
                                 previousItemType={entry.previousItemType}
                                 nextItemType={entry.nextItemType}
                               />
-                            </div>
+                            </motion.div>
                           ))}
                         </div>
                       )}
@@ -2980,7 +2985,7 @@ export function App(): React.JSX.Element {
                   {!isChatAtBottom && turns.length > 0 && (
                     <motion.div
                       initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
                       exit={{ opacity: 0, y: 8 }}
                       transition={{ duration: 0.18 }}
                       className="absolute left-1/2 -translate-x-1/2 bottom-[7.25rem] md:bottom-[7.75rem] z-20"
@@ -3003,7 +3008,7 @@ export function App(): React.JSX.Element {
                 </AnimatePresence>
 
                 {/* Input area */}
-                <div className="relative z-10 -mt-6 px-4 pt-6 pb-0 shrink-0">
+                <div className="relative z-10 -mt-6 px-4 pt-6 pb-0 md:pb-6 shrink-0">
                   <div
                     aria-hidden="true"
                     className="pointer-events-none absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-transparent via-background/85 to-background"
@@ -3026,7 +3031,7 @@ export function App(): React.JSX.Element {
                         <motion.div
                           key="composer"
                           initial={{ opacity: 0, y: 8 }}
-                          animate={{ opacity: 1, y: 0 }}
+                          animate={{ opacity: 1, height: "auto" }}
                           exit={{ opacity: 0, y: 8 }}
                           transition={{ duration: 0.15 }}
                           className="flex flex-col gap-2"
@@ -3035,7 +3040,7 @@ export function App(): React.JSX.Element {
                             {isGenerating && (
                               <motion.div
                                 initial={{ opacity: 0, y: 4 }}
-                                animate={{ opacity: 1, y: 0 }}
+                                animate={{ opacity: 1, height: "auto" }}
                                 exit={{ opacity: 0, y: 4 }}
                                 transition={{ duration: 0.15 }}
                                 className="px-1 flex items-center gap-1.5 text-xs text-muted-foreground"

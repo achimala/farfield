@@ -41,8 +41,9 @@ export function StreamEventCard({
   const parsed = StreamEventSchema.safeParse(event);
   if (!parsed.success) {
     const issues = parsed.error.issues
-      .map((issue) =>
-        `${issue.path.length > 0 ? issue.path.join(".") : "(root)"}: ${issue.message}`,
+      .map(
+        (issue) =>
+          `${issue.path.length > 0 ? issue.path.join(".") : "(root)"}: ${issue.message}`,
       )
       .join(" | ");
     return (

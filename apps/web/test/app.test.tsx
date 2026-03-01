@@ -328,14 +328,12 @@ let liveStateResolver: (
   threadId: string;
   ownerClientId: string | null;
   conversationState: UnifiedThreadFixture | null;
-  liveStateError:
-    | {
-        kind: "reductionFailed";
-        message: string;
-        eventIndex: number | null;
-        patchIndex: number | null;
-      }
-    | null;
+  liveStateError: {
+    kind: "reductionFailed";
+    message: string;
+    eventIndex: number | null;
+    patchIndex: number | null;
+  } | null;
 };
 
 function buildConversationStateFixture(
@@ -991,7 +989,9 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Live updates failed for this thread.")).toBeTruthy();
+    expect(
+      await screen.findByText("Live updates failed for this thread."),
+    ).toBeTruthy();
     expect(screen.queryByText("Pick one option")).toBeNull();
     expect(screen.queryByText("Option A")).toBeNull();
     expect(screen.queryByText("Option B")).toBeNull();
@@ -1062,7 +1062,9 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Live updates failed for this thread.")).toBeTruthy();
+    expect(
+      await screen.findByText("Live updates failed for this thread."),
+    ).toBeTruthy();
     expect(screen.queryByText("bun run test")).toBeNull();
   });
 
@@ -1213,7 +1215,9 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Live updates failed for this thread.")).toBeTruthy();
+    expect(
+      await screen.findByText("Live updates failed for this thread."),
+    ).toBeTruthy();
     expect(screen.queryByText("git status --short")).toBeNull();
   });
 
@@ -1343,7 +1347,13 @@ describe("App", () => {
           displayName: modelId,
           description: "Default model",
           defaultReasoningEffort: "xhigh",
-          supportedReasoningEfforts: ["minimal", "low", "medium", "high", "xhigh"],
+          supportedReasoningEfforts: [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+          ],
           hidden: false,
           isDefault: true,
         },
@@ -1363,10 +1373,14 @@ describe("App", () => {
       kind: "readLiveState",
       threadId: targetThreadId,
       ownerClientId: "client-1",
-      conversationState: buildConversationStateFixture(targetThreadId, modelId, {
-        latestReasoningEffort: null,
-        collaborationModeReasoningEffort: null,
-      }),
+      conversationState: buildConversationStateFixture(
+        targetThreadId,
+        modelId,
+        {
+          latestReasoningEffort: null,
+          collaborationModeReasoningEffort: null,
+        },
+      ),
       liveStateError: null,
     });
 
@@ -1421,7 +1435,13 @@ describe("App", () => {
           displayName: modelId,
           description: "Default model",
           defaultReasoningEffort: "medium",
-          supportedReasoningEfforts: ["minimal", "low", "medium", "high", "xhigh"],
+          supportedReasoningEfforts: [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+          ],
           hidden: false,
           isDefault: true,
         },
@@ -1441,15 +1461,18 @@ describe("App", () => {
       kind: "readLiveState",
       threadId: targetThreadId,
       ownerClientId: "client-1",
-      conversationState: buildConversationStateFixture(targetThreadId, modelId, {
-        latestReasoningEffort: null,
-        collaborationModeReasoningEffort: null,
-      }),
+      conversationState: buildConversationStateFixture(
+        targetThreadId,
+        modelId,
+        {
+          latestReasoningEffort: null,
+          collaborationModeReasoningEffort: null,
+        },
+      ),
       liveStateError: null,
     });
 
     render(<App />);
     expect(await screen.findByText("xhigh")).toBeTruthy();
   });
-
 });

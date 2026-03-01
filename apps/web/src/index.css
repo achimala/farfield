@@ -184,22 +184,22 @@ pre {
     background-position: 200% center;
   }
   100% {
-    background-position: 0% center;
+    background-position: -200% center;
   }
 }
 
 .reasoning-shimmer {
   background: linear-gradient(
     90deg,
-    var(--muted-foreground) 0%,
+    var(--muted-foreground) 25%,
     var(--foreground) 50%,
-    var(--muted-foreground) 100%
+    var(--muted-foreground) 75%
   );
   background-size: 200% auto;
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: reasoning-shimmer 8s linear infinite;
+  animation: reasoning-shimmer 3s linear infinite;
 }
 
 .markdown-content > * + * {

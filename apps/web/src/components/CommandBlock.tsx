@@ -1,4 +1,4 @@
-import { memo, useState } from "react";
+import React, { memo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ChevronRight,
@@ -36,7 +36,15 @@ interface CommandBlockProps {
 }
 
 function CommandBlockComponent({ item, isActive }: CommandBlockProps) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(item.status === "inProgress");
+  const lastStatusRef = React.useRef(item.status);
+
+  React.useEffect(() => {
+    if (item.status === "completed" && lastStatusRef.current === "inProgress") {
+      setExpanded(false);
+    }
+    lastStatusRef.current = item.status;
+  }, [item.status]);
   const isCompleted = item.status === "completed";
   const isSuccess = item.exitCode === 0 || item.exitCode == null;
   const output =
@@ -87,7 +95,7 @@ function CommandBlockComponent({ item, isActive }: CommandBlockProps) {
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.22, ease: "easeInOut" }}
+            transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
             className="overflow-hidden"
           >
             <div className="border-t border-border divide-y divide-border/60">

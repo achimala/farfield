@@ -1,4 +1,4 @@
-import { memo, useState } from "react";
+import React, { memo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ChevronRight, FilePlus, FileMinus, FileEdit } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -78,7 +78,22 @@ const GUTTER_CHAR: Record<LineType, string> = {
 };
 
 function DiffBlockComponent({ changes }: DiffBlockProps) {
-  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(
+    changes.length > 0 && changes[0]?.diff == null ? 0 : null,
+  );
+  const lastDiffLengthRef = React.useRef(changes[0]?.diff?.length ?? 0);
+
+  React.useEffect(() => {
+    if (changes.length > 0) {
+      const currentDiffLength = changes[0]?.diff?.length ?? 0;
+      const prevDiffLength = lastDiffLengthRef.current;
+
+      if (currentDiffLength > 0 && prevDiffLength === 0) {
+        setExpandedIdx(null);
+      }
+      lastDiffLengthRef.current = currentDiffLength;
+    }
+  }, [changes]);
 
   return (
     <div className="rounded-xl border border-border overflow-hidden text-sm">

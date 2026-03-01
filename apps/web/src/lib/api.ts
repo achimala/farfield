@@ -356,7 +356,8 @@ function readApiFailure(payload: JsonValue): {
 
   return {
     code: parsed.data.error.code ?? null,
-    message: parsed.data.error.message ?? parsed.data.error.code ?? "Request failed",
+    message:
+      parsed.data.error.message ?? parsed.data.error.code ?? "Request failed",
     details: parsed.data.error.details,
   };
 }
