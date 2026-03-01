@@ -7,9 +7,13 @@ import { z } from "zod";
 
 const FarfieldApiOriginEnvSchema = z.object({
   FARFIELD_API_ORIGIN: z.string().url().optional(),
+  REACT_COMPILER: z.enum(["0", "1", "true", "false"]).optional(),
+  REACT_PROFILING: z.enum(["0", "1", "true", "false"]).optional(),
 });
 const parsedEnv = FarfieldApiOriginEnvSchema.safeParse({
   FARFIELD_API_ORIGIN: process.env["FARFIELD_API_ORIGIN"],
+  REACT_COMPILER: process.env["REACT_COMPILER"],
+  REACT_PROFILING: process.env["REACT_PROFILING"],
 });
 if (!parsedEnv.success) {
   throw new Error(
@@ -20,10 +24,32 @@ if (!parsedEnv.success) {
 }
 const apiOrigin =
   parsedEnv.data.FARFIELD_API_ORIGIN ?? "http://127.0.0.1:4311";
+const reactCompilerEnabled =
+  parsedEnv.data.REACT_COMPILER === "1" ||
+  parsedEnv.data.REACT_COMPILER === "true";
+const reactProfilingEnabled =
+  parsedEnv.data.REACT_PROFILING === "1" ||
+  parsedEnv.data.REACT_PROFILING === "true";
+
+const resolveAlias: Record<string, string> = {
+  "@": path.resolve(__dirname, "./src"),
+};
+
+if (reactProfilingEnabled) {
+  resolveAlias["react-dom/client"] = "react-dom/profiling";
+}
 
 export default defineConfig({
   plugins: [
-    react(),
+    react(
+      reactCompilerEnabled
+        ? {
+            babel: {
+              plugins: ["babel-plugin-react-compiler"],
+            },
+          }
+        : undefined,
+    ),
     tailwindcss(),
     VitePWA({
       registerType: "autoUpdate",
@@ -41,9 +67,7 @@ export default defineConfig({
     })
   ],
   resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-    },
+    alias: resolveAlias,
   },
   server: {
     host: true,
