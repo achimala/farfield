@@ -855,6 +855,33 @@ function basenameFromPath(value: string): string {
   return parts[parts.length - 1] ?? normalized;
 }
 
+function normalizeManualGroupOrder(
+  manualOrder: readonly string[],
+  autoSortedKeys: readonly string[],
+): string[] {
+  const availableKeys = new Set(autoSortedKeys);
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const key of manualOrder) {
+    if (!availableKeys.has(key) || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    normalized.push(key);
+  }
+
+  for (const key of autoSortedKeys) {
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    normalized.push(key);
+  }
+
+  return normalized;
+}
+
 function parseUiStateFromPath(pathname: string): {
   threadId: string | null;
   tab: "chat" | "debug";
@@ -1211,21 +1238,17 @@ export function App(): React.JSX.Element {
     }
 
     const allGroups = Array.from(groups.values());
-    const orderIndex = new Map(sidebarOrder.map((key, index) => [key, index]));
-    allGroups.sort((left, right) => {
-      const leftIndex = orderIndex.get(left.key);
-      const rightIndex = orderIndex.get(right.key);
-      if (leftIndex !== undefined && rightIndex !== undefined) {
-        return leftIndex - rightIndex;
-      }
-      if (leftIndex !== undefined) {
-        return -1;
-      }
-      if (rightIndex !== undefined) {
-        return 1;
-      }
-      return right.latestUpdatedAt - left.latestUpdatedAt;
-    });
+    const autoSortedKeys = allGroups
+      .slice()
+      .sort((left, right) => right.latestUpdatedAt - left.latestUpdatedAt)
+      .map((group) => group.key);
+    const normalizedOrder = normalizeManualGroupOrder(sidebarOrder, autoSortedKeys);
+    const orderIndex = new Map(normalizedOrder.map((key, index) => [key, index]));
+    allGroups.sort(
+      (left, right) =>
+        (orderIndex.get(left.key) ?? Number.MAX_SAFE_INTEGER) -
+        (orderIndex.get(right.key) ?? Number.MAX_SAFE_INTEGER),
+    );
 
     return allGroups;
   }, [agentDescriptors, projectColors, sidebarOrder, threads]);
@@ -3469,10 +3492,10 @@ export function App(): React.JSX.Element {
                       return;
                     }
                     setSidebarOrder((previous) => {
-                      const keys =
-                        previous.length > 0
-                          ? [...previous]
-                          : groupedThreads.map((entry) => entry.key);
+                      const keys = normalizeManualGroupOrder(
+                        previous,
+                        groupedThreads.map((entry) => entry.key),
+                      );
                       const sourceIndex = keys.indexOf(sourceKey);
                       const targetIndex = keys.indexOf(group.key);
                       if (sourceIndex === -1) {
