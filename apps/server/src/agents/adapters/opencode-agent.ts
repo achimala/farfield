@@ -1,11 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
-import { OpenCodeConnection, OpenCodeMonitorService } from "@farfield/opencode-api";
+import {
+  OpenCodeConnection,
+  OpenCodeMonitorService,
+} from "@farfield/opencode-api";
 import {
   AppServerCollaborationModeListResponseSchema,
   AppServerListModelsResponseSchema,
   AppServerThreadListItemSchema,
-  parseThreadConversationState
+  parseThreadConversationState,
 } from "@farfield/protocol";
 import type {
   AgentAdapter,
@@ -17,7 +20,7 @@ import type {
   AgentListThreadsResult,
   AgentReadThreadInput,
   AgentReadThreadResult,
-  AgentSendMessageInput
+  AgentSendMessageInput,
 } from "../types.js";
 
 export interface OpenCodeAgentOptions {
@@ -35,7 +38,7 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
     canSubmitUserInput: false,
     canReadLiveState: false,
     canReadStreamEvents: false,
-    canReadRateLimits: false
+    canReadRateLimits: false,
   };
 
   private readonly connection: OpenCodeConnection;
@@ -53,7 +56,7 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
   public constructor(options: OpenCodeAgentOptions = {}) {
     this.connection = new OpenCodeConnection({
       ...(options.url ? { url: options.url } : {}),
-      ...(options.port !== undefined ? { port: options.port } : {})
+      ...(options.port !== undefined ? { port: options.port } : {}),
     });
     this.service = new OpenCodeMonitorService(this.connection);
   }
@@ -78,15 +81,22 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
     await this.connection.stop();
   }
 
-  public async listThreads(_input: AgentListThreadsInput): Promise<AgentListThreadsResult> {
+  public async listThreads(
+    _input: AgentListThreadsInput,
+  ): Promise<AgentListThreadsResult> {
     this.ensureConnected();
 
-    const sessions = new Map<string, Awaited<ReturnType<OpenCodeMonitorService["listSessions"]>>["data"][number]>();
+    const sessions = new Map<
+      string,
+      Awaited<
+        ReturnType<OpenCodeMonitorService["listSessions"]>
+      >["data"][number]
+    >();
     const directories = await this.listProjectDirectories();
 
     if (directories.length > 0) {
-      for (const directory of directories) {
-        try {
+      await Promise.all(
+        directories.map(async (directory) => {
           const result = await this.service.listSessions({ directory });
           for (const item of result.data) {
             sessions.set(item.id, item);
@@ -94,10 +104,8 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
               this.threadDirectoryById.set(item.id, path.resolve(item.cwd));
             }
           }
-        } catch {
-          continue;
-        }
-      }
+        }),
+      );
     } else {
       const result = await this.service.listSessions();
       for (const item of result.data) {
@@ -109,26 +117,33 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
     }
 
     const mappedData = Array.from(sessions.values()).map((session) =>
-      AppServerThreadListItemSchema.parse(session)
+      AppServerThreadListItemSchema.parse(session),
     );
 
     return {
       data: mappedData,
-      nextCursor: null
+      nextCursor: null,
     };
   }
 
-  public async createThread(input: AgentCreateThreadInput): Promise<AgentCreateThreadResult> {
+  public async createThread(
+    input: AgentCreateThreadInput,
+  ): Promise<AgentCreateThreadResult> {
     this.ensureConnected();
 
-    const directory = input.cwd ? normalizeDirectoryInput(input.cwd) : undefined;
+    const directory = input.cwd
+      ? normalizeDirectoryInput(input.cwd)
+      : undefined;
     const result = await this.service.createSession({
       ...(input.model ? { title: input.model } : {}),
-      ...(directory ? { directory } : {})
+      ...(directory ? { directory } : {}),
     });
 
     if (result.mapped.cwd && result.mapped.cwd.trim()) {
-      this.threadDirectoryById.set(result.threadId, path.resolve(result.mapped.cwd));
+      this.threadDirectoryById.set(
+        result.threadId,
+        path.resolve(result.mapped.cwd),
+      );
     } else if (directory) {
       this.threadDirectoryById.set(result.threadId, directory);
     }
@@ -138,11 +153,13 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
     return {
       threadId: result.threadId,
       thread: mappedThread,
-      cwd: mappedThread.cwd
+      cwd: mappedThread.cwd,
     };
   }
 
-  public async readThread(input: AgentReadThreadInput): Promise<AgentReadThreadResult> {
+  public async readThread(
+    input: AgentReadThreadInput,
+  ): Promise<AgentReadThreadResult> {
     this.ensureConnected();
 
     const directory = this.resolveThreadDirectory(input.threadId);
@@ -153,7 +170,7 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
     }
 
     return {
-      thread: parseThreadConversationState(state)
+      thread: parseThreadConversationState(state),
     };
   }
 
@@ -163,24 +180,25 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
     const directory = input.cwd
       ? normalizeDirectoryInput(input.cwd)
       : this.resolveThreadDirectory(input.threadId);
-
     const selectedMode = this.threadModeById.get(input.threadId);
-    const modelSelection = selectedMode?.model ? parseModelSelection(selectedMode.model) : null;
+    const modelSelection = selectedMode?.model
+      ? parseModelSelection(selectedMode.model)
+      : null;
 
     await this.service.sendMessage({
       sessionId: input.threadId,
       text: input.text,
       ...(selectedMode
         ? {
-            agent: selectedMode.mode
+            agent: selectedMode.mode,
           }
         : {}),
       ...(modelSelection
         ? {
-            model: modelSelection
+            model: modelSelection,
           }
         : {}),
-      ...(directory ? { directory } : {})
+      ...(directory ? { directory } : {}),
     });
   }
 
@@ -235,12 +253,12 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
                 { reasoningEffort: "minimal", description: "Minimal reasoning" },
                 { reasoningEffort: "low", description: "Low reasoning" },
                 { reasoningEffort: "medium", description: "Medium reasoning" },
-                { reasoningEffort: "high", description: "High reasoning" }
+                { reasoningEffort: "high", description: "High reasoning" },
               ]
             : [{ reasoningEffort: "none", description: "Reasoning disabled" }],
           defaultReasoningEffort: supportsReasoning ? "medium" : "none",
           supportsPersonality: false,
-          upgrade: null
+          upgrade: null,
         });
       }
     }
@@ -249,7 +267,7 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
 
     return AppServerListModelsResponseSchema.parse({
       data: models.slice(0, Math.max(1, limit)),
-      nextCursor: null
+      nextCursor: null,
     });
   }
 
@@ -263,7 +281,7 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
         mode: agent.name,
         model: agent.model ? `${agent.model.providerID}/${agent.model.modelID}` : null,
         reasoning_effort: null,
-        developer_instructions: agent.prompt ?? null
+        developer_instructions: agent.prompt ?? null,
       };
     });
 
@@ -284,10 +302,10 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
     this.threadModeById.set(input.threadId, {
       mode: input.collaborationMode.mode,
       model: input.collaborationMode.settings.model ?? null,
-      reasoningEffort: input.collaborationMode.settings.reasoning_effort ?? null
+      reasoningEffort: input.collaborationMode.settings.reasoning_effort ?? null,
     });
     return {
-      ownerClientId: "opencode"
+      ownerClientId: "opencode",
     };
   }
 
@@ -306,7 +324,26 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
   }
 }
 
-function parseModelSelection(model: string): { providerID: string; modelID: string } | null {
+function normalizeDirectoryInput(directory: string): string {
+  const trimmed = directory.trim();
+  if (trimmed.length === 0) {
+    throw new Error("Directory is required");
+  }
+
+  const resolved = path.resolve(trimmed);
+  if (!fs.existsSync(resolved)) {
+    throw new Error(`Directory does not exist: ${resolved}`);
+  }
+  const stats = fs.statSync(resolved);
+  if (!stats.isDirectory()) {
+    throw new Error(`Path is not a directory: ${resolved}`);
+  }
+  return resolved;
+}
+
+function parseModelSelection(
+  model: string,
+): { providerID: string; modelID: string } | null {
   const trimmed = model.trim();
   if (!trimmed) {
     return null;
@@ -325,12 +362,12 @@ function parseModelSelection(model: string): { providerID: string; modelID: stri
 
   return {
     providerID,
-    modelID
+    modelID,
   };
 }
 
 function mapInputModalities(
-  modalities: Array<"text" | "audio" | "image" | "video" | "pdf">
+  modalities: Array<"text" | "audio" | "image" | "video" | "pdf">,
 ): Array<"text" | "image"> {
   const mapped = new Set<"text" | "image">();
   for (const modality of modalities) {
@@ -344,23 +381,6 @@ function mapInputModalities(
   }
 
   return Array.from(mapped);
-}
-
-function normalizeDirectoryInput(directory: string): string {
-  const trimmed = directory.trim();
-  if (trimmed.length === 0) {
-    throw new Error("Directory is required");
-  }
-
-  const resolved = path.resolve(trimmed);
-  if (!fs.existsSync(resolved)) {
-    throw new Error(`Directory does not exist: ${resolved}`);
-  }
-  const stats = fs.statSync(resolved);
-  if (!stats.isDirectory()) {
-    throw new Error(`Path is not a directory: ${resolved}`);
-  }
-  return resolved;
 }
 
 function normalizeDirectoryList(directories: string[]): string[] {

@@ -7,7 +7,8 @@ import type {
   CollaborationMode,
   AppServerGetAccountRateLimitsResponse,
   IpcFrame,
-  UserInputResponsePayload
+  UserInputRequestId,
+  UserInputResponsePayload,
 } from "@farfield/protocol";
 
 export type AgentId = "codex" | "opencode";
@@ -86,7 +87,7 @@ export interface AgentSetCollaborationModeInput {
 export interface AgentSubmitUserInputInput {
   threadId: string;
   ownerClientId?: string;
-  requestId: number;
+  requestId: UserInputRequestId;
   response: UserInputResponsePayload;
 }
 
@@ -99,7 +100,7 @@ export interface AgentThreadLiveState {
   ownerClientId: string | null;
   conversationState: AppServerReadThreadResponse["thread"] | null;
   liveStateError: {
-    kind: "reductionFailed";
+    kind: "reductionFailed" | "parseFailed";
     message: string;
     eventIndex: number | null;
     patchIndex: number | null;
@@ -139,12 +140,17 @@ export interface AgentAdapter {
 
   listModels?(limit: number): Promise<AppServerListModelsResponse>;
   listCollaborationModes?(): Promise<AppServerCollaborationModeListResponse>;
-  setCollaborationMode?(input: AgentSetCollaborationModeInput): Promise<{ ownerClientId: string }>;
+  setCollaborationMode?(
+    input: AgentSetCollaborationModeInput,
+  ): Promise<{ ownerClientId: string }>;
   submitUserInput?(
-    input: AgentSubmitUserInputInput
-  ): Promise<{ ownerClientId: string; requestId: number }>;
+    input: AgentSubmitUserInputInput,
+  ): Promise<{ ownerClientId: string; requestId: UserInputRequestId }>;
   readLiveState?(threadId: string): Promise<AgentThreadLiveState>;
-  readStreamEvents?(threadId: string, limit: number): Promise<AgentThreadStreamEvents>;
+  readStreamEvents?(
+    threadId: string,
+    limit: number,
+  ): Promise<AgentThreadStreamEvents>;
   listProjectDirectories?(): Promise<string[]>;
   readRateLimits?(): Promise<AppServerGetAccountRateLimitsResponse>;
 }

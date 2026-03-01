@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import readline from "node:readline";
 import { randomUUID } from "node:crypto";
+import type { AppServerClientRequestMethod } from "@farfield/protocol";
 import {
   AppServerRpcError,
   AppServerTransportError
@@ -8,7 +9,7 @@ import {
 import { JsonRpcRequestSchema, parseJsonRpcIncomingMessage } from "./json-rpc.js";
 
 export interface AppServerTransport {
-  request(method: string, params: unknown, timeoutMs?: number): Promise<unknown>;
+  request(method: AppServerClientRequestMethod, params: unknown, timeoutMs?: number): Promise<unknown>;
   close(): Promise<void>;
 }
 
@@ -87,25 +88,8 @@ export class ChildProcessAppServerTransport implements AppServerTransport {
         return;
       }
 
-      let raw: unknown;
-      try {
-        raw = JSON.parse(trimmed);
-      } catch {
-        this.rejectAll(new AppServerTransportError("app-server returned invalid JSON"));
-        return;
-      }
-
-      let message;
-      try {
-        message = parseJsonRpcIncomingMessage(raw);
-      } catch (error) {
-        this.rejectAll(
-          new AppServerTransportError(
-            `app-server response schema mismatch: ${error instanceof Error ? error.message : String(error)}`
-          )
-        );
-        return;
-      }
+      const raw = JSON.parse(trimmed);
+      const message = parseJsonRpcIncomingMessage(raw);
 
       if (message.kind === "notification") {
         return;
@@ -140,11 +124,7 @@ export class ChildProcessAppServerTransport implements AppServerTransport {
         return;
       }
 
-      try {
-        this.onStderr?.(trimmed);
-      } catch {
-        // Never fail protocol requests because of stderr log handling.
-      }
+      this.onStderr?.(trimmed);
     });
 
     this.process = child;
@@ -158,7 +138,11 @@ export class ChildProcessAppServerTransport implements AppServerTransport {
     this.pending.clear();
   }
 
-  private async sendRequest(method: string, params: unknown, timeoutMs?: number): Promise<unknown> {
+  private async sendRequest(
+    method: AppServerClientRequestMethod,
+    params: unknown,
+    timeoutMs?: number
+  ): Promise<unknown> {
     const processHandle = this.process;
     if (!processHandle) {
       throw new AppServerTransportError("app-server failed to start");
@@ -235,7 +219,11 @@ export class ChildProcessAppServerTransport implements AppServerTransport {
     return this.initializeInFlight;
   }
 
-  public async request(method: string, params: unknown, timeoutMs?: number): Promise<unknown> {
+  public async request(
+    method: AppServerClientRequestMethod,
+    params: unknown,
+    timeoutMs?: number
+  ): Promise<unknown> {
     this.ensureStarted();
 
     if (method !== "initialize") {

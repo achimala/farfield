@@ -21,7 +21,7 @@
           ]
         },
         {
-          "description": "User approved the command and future identical commands should run without prompting.",
+          "description": "User approved the command and future prompts in the same session-scoped approval cache should run without prompting.",
           "type": "string",
           "enum": [
             "acceptForSession"
@@ -53,6 +53,28 @@
           "title": "AcceptWithExecpolicyAmendmentCommandExecutionApprovalDecision"
         },
         {
+          "description": "User chose a persistent network policy rule (allow/deny) for this host.",
+          "type": "object",
+          "required": [
+            "applyNetworkPolicyAmendment"
+          ],
+          "properties": {
+            "applyNetworkPolicyAmendment": {
+              "type": "object",
+              "required": [
+                "network_policy_amendment"
+              ],
+              "properties": {
+                "network_policy_amendment": {
+                  "$ref": "#/definitions/NetworkPolicyAmendment"
+                }
+              }
+            }
+          },
+          "additionalProperties": false,
+          "title": "ApplyNetworkPolicyAmendmentCommandExecutionApprovalDecision"
+        },
+        {
           "description": "User denied the command. The agent will continue the turn.",
           "type": "string",
           "enum": [
@@ -66,6 +88,28 @@
             "cancel"
           ]
         }
+      ]
+    },
+    "NetworkPolicyAmendment": {
+      "type": "object",
+      "required": [
+        "action",
+        "host"
+      ],
+      "properties": {
+        "action": {
+          "$ref": "#/definitions/NetworkPolicyRuleAction"
+        },
+        "host": {
+          "type": "string"
+        }
+      }
+    },
+    "NetworkPolicyRuleAction": {
+      "type": "string",
+      "enum": [
+        "allow",
+        "deny"
       ]
     }
   }

@@ -4,48 +4,42 @@ import fs from "node:fs";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { AppServerRpcError, type SendRequestOptions } from "@farfield/api";
-import type { IpcFrame, IpcRequestFrame } from "@farfield/protocol";
-import { z } from "zod";
+import type { IpcFrame } from "@farfield/protocol";
 import {
-  InterruptBodySchema,
-  AgentScopedQuerySchema,
+  UnifiedCommandSchema,
+  type UnifiedEvent,
+  type UnifiedProviderId,
+} from "@farfield/unified-surface";
+import {
   parseBody,
-  parseQuery,
-  ReplayBodySchema,
-  SendMessageBodySchema,
-  StartThreadBodySchema,
-  SetModeBodySchema,
-  SubmitUserInputBodySchema,
   TraceMarkBodySchema,
-  TraceStartBodySchema
+  TraceStartBodySchema,
 } from "./http-schemas.js";
 import { logger } from "./logger.js";
 import {
   parseServerCliOptions,
-  formatServerHelpText
+  formatServerHelpText,
 } from "./agents/cli-options.js";
 import { AgentRegistry } from "./agents/registry.js";
 import { ThreadIndex } from "./agents/thread-index.js";
 import { CodexAgentAdapter } from "./agents/adapters/codex-agent.js";
 import { OpenCodeAgentAdapter } from "./agents/adapters/opencode-agent.js";
-import type { AgentAdapter, AgentDescriptor, AgentId } from "./agents/types.js";
+import type { AgentAdapter } from "./agents/types.js";
+import {
+  UnifiedBackendFeatureError,
+  buildUnifiedFeatureMatrix,
+  createUnifiedProviderAdapters,
+} from "./unified/adapter.js";
 
 const HOST = process.env["HOST"] ?? "127.0.0.1";
 const PORT = Number(process.env["PORT"] ?? 4311);
 const HISTORY_LIMIT = 2_000;
 const USER_AGENT = "farfield/0.2.0";
 const IPC_RECONNECT_DELAY_MS = 1_000;
+const SIDEBAR_PREVIEW_MAX_CHARS = 180;
 
 const TRACE_DIR = path.resolve(process.cwd(), "traces");
 const DEFAULT_WORKSPACE = path.resolve(process.cwd());
-const CODEX_GLOBAL_STATE_PATH = path.join(os.homedir(), ".codex", ".codex-global-state.json");
-
-const CodexGlobalStateSchema = z
-  .object({
-    "electron-workspace-root-labels": z.record(z.string()).default({})
-  })
-  .passthrough();
 
 interface HistoryEntry {
   id: string;
@@ -68,14 +62,6 @@ interface TraceSummary {
 interface ActiveTrace {
   summary: TraceSummary;
   stream: fs.WriteStream;
-}
-
-interface ParsedReplayFrame {
-  type: "request" | "broadcast";
-  method: string;
-  params: IpcRequestFrame["params"];
-  targetClientId?: string;
-  version?: number;
 }
 
 function resolveCodexExecutablePath(): string {
@@ -108,32 +94,11 @@ function resolveGitCommitHash(): string | null {
   try {
     const hash = execFileSync("git", ["rev-parse", "--short", "HEAD"], {
       cwd: DEFAULT_WORKSPACE,
-      encoding: "utf8"
+      encoding: "utf8",
     }).trim();
     return hash.length > 0 ? hash : null;
   } catch {
     return null;
-  }
-}
-
-function readCodexWorkspaceRootLabels(): Record<string, string> {
-  try {
-    if (!fs.existsSync(CODEX_GLOBAL_STATE_PATH)) {
-      return {};
-    }
-
-    const rawState = fs.readFileSync(CODEX_GLOBAL_STATE_PATH, "utf8");
-    const parsedState = CodexGlobalStateSchema.parse(JSON.parse(rawState));
-    return parsedState["electron-workspace-root-labels"];
-  } catch (error) {
-    logger.warn(
-      {
-        path: CODEX_GLOBAL_STATE_PATH,
-        error: toErrorMessage(error)
-      },
-      "codex-workspace-labels-read-failed"
-    );
-    return {};
   }
 }
 
@@ -166,14 +131,18 @@ function parseBoolean(value: string | null, fallback: boolean): boolean {
   return fallback;
 }
 
-function jsonResponse(res: ServerResponse, statusCode: number, body: unknown): void {
+function jsonResponse(
+  res: ServerResponse,
+  statusCode: number,
+  body: unknown,
+): void {
   const encoded = Buffer.from(JSON.stringify(body), "utf8");
   res.writeHead(statusCode, {
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": encoded.length,
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "content-type",
-    "Access-Control-Allow-Methods": "GET,POST,OPTIONS"
+    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
   });
   res.end(encoded);
 }
@@ -211,38 +180,19 @@ function toErrorMessage(error: unknown): string {
   return String(error);
 }
 
+function compactSidebarPreview(preview: string): string {
+  const compact = preview.replace(/\s+/g, " ").trim();
+  if (compact.length <= SIDEBAR_PREVIEW_MAX_CHARS) {
+    return compact;
+  }
+  const sliceLength = Math.max(0, SIDEBAR_PREVIEW_MAX_CHARS - 3);
+  return `${compact.slice(0, sliceLength).trimEnd()}...`;
+}
+
 function ensureTraceDirectory(): void {
   if (!fs.existsSync(TRACE_DIR)) {
     fs.mkdirSync(TRACE_DIR, { recursive: true });
   }
-}
-
-function parseReplayFrame(payload: unknown): ParsedReplayFrame {
-  if (!payload || typeof payload !== "object") {
-    throw new Error("Entry payload is unavailable");
-  }
-
-  const record = payload as Record<string, unknown>;
-  const type = record["type"];
-  if (type !== "request" && type !== "broadcast") {
-    throw new Error("Only captured request and broadcast entries can be replayed");
-  }
-
-  const method = record["method"];
-  if (typeof method !== "string" || method.trim().length === 0) {
-    throw new Error("Captured IPC frame has invalid method");
-  }
-
-  const targetClientId = record["targetClientId"];
-  const version = record["version"];
-
-  return {
-    type,
-    method,
-    params: record["params"],
-    ...(typeof targetClientId === "string" ? { targetClientId } : {}),
-    ...(typeof version === "number" ? { version } : {})
-  };
 }
 
 const parsedCli = (() => {
@@ -263,13 +213,14 @@ if (parsedCli.showHelp) {
 }
 
 const configuredAgentIds = parsedCli.agentIds;
+const configuredUnifiedProviders: UnifiedProviderId[] = [...configuredAgentIds];
 const codexExecutable = resolveCodexExecutablePath();
 const ipcSocketPath = resolveIpcSocketPath();
 const gitCommit = resolveGitCommitHash();
 
 const history: HistoryEntry[] = [];
 const historyById = new Map<string, unknown>();
-const sseClients = new Set<ServerResponse>();
+const unifiedSseClients = new Set<ServerResponse>();
 const SSE_KEEPALIVE_INTERVAL_MS = 15_000;
 const threadIndex = new ThreadIndex();
 
@@ -290,7 +241,7 @@ function pushHistory(
   source: HistoryEntry["source"],
   direction: HistoryEntry["direction"],
   payload: unknown,
-  meta: Record<string, unknown> = {}
+  meta: Record<string, unknown> = {},
 ): HistoryEntry {
   const entry: HistoryEntry = {
     id: randomUUID(),
@@ -298,7 +249,7 @@ function pushHistory(
     source,
     direction,
     payload,
-    meta
+    meta,
   };
 
   history.push(entry);
@@ -312,65 +263,13 @@ function pushHistory(
   }
 
   recordTraceEvent({ type: "history", ...entry });
-  broadcastSse({ type: "history", entry });
   return entry;
 }
 
-function summarizeActionDetails(details: Record<string, unknown>): Record<string, unknown> {
-  const summary: Record<string, unknown> = {};
-  const keys = ["agentId", "threadId", "ownerClientId", "requestId", "textLength", "cwd", "model"];
-
-  for (const key of keys) {
-    const value = details[key];
-    if (value !== undefined) {
-      summary[key] = value;
-    }
-  }
-
-  return summary;
-}
-
-function pushActionEvent(
-  action: string,
-  stage: "attempt" | "success" | "error",
-  details: Record<string, unknown>
+function pushSystem(
+  message: string,
+  details: Record<string, unknown> = {},
 ): void {
-  logger.info(
-    {
-      action,
-      stage,
-      ...summarizeActionDetails(details)
-    },
-    "action-event"
-  );
-  pushHistory("app", "out", {
-    type: "action",
-    action,
-    stage,
-    ...details
-  }, details);
-}
-
-function pushActionError(
-  action: string,
-  error: unknown,
-  details: Record<string, unknown>
-): string {
-  const message = toErrorMessage(error);
-  logger.error(
-    {
-      action,
-      error: message,
-      ...summarizeActionDetails(details)
-    },
-    "action-error"
-  );
-  pushActionEvent(action, "error", { ...details, error: message });
-  pushSystem("Action failed", { action, ...details, error: message });
-  return message;
-}
-
-function pushSystem(message: string, details: Record<string, unknown> = {}): void {
   logger.info({ message, ...details }, "system-event");
   pushHistory("system", "system", { message, details });
 }
@@ -389,13 +288,13 @@ for (const agentId of configuredAgentIds) {
       reconnectDelayMs: IPC_RECONNECT_DELAY_MS,
       onStateChange: () => {
         broadcastRuntimeState();
-      }
+      },
     });
 
     codexAdapter.onIpcFrame((event) => {
       pushHistory("ipc", event.direction, event.frame, {
         method: event.method,
-        threadId: event.threadId
+        threadId: event.threadId,
       });
     });
 
@@ -410,22 +309,10 @@ for (const agentId of configuredAgentIds) {
 }
 
 const registry = new AgentRegistry(adapters);
-
-function buildAgentDescriptor(
-  adapter: AgentAdapter,
-  projectDirectories: string[],
-  projectLabels: Record<string, string>
-): AgentDescriptor {
-  return {
-    id: adapter.id,
-    label: adapter.label,
-    enabled: adapter.isEnabled(),
-    connected: adapter.isConnected(),
-    capabilities: adapter.capabilities,
-    projectDirectories,
-    projectLabels
-  };
-}
+const unifiedAdapters = createUnifiedProviderAdapters({
+  codex: codexAdapter,
+  opencode: openCodeAdapter,
+});
 
 function getRuntimeStateSnapshot(): Record<string, unknown> {
   const codexRuntimeState = codexAdapter?.getRuntimeState();
@@ -441,111 +328,76 @@ function getRuntimeStateSnapshot(): Record<string, unknown> {
     lastError: runtimeLastError ?? codexRuntimeState?.lastError ?? null,
     historyCount: history.length,
     threadOwnerCount: codexAdapter?.getThreadOwnerCount() ?? 0,
-    activeTrace: activeTrace?.summary ?? null
+    activeTrace: activeTrace?.summary ?? null,
   };
 }
 
-function broadcastSse(payload: unknown): void {
-  for (const client of sseClients) {
-    eventResponse(client, payload);
+function resolveUnifiedAdapter(provider: UnifiedProviderId) {
+  return unifiedAdapters[provider];
+}
+
+function listUnifiedProviders(): UnifiedProviderId[] {
+  return configuredUnifiedProviders;
+}
+
+function buildUnifiedProviderStateEvents(): UnifiedEvent[] {
+  return listUnifiedProviders().map((provider) => {
+    const adapter = resolveUnifiedAdapter(provider);
+    const connected = adapter
+      ? (registry.getAdapter(provider)?.isConnected() ?? false)
+      : false;
+    const enabled = adapter
+      ? (registry.getAdapter(provider)?.isEnabled() ?? false)
+      : false;
+
+    return {
+      kind: "providerStateChanged",
+      provider,
+      enabled,
+      connected,
+      lastError:
+        provider === "codex"
+          ? (runtimeLastError ??
+            codexAdapter?.getRuntimeState().lastError ??
+            null)
+          : (runtimeLastError ?? null),
+    };
+  });
+}
+
+function broadcastUnifiedEvent(event: UnifiedEvent): void {
+  for (const client of unifiedSseClients) {
+    eventResponse(client, event);
   }
 }
 
 function writeSseKeepalive(): void {
-  for (const client of sseClients) {
+  for (const client of unifiedSseClients) {
     try {
       client.write(": keepalive\n\n");
     } catch {
-      sseClients.delete(client);
+      unifiedSseClients.delete(client);
     }
   }
 }
 
 function broadcastRuntimeState(): void {
-  broadcastSse({
-    type: "state",
-    state: getRuntimeStateSnapshot()
-  });
+  for (const event of buildUnifiedProviderStateEvents()) {
+    broadcastUnifiedEvent(event);
+  }
 }
 
 setInterval(() => {
   writeSseKeepalive();
 }, SSE_KEEPALIVE_INTERVAL_MS);
 
-function resolveCreateThreadAdapter(
-  requestedAgentId: AgentId | undefined
-): AgentAdapter | null {
-  if (requestedAgentId) {
-    const adapter = registry.getAdapter(requestedAgentId);
-    if (!adapter) {
-      return null;
-    }
-    if (!adapter.isEnabled()) {
-      return null;
-    }
-    return adapter;
+function parseUnifiedProviderId(
+  value: string | null,
+): UnifiedProviderId | null {
+  if (value === "codex" || value === "opencode") {
+    return value;
   }
-
-  const defaultAgentId = registry.resolveDefaultAgentId();
-  if (!defaultAgentId) {
-    return null;
-  }
-
-  return registry.getAdapter(defaultAgentId);
-}
-
-function resolveCapabilityAdapter(
-  capability: keyof AgentAdapter["capabilities"],
-  requestedAgentId: AgentId | undefined
-): AgentAdapter | null {
-  if (requestedAgentId) {
-    const adapter = registry.getAdapter(requestedAgentId);
-    if (!adapter || !adapter.isEnabled() || !adapter.isConnected()) {
-      return null;
-    }
-    if (!adapter.capabilities[capability]) {
-      return null;
-    }
-    return adapter;
-  }
-
-  return registry.resolveFirstWithCapability(capability);
-}
-
-function resolveAdapterForThread(threadId: string):
-  | { ok: true; adapter: AgentAdapter; agentId: AgentId }
-  | { ok: false; status: number; error: string } {
-  const registeredAgentId = threadIndex.resolve(threadId);
-  if (!registeredAgentId) {
-    return {
-      ok: false,
-      status: 404,
-      error: `Thread ${threadId} is not registered. Refresh thread list and try again.`
-    };
-  }
-
-  const adapter = registry.getAdapter(registeredAgentId);
-  if (!adapter || !adapter.isEnabled()) {
-    return {
-      ok: false,
-      status: 503,
-      error: `Agent ${registeredAgentId} is not enabled for thread ${threadId}.`
-    };
-  }
-
-  if (!adapter.isConnected()) {
-    return {
-      ok: false,
-      status: 503,
-      error: `Agent ${registeredAgentId} is not connected for thread ${threadId}.`
-    };
-  }
-
-  return {
-    ok: true,
-    adapter,
-    agentId: registeredAgentId
-  };
+  return null;
 }
 
 const server = http.createServer(async (req, res) => {
@@ -564,481 +416,401 @@ const server = http.createServer(async (req, res) => {
     const pathname = url.pathname;
     const segments = pathname.split("/").filter(Boolean);
 
-    if (req.method === "GET" && pathname === "/events") {
+    if (req.method === "GET" && pathname === "/api/health") {
+      jsonResponse(res, 200, {
+        ok: true,
+        state: getRuntimeStateSnapshot(),
+      });
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/unified/events") {
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
         "X-Accel-Buffering": "no",
-        "Access-Control-Allow-Origin": "*"
+        "Access-Control-Allow-Origin": "*",
       });
       res.write("retry: 1000\n\n");
 
-      sseClients.add(res);
-      eventResponse(res, {
-        type: "state",
-        state: getRuntimeStateSnapshot()
-      });
+      unifiedSseClients.add(res);
+      for (const event of buildUnifiedProviderStateEvents()) {
+        eventResponse(res, event);
+      }
 
       req.on("close", () => {
-        sseClients.delete(res);
+        unifiedSseClients.delete(res);
       });
       return;
     }
 
-    if (req.method === "GET" && pathname === "/api/health") {
-      jsonResponse(res, 200, {
-        ok: true,
-        state: getRuntimeStateSnapshot()
+    if (req.method === "GET" && pathname === "/api/unified/features") {
+      const features = buildUnifiedFeatureMatrix({
+        codex: codexAdapter,
+        opencode: openCodeAdapter,
       });
-      return;
-    }
-
-    if (req.method === "GET" && pathname === "/api/agents") {
-      const codexWorkspaceRootLabels = codexAdapter ? readCodexWorkspaceRootLabels() : {};
-      const descriptors = await Promise.all(
-        registry.listAdapters().map(async (adapter) => {
-          const projectLabels = adapter.id === "codex" ? codexWorkspaceRootLabels : {};
-          if (!adapter.listProjectDirectories || !adapter.isConnected()) {
-            return buildAgentDescriptor(adapter, [], projectLabels);
-          }
-
-          try {
-            const projectDirectories = await adapter.listProjectDirectories();
-            return buildAgentDescriptor(adapter, projectDirectories, projectLabels);
-          } catch (error) {
-            logger.warn(
-              {
-                agentId: adapter.id,
-                error: toErrorMessage(error)
-              },
-              "agent-project-directory-list-failed"
-            );
-            return buildAgentDescriptor(adapter, [], projectLabels);
-          }
-        })
-      );
-
-      const defaultAgentId = registry.resolveDefaultAgentId() ?? configuredAgentIds[0];
 
       jsonResponse(res, 200, {
         ok: true,
-        agents: descriptors,
-        defaultAgentId
+        features,
       });
       return;
     }
 
-    if (req.method === "POST" && pathname === "/api/threads") {
-      const body = parseBody(StartThreadBodySchema, await readJsonBody(req));
-      const adapter = resolveCreateThreadAdapter(body.agentId);
+    if (req.method === "POST" && pathname === "/api/unified/command") {
+      const command = UnifiedCommandSchema.parse(await readJsonBody(req));
+      const adapter = resolveUnifiedAdapter(command.provider);
 
       if (!adapter) {
         jsonResponse(res, 503, {
           ok: false,
-          error: body.agentId
-            ? `Requested agent ${body.agentId} is not enabled.`
-            : "No enabled agent is available."
+          error: {
+            code: "providerDisabled",
+            message: `Provider ${command.provider} is not available`,
+          },
         });
         return;
       }
 
-      pushActionEvent("thread-create", "attempt", {
-        agentId: adapter.id,
-        cwd: body.cwd ?? null,
-        model: body.model ?? null
-      });
-
       try {
-        const createInput = {
-          ...(body.cwd
-            ? { cwd: body.cwd }
-            : adapter.id === "codex"
-              ? { cwd: DEFAULT_WORKSPACE }
-              : {}),
-          ...(body.model ? { model: body.model } : {}),
-          ...(body.modelProvider ? { modelProvider: body.modelProvider } : {}),
-          ...(body.personality ? { personality: body.personality } : {}),
-          ...(body.sandbox ? { sandbox: body.sandbox } : {}),
-          ...(body.approvalPolicy ? { approvalPolicy: body.approvalPolicy } : {}),
-          ...(typeof body.ephemeral === "boolean" ? { ephemeral: body.ephemeral } : {})
-        };
-        const result = await adapter.createThread(createInput);
+        const result = await adapter.execute(command);
 
-        threadIndex.register(result.threadId, adapter.id);
+        if (result.kind === "listThreads") {
+          for (const thread of result.data) {
+            threadIndex.register(thread.id, thread.provider);
+          }
+        }
 
-        pushActionEvent("thread-create", "success", {
-          agentId: adapter.id,
-          threadId: result.threadId,
-          cwd: result.cwd ?? result.thread.cwd ?? null
-        });
+        if (result.kind === "readThread" || result.kind === "createThread") {
+          threadIndex.register(result.thread.id, result.thread.provider);
+          broadcastUnifiedEvent({
+            kind: "threadUpdated",
+            threadId: result.thread.id,
+            provider: result.thread.provider,
+            thread: result.thread,
+          });
+        }
 
         jsonResponse(res, 200, {
           ok: true,
-          ...result,
-          threadId: result.threadId,
-          agentId: adapter.id
+          result,
         });
       } catch (error) {
-        const message = pushActionError("thread-create", error, {
-          agentId: adapter.id,
-          cwd: body.cwd ?? null
+        if (error instanceof UnifiedBackendFeatureError) {
+          jsonResponse(res, 200, {
+            ok: false,
+            error: {
+              code: error.reason,
+              message: error.message,
+              details: {
+                provider: error.provider,
+                featureId: error.featureId,
+                reason: error.reason,
+              },
+            },
+          });
+          return;
+        }
+
+        const message = toErrorMessage(error);
+        broadcastUnifiedEvent({
+          kind: "error",
+          message,
+          code: "internalError",
         });
-        jsonResponse(res, 500, { ok: false, error: message });
+        jsonResponse(res, 500, {
+          ok: false,
+          error: {
+            code: "internalError",
+            message,
+          },
+        });
       }
       return;
     }
 
-    if (req.method === "GET" && pathname === "/api/threads") {
+    if (req.method === "GET" && pathname === "/api/unified/threads") {
       const limit = parseInteger(url.searchParams.get("limit"), 80);
       const archived = parseBoolean(url.searchParams.get("archived"), false);
       const all = parseBoolean(url.searchParams.get("all"), false);
       const maxPages = parseInteger(url.searchParams.get("maxPages"), 20);
       const cursor = url.searchParams.get("cursor") ?? null;
 
-      const enabledAdapters = registry.listEnabled();
-      const mergedData: Array<Record<string, unknown>> = [];
-      let nextCursor: string | null = null;
+      const data: Array<{
+        id: string;
+        provider: UnifiedProviderId;
+        preview: string;
+        title?: string | null | undefined;
+        isGenerating?: boolean | undefined;
+        createdAt: number;
+        updatedAt: number;
+        cwd?: string | undefined;
+        source?: string | undefined;
+      }> = [];
+      const cursors: Record<UnifiedProviderId, string | null> = {
+        codex: null,
+        opencode: null,
+      };
+      const errors: Record<
+        UnifiedProviderId,
+        {
+          code: string;
+          message: string;
+          details?: Record<string, string>;
+        } | null
+      > = {
+        codex: null,
+        opencode: null,
+      };
 
-      for (const adapter of enabledAdapters) {
-        try {
-          const result = await adapter.listThreads({
-            limit,
-            archived,
-            all,
-            maxPages,
-            cursor
-          });
-
-          if (!nextCursor && result.nextCursor) {
-            nextCursor = result.nextCursor;
+      await Promise.all(
+        listUnifiedProviders().map(async (provider) => {
+          const adapter = resolveUnifiedAdapter(provider);
+          if (!adapter) {
+            errors[provider] = {
+              code: "providerDisabled",
+              message: `Provider ${provider} is not available`,
+            };
+            return;
           }
 
-          for (const thread of result.data) {
-            threadIndex.register(thread.id, adapter.id);
-            mergedData.push({
-              ...thread,
-              agentId: adapter.id
+          try {
+            const result = await adapter.execute({
+              kind: "listThreads",
+              provider,
+              limit,
+              archived,
+              all,
+              maxPages,
+              cursor,
             });
+
+            cursors[provider] = result.nextCursor ?? null;
+            for (const thread of result.data) {
+              threadIndex.register(thread.id, thread.provider);
+              data.push(thread);
+            }
+          } catch (error) {
+            const message = toErrorMessage(error);
+            errors[provider] = {
+              code: "listThreadsFailed",
+              message,
+              details: {
+                provider,
+              },
+            };
+            logger.warn(
+              {
+                provider,
+                error: message,
+              },
+              "unified-list-threads-failed",
+            );
           }
-        } catch (error) {
-          logger.warn(
-            {
-              agentId: adapter.id,
-              error: toErrorMessage(error)
-            },
-            "agent-list-threads-failed"
-          );
-        }
-      }
+        }),
+      );
 
       jsonResponse(res, 200, {
         ok: true,
-        data: mergedData,
-        nextCursor
+        data,
+        cursors,
+        errors,
       });
       return;
     }
 
-    if (req.method === "GET" && pathname === "/api/models") {
-      const query = parseQuery(AgentScopedQuerySchema, {
-        agentId: url.searchParams.get("agentId") ?? undefined
-      });
-      const adapter = resolveCapabilityAdapter("canListModels", query.agentId);
-      if (!adapter || !adapter.listModels) {
-        jsonResponse(res, 200, {
-          ok: true,
-          data: [],
-          nextCursor: null
-        });
-        return;
-      }
+    if (req.method === "GET" && pathname === "/api/unified/sidebar") {
+      const limit = parseInteger(url.searchParams.get("limit"), 80);
+      const archived = parseBoolean(url.searchParams.get("archived"), false);
+      const all = parseBoolean(url.searchParams.get("all"), false);
+      const maxPages = parseInteger(url.searchParams.get("maxPages"), 20);
+      const cursor = url.searchParams.get("cursor") ?? null;
 
-      const limit = parseInteger(url.searchParams.get("limit"), 100);
-      const result = await adapter.listModels(limit);
-      jsonResponse(res, 200, { ok: true, ...result });
-      return;
-    }
+      const rows: Array<{
+        id: string;
+        provider: UnifiedProviderId;
+        preview: string;
+        title?: string | null | undefined;
+        isGenerating?: boolean | undefined;
+        createdAt: number;
+        updatedAt: number;
+        cwd?: string | undefined;
+        source?: string | undefined;
+      }> = [];
+      const errors: Record<
+        UnifiedProviderId,
+        {
+          code: string;
+          message: string;
+          details?: Record<string, string>;
+        } | null
+      > = {
+        codex: null,
+        opencode: null,
+      };
 
-    if (req.method === "GET" && pathname === "/api/collaboration-modes") {
-      const query = parseQuery(AgentScopedQuerySchema, {
-        agentId: url.searchParams.get("agentId") ?? undefined
-      });
-      const adapter = resolveCapabilityAdapter("canListCollaborationModes", query.agentId);
-      if (!adapter || !adapter.listCollaborationModes) {
-        jsonResponse(res, 200, {
-          ok: true,
-          data: []
-        });
-        return;
-      }
-
-      const result = await adapter.listCollaborationModes();
-      jsonResponse(res, 200, { ok: true, ...result });
-      return;
-    }
-
-    if (segments[0] === "api" && segments[1] === "threads" && segments[2]) {
-      const threadId = decodeURIComponent(segments[2]);
-      const resolved = resolveAdapterForThread(threadId);
-      if (!resolved.ok) {
-        jsonResponse(res, resolved.status, {
-          ok: false,
-          error: resolved.error,
-          threadId
-        });
-        return;
-      }
-
-      const adapter = resolved.adapter;
-
-      if (req.method === "GET" && segments.length === 3) {
-        const includeTurns = parseBoolean(url.searchParams.get("includeTurns"), true);
-
-        try {
-          const result = await adapter.readThread({ threadId, includeTurns });
-          jsonResponse(res, 200, {
-            ok: true,
-            ...result,
-            agentId: resolved.agentId
-          });
-          return;
-        } catch (error) {
-          if (
-            resolved.agentId === "codex" &&
-            codexAdapter &&
-            error instanceof Error &&
-            codexAdapter.isThreadNotLoadedError(error)
-          ) {
-            jsonResponse(res, 404, {
-              ok: false,
-              error: `Thread not loaded in app-server: ${threadId}`,
-              threadId
-            });
+      await Promise.all(
+        listUnifiedProviders().map(async (provider) => {
+          const adapter = resolveUnifiedAdapter(provider);
+          if (!adapter) {
+            errors[provider] = {
+              code: "providerDisabled",
+              message: `Provider ${provider} is not available`,
+            };
             return;
           }
-          throw error;
-        }
-      }
 
-      if (req.method === "GET" && segments[3] === "live-state") {
-        if (!adapter.capabilities.canReadLiveState || !adapter.readLiveState) {
-          jsonResponse(res, 400, {
+          try {
+            const result = await adapter.execute({
+              kind: "listThreads",
+              provider,
+              limit,
+              archived,
+              all,
+              maxPages,
+              cursor,
+            });
+
+            for (const thread of result.data) {
+              threadIndex.register(thread.id, thread.provider);
+              rows.push({
+                ...thread,
+                preview: compactSidebarPreview(thread.preview),
+              });
+            }
+          } catch (error) {
+            const message = toErrorMessage(error);
+            errors[provider] = {
+              code: "listThreadsFailed",
+              message,
+              details: {
+                provider,
+              },
+            };
+            logger.warn(
+              {
+                provider,
+                error: message,
+              },
+              "unified-sidebar-threads-failed",
+            );
+          }
+        }),
+      );
+
+      jsonResponse(res, 200, {
+        ok: true,
+        rows,
+        errors,
+      });
+      return;
+    }
+
+    if (
+      req.method === "GET" &&
+      segments[0] === "api" &&
+      segments[1] === "unified" &&
+      segments[2] === "thread" &&
+      segments[3]
+    ) {
+      const threadId = decodeURIComponent(segments[3]);
+      const rawProvider = url.searchParams.get("provider");
+      const providerFromQuery = parseUnifiedProviderId(rawProvider);
+      if (rawProvider !== null && providerFromQuery === null) {
+        jsonResponse(res, 400, {
+          ok: false,
+          error: {
+            code: "invalidProvider",
+            message: `Provider ${rawProvider} is not supported`,
+            details: {
+              provider: rawProvider,
+            },
+          },
+        });
+        return;
+      }
+      const includeTurns = parseBoolean(
+        url.searchParams.get("includeTurns"),
+        true,
+      );
+      const knownProviders = threadIndex.providers(threadId);
+      const resolvedProvider = threadIndex.resolve(threadId);
+      const provider = providerFromQuery ?? resolvedProvider;
+
+      if (!provider) {
+        if (knownProviders.length > 1) {
+          jsonResponse(res, 409, {
             ok: false,
-            error: `Agent ${resolved.agentId} does not support live thread state`,
-            threadId
+            error: {
+              code: "threadProviderAmbiguous",
+              message: `Thread ${threadId} exists in multiple providers; provider query is required`,
+              details: {
+                threadId,
+                providers: knownProviders,
+              },
+            },
           });
           return;
         }
 
-        const liveState = await adapter.readLiveState(threadId);
+        jsonResponse(res, 404, {
+          ok: false,
+          error: {
+            code: "threadNotFound",
+            message: `Thread ${threadId} is not registered`,
+            details: {
+              threadId,
+            },
+          },
+        });
+        return;
+      }
+
+      const adapter = resolveUnifiedAdapter(provider);
+      if (!adapter) {
+        jsonResponse(res, 503, {
+          ok: false,
+          error: {
+            code: "providerDisabled",
+            message: `Provider ${provider} is not available`,
+            details: {
+              provider,
+            },
+          },
+        });
+        return;
+      }
+
+      try {
+        const result = await adapter.execute({
+          kind: "readThread",
+          provider,
+          threadId,
+          includeTurns,
+        });
+
+        threadIndex.register(result.thread.id, result.thread.provider);
         jsonResponse(res, 200, {
           ok: true,
-          threadId,
-          ownerClientId: liveState.ownerClientId,
-          conversationState: liveState.conversationState,
-          liveStateError: liveState.liveStateError
+          thread: result.thread,
         });
-        return;
+      } catch (error) {
+        const message = toErrorMessage(error);
+        jsonResponse(res, 500, {
+          ok: false,
+          error: {
+            code: "threadReadFailed",
+            message,
+            details: {
+              provider,
+              threadId,
+              includeTurns,
+            },
+          },
+        });
       }
-
-      if (req.method === "GET" && segments[3] === "stream-events") {
-        if (!adapter.capabilities.canReadStreamEvents || !adapter.readStreamEvents) {
-          jsonResponse(res, 400, {
-            ok: false,
-            error: `Agent ${resolved.agentId} does not support stream events`,
-            threadId
-          });
-          return;
-        }
-
-        const limit = parseInteger(url.searchParams.get("limit"), 60);
-        const streamEvents = await adapter.readStreamEvents(threadId, limit);
-        jsonResponse(res, 200, {
-          ok: true,
-          threadId,
-          ownerClientId: streamEvents.ownerClientId,
-          events: streamEvents.events
-        });
-        return;
-      }
-
-      if (req.method === "POST" && segments[3] === "messages") {
-        const body = parseBody(SendMessageBodySchema, await readJsonBody(req));
-
-        pushActionEvent("messages", "attempt", {
-          agentId: resolved.agentId,
-          threadId,
-          textLength: body.text.length
-        });
-
-        try {
-          await adapter.sendMessage({
-            threadId,
-            text: body.text,
-            ...(body.ownerClientId ? { ownerClientId: body.ownerClientId } : {}),
-            ...(body.cwd ? { cwd: body.cwd } : {}),
-            ...(typeof body.isSteering === "boolean" ? { isSteering: body.isSteering } : {})
-          });
-        } catch (error) {
-          const message = pushActionError("messages", error, {
-            agentId: resolved.agentId,
-            threadId
-          });
-          jsonResponse(res, 500, { ok: false, error: message, threadId });
-          return;
-        }
-
-        pushActionEvent("messages", "success", {
-          agentId: resolved.agentId,
-          threadId
-        });
-
-        jsonResponse(res, 200, {
-          ok: true,
-          threadId
-        });
-        return;
-      }
-
-      if (req.method === "POST" && segments[3] === "collaboration-mode") {
-        if (!adapter.capabilities.canSetCollaborationMode || !adapter.setCollaborationMode) {
-          jsonResponse(res, 400, {
-            ok: false,
-            error: `Agent ${resolved.agentId} does not support collaboration modes`,
-            threadId
-          });
-          return;
-        }
-
-        const body = parseBody(SetModeBodySchema, await readJsonBody(req));
-
-        pushActionEvent("collaboration-mode", "attempt", {
-          agentId: resolved.agentId,
-          threadId,
-          collaborationMode: body.collaborationMode
-        });
-
-        try {
-          const result = await adapter.setCollaborationMode({
-            threadId,
-            ...(body.ownerClientId ? { ownerClientId: body.ownerClientId } : {}),
-            collaborationMode: body.collaborationMode
-          });
-
-          pushActionEvent("collaboration-mode", "success", {
-            agentId: resolved.agentId,
-            threadId,
-            ownerClientId: result.ownerClientId
-          });
-
-          jsonResponse(res, 200, {
-            ok: true,
-            threadId,
-            ownerClientId: result.ownerClientId
-          });
-        } catch (error) {
-          const message = pushActionError("collaboration-mode", error, {
-            agentId: resolved.agentId,
-            threadId
-          });
-          jsonResponse(res, 500, {
-            ok: false,
-            error: message,
-            threadId
-          });
-        }
-        return;
-      }
-
-      if (req.method === "POST" && segments[3] === "user-input") {
-        if (!adapter.capabilities.canSubmitUserInput || !adapter.submitUserInput) {
-          jsonResponse(res, 400, {
-            ok: false,
-            error: `Agent ${resolved.agentId} does not support user input submission`,
-            threadId
-          });
-          return;
-        }
-
-        const body = parseBody(SubmitUserInputBodySchema, await readJsonBody(req));
-
-        pushActionEvent("user-input", "attempt", {
-          agentId: resolved.agentId,
-          threadId,
-          requestId: body.requestId
-        });
-
-        try {
-          const result = await adapter.submitUserInput({
-            threadId,
-            ...(body.ownerClientId ? { ownerClientId: body.ownerClientId } : {}),
-            requestId: body.requestId,
-            response: body.response
-          });
-
-          pushActionEvent("user-input", "success", {
-            agentId: resolved.agentId,
-            threadId,
-            ownerClientId: result.ownerClientId,
-            requestId: result.requestId
-          });
-
-          jsonResponse(res, 200, {
-            ok: true,
-            threadId,
-            ownerClientId: result.ownerClientId,
-            requestId: result.requestId
-          });
-        } catch (error) {
-          const message = pushActionError("user-input", error, {
-            agentId: resolved.agentId,
-            threadId,
-            requestId: body.requestId
-          });
-          jsonResponse(res, 500, {
-            ok: false,
-            error: message,
-            threadId,
-            requestId: body.requestId
-          });
-        }
-        return;
-      }
-
-      if (req.method === "POST" && segments[3] === "interrupt") {
-        const body = parseBody(InterruptBodySchema, await readJsonBody(req));
-
-        pushActionEvent("interrupt", "attempt", {
-          agentId: resolved.agentId,
-          threadId
-        });
-
-        try {
-          await adapter.interrupt({
-            threadId,
-            ...(body.ownerClientId ? { ownerClientId: body.ownerClientId } : {})
-          });
-        } catch (error) {
-          const message = pushActionError("interrupt", error, {
-            agentId: resolved.agentId,
-            threadId
-          });
-          jsonResponse(res, 500, { ok: false, error: message, threadId });
-          return;
-        }
-
-        pushActionEvent("interrupt", "success", {
-          agentId: resolved.agentId,
-          threadId
-        });
-
-        jsonResponse(res, 200, {
-          ok: true,
-          threadId
-        });
-        return;
-      }
+      return;
     }
 
     if (segments[0] === "api" && segments[1] === "debug") {
@@ -1053,88 +825,18 @@ const server = http.createServer(async (req, res) => {
         const entryId = decodeURIComponent(segments[3]);
         const entry = history.find((item) => item.id === entryId) ?? null;
         if (!entry) {
-          jsonResponse(res, 404, { ok: false, error: "History entry not found" });
+          jsonResponse(res, 404, {
+            ok: false,
+            error: "History entry not found",
+          });
           return;
         }
 
         jsonResponse(res, 200, {
           ok: true,
           entry,
-          fullPayload: historyById.get(entryId) ?? null
+          fullPayload: historyById.get(entryId) ?? null,
         });
-        return;
-      }
-
-      if (req.method === "POST" && pathname === "/api/debug/replay") {
-        if (!codexAdapter) {
-          jsonResponse(res, 503, {
-            ok: false,
-            error: "Codex adapter is not enabled"
-          });
-          return;
-        }
-
-        if (!codexAdapter.isIpcReady()) {
-          jsonResponse(res, 503, {
-            ok: false,
-            error: codexAdapter.getRuntimeState().lastError ?? "Desktop IPC is not connected"
-          });
-          return;
-        }
-
-        const body = parseBody(ReplayBodySchema, await readJsonBody(req));
-        const entry = history.find((item) => item.id === body.entryId);
-        if (!entry) {
-          jsonResponse(res, 404, { ok: false, error: "History entry not found" });
-          return;
-        }
-
-        let frame: ParsedReplayFrame;
-        try {
-          frame = parseReplayFrame(historyById.get(entry.id));
-        } catch (error) {
-          jsonResponse(res, 409, {
-            ok: false,
-            error: toErrorMessage(error)
-          });
-          return;
-        }
-
-        const options: SendRequestOptions = {
-          ...(frame.targetClientId ? { targetClientId: frame.targetClientId } : {}),
-          ...(typeof frame.version === "number" ? { version: frame.version } : {})
-        };
-
-        if (frame.type === "request") {
-          const replayPromise = codexAdapter.replayRequest(frame.method, frame.params, options);
-
-          if (body.waitForResponse) {
-            const response = await replayPromise;
-            jsonResponse(res, 200, {
-              ok: true,
-              replayed: true,
-              response
-            });
-            return;
-          }
-
-          void replayPromise.catch((error) => {
-            pushSystem("Replay request failed", {
-              error: toErrorMessage(error),
-              entryId: entry.id
-            });
-          });
-
-          jsonResponse(res, 200, {
-            ok: true,
-            replayed: true,
-            queued: true
-          });
-          return;
-        }
-
-        codexAdapter.replayBroadcast(frame.method, frame.params, options);
-        jsonResponse(res, 200, { ok: true, replayed: true });
         return;
       }
 
@@ -1142,7 +844,7 @@ const server = http.createServer(async (req, res) => {
         jsonResponse(res, 200, {
           ok: true,
           active: activeTrace?.summary ?? null,
-          recent: recentTraces
+          recent: recentTraces,
         });
         return;
       }
@@ -1152,7 +854,7 @@ const server = http.createServer(async (req, res) => {
         if (activeTrace) {
           jsonResponse(res, 409, {
             ok: false,
-            error: "A trace is already active"
+            error: "A trace is already active",
           });
           return;
         }
@@ -1168,22 +870,22 @@ const server = http.createServer(async (req, res) => {
           startedAt: new Date().toISOString(),
           stoppedAt: null,
           eventCount: 0,
-          path: tracePath
+          path: tracePath,
         };
 
         activeTrace = {
           summary,
-          stream
+          stream,
         };
 
         pushSystem("Trace started", {
           traceId: id,
-          label: body.label
+          label: body.label,
         });
 
         jsonResponse(res, 200, {
           ok: true,
-          trace: summary
+          trace: summary,
         });
         return;
       }
@@ -1198,7 +900,7 @@ const server = http.createServer(async (req, res) => {
         const marker = {
           type: "trace-marker",
           at: new Date().toISOString(),
-          note: body.note
+          note: body.note,
         };
 
         activeTrace.stream.write(`${JSON.stringify(marker)}\n`);
@@ -1229,7 +931,7 @@ const server = http.createServer(async (req, res) => {
 
         jsonResponse(res, 200, {
           ok: true,
-          trace: trace.summary
+          trace: trace.summary,
         });
         return;
       }
@@ -1253,7 +955,7 @@ const server = http.createServer(async (req, res) => {
           "Content-Type": "application/x-ndjson",
           "Content-Length": data.length,
           "Content-Disposition": `attachment; filename="${trace.id}.ndjson"`,
-          "Access-Control-Allow-Origin": "*"
+          "Access-Control-Allow-Origin": "*",
         });
         res.end(data);
         return;
@@ -1265,7 +967,7 @@ const server = http.createServer(async (req, res) => {
       if (!adapter || !adapter.readRateLimits) {
         jsonResponse(res, 400, {
           ok: false,
-          error: "No agent supports rate limit reading"
+          error: "No agent supports rate limit reading",
         });
         return;
       }
@@ -1288,19 +990,19 @@ const server = http.createServer(async (req, res) => {
       {
         method: req.method ?? "unknown",
         url: req.url ?? "unknown",
-        error: runtimeLastError
+        error: runtimeLastError,
       },
-      "request-failed"
+      "request-failed",
     );
     pushSystem("Request failed", {
       error: runtimeLastError,
       method: req.method ?? "unknown",
-      url: req.url ?? "unknown"
+      url: req.url ?? "unknown",
     });
     broadcastRuntimeState();
     jsonResponse(res, 500, {
       ok: false,
-      error: runtimeLastError
+      error: runtimeLastError,
     });
   }
 });
@@ -1311,7 +1013,7 @@ async function start(): Promise<void> {
   pushSystem("Starting Farfield monitor server", {
     appExecutable: codexExecutable,
     socketPath: ipcSocketPath,
-    agentIds: configuredAgentIds
+    agentIds: configuredAgentIds,
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -1320,7 +1022,7 @@ async function start(): Promise<void> {
     };
 
     server.once("error", onError);
-    server.listen(PORT, HOST, () => {
+    server.listen({ port: PORT, host: HOST, exclusive: true }, () => {
       server.off("error", onError);
       resolve();
     });
@@ -1330,7 +1032,7 @@ async function start(): Promise<void> {
     url: `http://${HOST}:${PORT}`,
     appExecutable: codexExecutable,
     socketPath: ipcSocketPath,
-    agentIds: configuredAgentIds
+    agentIds: configuredAgentIds,
   });
 
   for (const adapter of registry.listAdapters()) {
@@ -1338,25 +1040,25 @@ async function start(): Promise<void> {
       await adapter.start();
       pushSystem("Agent connected", {
         agentId: adapter.id,
-        connected: adapter.isConnected()
+        connected: adapter.isConnected(),
       });
 
       if (adapter.id === "opencode" && openCodeAdapter) {
         pushSystem("OpenCode backend connected", {
-          url: openCodeAdapter.getUrl()
+          url: openCodeAdapter.getUrl(),
         });
       }
     } catch (error) {
       pushSystem("Agent failed to connect", {
         agentId: adapter.id,
-        error: toErrorMessage(error)
+        error: toErrorMessage(error),
       });
       logger.error(
         {
           agentId: adapter.id,
-          error: toErrorMessage(error)
+          error: toErrorMessage(error),
         },
-        "agent-start-failed"
+        "agent-start-failed",
       );
     }
   }

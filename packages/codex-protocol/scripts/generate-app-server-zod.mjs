@@ -41,22 +41,34 @@ const schemaTargets = [
     exportName: "ModelListResponseSchema"
   },
   {
-    id: "send-user-message-params",
-    source: path.join(vendorRoot, "stable", "json", "v1", "SendUserMessageParams.json"),
-    fileName: "SendUserMessageParamsSchema.ts",
-    exportName: "SendUserMessageParamsSchema"
+    id: "request-id",
+    source: path.join(vendorRoot, "stable", "json", "RequestId.json"),
+    fileName: "RequestIdSchema.ts",
+    exportName: "RequestIdSchema"
   },
   {
-    id: "send-user-message-response",
-    source: path.join(vendorRoot, "stable", "json", "v1", "SendUserMessageResponse.json"),
-    fileName: "SendUserMessageResponseSchema.ts",
-    exportName: "SendUserMessageResponseSchema"
+    id: "tool-request-user-input-params",
+    source: path.join(vendorRoot, "stable", "json", "ToolRequestUserInputParams.json"),
+    fileName: "ToolRequestUserInputParamsSchema.ts",
+    exportName: "ToolRequestUserInputParamsSchema"
   },
   {
     id: "tool-request-user-input-response",
     source: path.join(vendorRoot, "stable", "json", "ToolRequestUserInputResponse.json"),
     fileName: "ToolRequestUserInputResponseSchema.ts",
     exportName: "ToolRequestUserInputResponseSchema"
+  },
+  {
+    id: "stable-server-request",
+    source: path.join(vendorRoot, "stable", "json", "ServerRequest.json"),
+    fileName: "StableServerRequestSchema.ts",
+    exportName: "StableServerRequestSchema"
+  },
+  {
+    id: "experimental-server-request",
+    source: path.join(vendorRoot, "experimental", "json", "ServerRequest.json"),
+    fileName: "ExperimentalServerRequestSchema.ts",
+    exportName: "ExperimentalServerRequestSchema"
   },
   {
     id: "collaboration-mode-list-response",
@@ -66,8 +78,43 @@ const schemaTargets = [
   }
 ];
 
+const methodManifestSources = {
+  clientRequest: [
+    path.join(vendorRoot, "stable", "json", "ClientRequest.json"),
+    path.join(vendorRoot, "experimental", "json", "ClientRequest.json")
+  ],
+  clientNotification: [
+    path.join(vendorRoot, "stable", "json", "ClientNotification.json"),
+    path.join(vendorRoot, "experimental", "json", "ClientNotification.json")
+  ],
+  serverRequest: [
+    path.join(vendorRoot, "stable", "json", "ServerRequest.json"),
+    path.join(vendorRoot, "experimental", "json", "ServerRequest.json")
+  ],
+  serverNotification: [
+    path.join(vendorRoot, "stable", "json", "ServerNotification.json"),
+    path.join(vendorRoot, "experimental", "json", "ServerNotification.json")
+  ]
+};
+
 function ensureSchemaFilesExist() {
   const missing = schemaTargets.filter((target) => !fs.existsSync(target.source));
+  const missingManifestSources = Object.entries(methodManifestSources)
+    .flatMap(([name, sources]) =>
+      sources
+        .filter((source) => !fs.existsSync(source))
+        .map((source) => ({ name, source }))
+    );
+
+  for (const entry of missingManifestSources) {
+    missing.push({
+      id: `method-manifest-${entry.name}`,
+      source: entry.source,
+      fileName: "",
+      exportName: ""
+    });
+  }
+
   if (missing.length === 0) {
     return;
   }
@@ -99,11 +146,80 @@ async function writeSchemaModule(target) {
   fs.writeFileSync(path.join(outDir, target.fileName), withHeader, "utf8");
 }
 
+function readMethodNames(sourcePaths) {
+  const methodNames = new Set();
+
+  for (const sourcePath of sourcePaths) {
+    const schema = JSON.parse(fs.readFileSync(sourcePath, "utf8"));
+    if (!Array.isArray(schema.oneOf)) {
+      throw new Error(`Expected oneOf array in ${sourcePath}`);
+    }
+
+    for (const branch of schema.oneOf) {
+      const method = branch?.properties?.method;
+      if (!method || !Array.isArray(method.enum) || method.enum.length !== 1) {
+        continue;
+      }
+      const value = method.enum[0];
+      if (typeof value === "string" && value.trim().length > 0) {
+        methodNames.add(value);
+      }
+    }
+  }
+
+  return Array.from(methodNames).sort((left, right) => left.localeCompare(right));
+}
+
+function renderStringTuple(name, values) {
+  const renderedValues = values.map((value) => `  ${JSON.stringify(value)}`).join(",\n");
+  return [
+    `export const ${name} = [`,
+    renderedValues,
+    "] as const;",
+    ""
+  ].join("\n");
+}
+
+function writeMethodManifestModule() {
+  const clientRequestMethods = readMethodNames(methodManifestSources.clientRequest);
+  const clientNotificationMethods = readMethodNames(methodManifestSources.clientNotification);
+  const serverRequestMethods = readMethodNames(methodManifestSources.serverRequest);
+  const serverNotificationMethods = readMethodNames(methodManifestSources.serverNotification);
+
+  const lines = [
+    "// GENERATED FILE. DO NOT EDIT.",
+    ...methodManifestSources.clientRequest.map((source) => `// Source: ${path.relative(root, source)}`),
+    ...methodManifestSources.clientNotification.map((source) => `// Source: ${path.relative(root, source)}`),
+    ...methodManifestSources.serverRequest.map((source) => `// Source: ${path.relative(root, source)}`),
+    ...methodManifestSources.serverNotification.map((source) => `// Source: ${path.relative(root, source)}`),
+    "",
+    renderStringTuple("APP_SERVER_CLIENT_REQUEST_METHODS", clientRequestMethods),
+    "export type AppServerClientRequestMethod =",
+    "  typeof APP_SERVER_CLIENT_REQUEST_METHODS[number];",
+    "",
+    renderStringTuple("APP_SERVER_CLIENT_NOTIFICATION_METHODS", clientNotificationMethods),
+    "export type AppServerClientNotificationMethod =",
+    "  typeof APP_SERVER_CLIENT_NOTIFICATION_METHODS[number];",
+    "",
+    renderStringTuple("APP_SERVER_SERVER_REQUEST_METHODS", serverRequestMethods),
+    "export type AppServerServerRequestMethod =",
+    "  typeof APP_SERVER_SERVER_REQUEST_METHODS[number];",
+    "",
+    renderStringTuple("APP_SERVER_SERVER_NOTIFICATION_METHODS", serverNotificationMethods),
+    "export type AppServerServerNotificationMethod =",
+    "  typeof APP_SERVER_SERVER_NOTIFICATION_METHODS[number];",
+    ""
+  ];
+
+  fs.writeFileSync(path.join(outDir, "MethodManifest.ts"), lines.join("\n"), "utf8");
+}
+
 function writeIndexModule() {
   const exportLines = schemaTargets.map((target) => {
     const importPath = `./${target.fileName.replace(/\.ts$/, ".js")}`;
     return `export { ${target.exportName} } from "${importPath}";`;
   });
+  exportLines.push('export * from "./MethodManifest.js";');
   const file = [
     "// GENERATED FILE. DO NOT EDIT.",
     ...exportLines,
@@ -122,6 +238,7 @@ async function main() {
     await writeSchemaModule(target);
   }
 
+  writeMethodManifestModule();
   writeIndexModule();
   process.stdout.write("Generated app-server Zod schema modules.\n");
 }

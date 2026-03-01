@@ -11,7 +11,11 @@ describe("resolveOwnerClientId", () => {
   });
 
   it("uses explicit override when mapped owner is missing", () => {
-    const owner = resolveOwnerClientId(new Map(), "thread-1", "client-override");
+    const owner = resolveOwnerClientId(
+      new Map(),
+      "thread-1",
+      "client-override",
+    );
     expect(owner).toBe("client-override");
   });
 
@@ -23,9 +27,19 @@ describe("resolveOwnerClientId", () => {
     expect(owner).toBe("client-map");
   });
 
+  it("uses global owner when mapped owner and override are missing", () => {
+    const owner = resolveOwnerClientId(
+      new Map(),
+      "thread-1",
+      undefined,
+      "client-global",
+    );
+    expect(owner).toBe("client-global");
+  });
+
   it("throws when owner is unavailable", () => {
     expect(() => resolveOwnerClientId(new Map(), "thread-1")).toThrowError(
-      /No owner client id/
+      /No owner client id/,
     );
   });
 });

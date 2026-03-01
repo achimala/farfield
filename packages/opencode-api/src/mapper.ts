@@ -1,20 +1,19 @@
 import type {
-  Session,
-  Message,
-  UserMessage,
   AssistantMessage,
+  Event,
+  Message,
   Part,
-  TextPart,
+  Session,
   ToolPart,
-  ReasoningPart,
-  FilePart,
-  ToolState,
-  EventMessageUpdated,
-  EventMessagePartUpdated,
-  EventSessionUpdated,
-  EventSessionStatus,
-  EventPermissionUpdated
+  ToolState
 } from "@opencode-ai/sdk";
+import { z } from "zod";
+import {
+  OPENCODE_EVENT_TYPES,
+  OPENCODE_PART_TYPES,
+  type OpenCodeEventType,
+  type OpenCodePartType
+} from "./generated/OpenCodeManifest.js";
 
 /**
  * Mapped thread list item, matching the shape of AppServerThreadListItemSchema.
@@ -22,6 +21,7 @@ import type {
 export interface MappedThreadListItem {
   id: string;
   preview: string;
+  title: string | null;
   createdAt: number;
   updatedAt: number;
   cwd?: string;
@@ -50,6 +50,21 @@ export type MappedTurnItem =
       type: "fileChange";
       changes: Array<{ path: string; kind: { type: string }; diff?: string }>;
       status: string;
+    }
+  | {
+      id: string;
+      type: "error";
+      message: string;
+    }
+  | {
+      id: string;
+      type: "contextCompaction";
+      completed?: boolean;
+    }
+  | {
+      id: string;
+      type: "plan";
+      text: string;
     };
 
 /**
@@ -61,8 +76,8 @@ export interface MappedTurn {
   status: string;
   turnStartedAtMs: number | null;
   finalAssistantStartedAtMs: number | null;
-  error: unknown | null;
-  diff: unknown | null;
+  error: null;
+  diff: null;
   items: MappedTurnItem[];
 }
 
@@ -81,12 +96,151 @@ export interface MappedThreadConversationState {
   source: "opencode";
 }
 
+export interface OpenCodeSsePayload {
+  type: "opencode-event";
+  sessionId: string;
+  relatedSessionId: string | null;
+  relevantToSession: boolean;
+  eventType: OpenCodeEventType;
+  payload: Event;
+}
+
+const ToolInputSchema = z
+  .object({
+    command: z.string().optional(),
+    cwd: z.string().optional(),
+    file_path: z.string().optional(),
+    path: z.string().optional()
+  })
+  .passthrough();
+
+const ToolMetadataSchema = z
+  .object({
+    exit_code: z.number().int().optional()
+  })
+  .passthrough();
+
+type PartByType<K extends OpenCodePartType> = Extract<Part, { type: K }>;
+type EventByType<K extends OpenCodeEventType> = Extract<Event, { type: K }>;
+
+type PartMapperTable = {
+  [K in OpenCodePartType]: (part: PartByType<K>) => MappedTurnItem;
+};
+
+type EventSessionIdExtractorTable = {
+  [K in OpenCodeEventType]: (event: EventByType<K>) => string | null;
+};
+
+const OPEN_CODE_PART_MAPPERS: PartMapperTable = {
+  agent: (part) => ({
+    id: part.id,
+    type: "agentMessage",
+    text: `[agent] ${part.name}`
+  }),
+  compaction: (part) => ({
+    id: part.id,
+    type: "contextCompaction",
+    completed: true
+  }),
+  file: (part) => ({
+    id: part.id,
+    type: "fileChange",
+    changes: [{
+      path: part.url,
+      kind: { type: "created" },
+      ...(part.source ? { diff: part.source.text.value } : {})
+    }],
+    status: "completed"
+  }),
+  patch: (part) => ({
+    id: part.id,
+    type: "fileChange",
+    changes: part.files.map((filePath) => ({
+      path: filePath,
+      kind: { type: "modified" }
+    })),
+    status: "completed"
+  }),
+  reasoning: (part) => ({
+    id: part.id,
+    type: "reasoning",
+    text: part.text
+  }),
+  retry: (part) => ({
+    id: part.id,
+    type: "error",
+    message: part.error.data.message
+  }),
+  snapshot: (part) => ({
+    id: part.id,
+    type: "contextCompaction",
+    completed: false
+  }),
+  "step-finish": (part) => ({
+    id: part.id,
+    type: "reasoning",
+    text: `Step finished (${part.reason})`
+  }),
+  "step-start": (part) => ({
+    id: part.id,
+    type: "reasoning",
+    text: "Step started"
+  }),
+  subtask: (part) => ({
+    id: part.id,
+    type: "plan",
+    text: `${part.description}\n\n${part.prompt}`
+  }),
+  text: (part) => ({
+    id: part.id,
+    type: "agentMessage",
+    text: `${part.synthetic ? "[synthetic] " : ""}${part.ignored ? "[ignored] " : ""}${part.text}`
+  }),
+  tool: (part) => toolPartToTurnItem(part)
+};
+
+const OPEN_CODE_EVENT_SESSION_ID_EXTRACTORS: EventSessionIdExtractorTable = {
+  "command.executed": (event) => event.properties.sessionID,
+  "file.edited": () => null,
+  "file.watcher.updated": () => null,
+  "installation.update-available": () => null,
+  "installation.updated": () => null,
+  "lsp.client.diagnostics": () => null,
+  "lsp.updated": () => null,
+  "message.part.removed": (event) => event.properties.sessionID,
+  "message.part.updated": (event) => event.properties.part.sessionID,
+  "message.removed": (event) => event.properties.sessionID,
+  "message.updated": (event) => event.properties.info.sessionID,
+  "permission.replied": (event) => event.properties.sessionID,
+  "permission.updated": (event) => event.properties.sessionID,
+  "pty.created": () => null,
+  "pty.deleted": () => null,
+  "pty.exited": () => null,
+  "pty.updated": () => null,
+  "server.connected": () => null,
+  "server.instance.disposed": () => null,
+  "session.compacted": (event) => event.properties.sessionID,
+  "session.created": (event) => event.properties.info.id,
+  "session.deleted": (event) => event.properties.info.id,
+  "session.diff": (event) => event.properties.sessionID,
+  "session.error": (event) => event.properties.sessionID ?? null,
+  "session.idle": (event) => event.properties.sessionID,
+  "session.status": (event) => event.properties.sessionID,
+  "session.updated": (event) => event.properties.info.id,
+  "todo.updated": (event) => event.properties.sessionID,
+  "tui.command.execute": () => null,
+  "tui.prompt.append": () => null,
+  "tui.toast.show": () => null,
+  "vcs.branch.updated": () => null
+};
+
 export function sessionToThreadListItem(session: Session): MappedThreadListItem {
   return {
     id: session.id,
     preview: session.title || "(untitled)",
-    createdAt: session.time.created,
-    updatedAt: session.time.updated,
+    title: session.title || null,
+    createdAt: normalizeUnixTimestampSeconds(session.time.created),
+    updatedAt: normalizeUnixTimestampSeconds(session.time.updated),
     cwd: session.directory,
     source: "opencode"
   };
@@ -100,15 +254,15 @@ export function sessionToConversationState(
   const turns = messagesToTurns(messages, partsByMessage);
 
   const lastAssistant = messages.filter(
-    (m): m is AssistantMessage => m.role === "assistant"
+    (message): message is AssistantMessage => message.role === "assistant"
   ).at(-1);
 
   return {
     id: session.id,
     turns,
     requests: [],
-    createdAt: session.time.created,
-    updatedAt: session.time.updated,
+    createdAt: normalizeUnixTimestampSeconds(session.time.created),
+    updatedAt: normalizeUnixTimestampSeconds(session.time.updated),
     title: session.title || null,
     latestModel: lastAssistant
       ? `${lastAssistant.providerID}/${lastAssistant.modelID}`
@@ -116,6 +270,13 @@ export function sessionToConversationState(
     cwd: session.directory,
     source: "opencode"
   };
+}
+
+function normalizeUnixTimestampSeconds(value: number): number {
+  if (value >= 10_000_000_000) {
+    return Math.floor(value / 1000);
+  }
+  return Math.floor(value);
 }
 
 /**
@@ -131,54 +292,46 @@ export function messagesToTurns(
   const turns: MappedTurn[] = [];
   const assistantByParent = new Map<string, AssistantMessage>();
 
-  for (const msg of messages) {
-    if (msg.role === "assistant") {
-      assistantByParent.set(msg.parentID, msg);
+  for (const message of messages) {
+    if (message.role === "assistant") {
+      assistantByParent.set(message.parentID, message);
     }
   }
 
-  for (const msg of messages) {
-    if (msg.role !== "user") {
+  for (const message of messages) {
+    if (message.role !== "user") {
       continue;
     }
 
-    const userMsg = msg as UserMessage;
-    const assistantMsg = assistantByParent.get(userMsg.id) ?? null;
+    const assistantMessage = assistantByParent.get(message.id) ?? null;
     const items: MappedTurnItem[] = [];
 
-    const userParts = partsByMessage.get(userMsg.id) ?? [];
-    const userTextParts = userParts.filter(
-      (p): p is TextPart => p.type === "text"
-    );
-
-    if (userTextParts.length > 0) {
+    const userParts = partsByMessage.get(message.id) ?? [];
+    if (userParts.length > 0) {
       items.push({
-        id: `${userMsg.id}-input`,
+        id: `${message.id}-input`,
         type: "userMessage",
-        content: userTextParts.map((p) => ({ type: "text" as const, text: p.text }))
+        content: userParts.map(partToUserMessageContent)
       });
     }
 
-    if (assistantMsg) {
-      const assistantParts = partsByMessage.get(assistantMsg.id) ?? [];
+    if (assistantMessage) {
+      const assistantParts = partsByMessage.get(assistantMessage.id) ?? [];
       for (const part of assistantParts) {
-        const mapped = partToTurnItem(part);
-        if (mapped) {
-          items.push(mapped);
-        }
+        items.push(partToTurnItem(part));
       }
     }
 
-    const isCompleted = assistantMsg?.finish === "stop" || assistantMsg?.finish === "length";
-    const hasError = assistantMsg?.error != null;
+    const isCompleted = assistantMessage?.finish === "stop" || assistantMessage?.finish === "length";
+    const hasError = assistantMessage?.error != null;
 
     turns.push({
-      turnId: assistantMsg?.id ?? null,
-      id: userMsg.id,
-      status: hasError ? "error" : isCompleted ? "completed" : assistantMsg ? "running" : "pending",
-      turnStartedAtMs: userMsg.time.created,
-      finalAssistantStartedAtMs: assistantMsg?.time.created ?? null,
-      error: assistantMsg?.error ?? null,
+      turnId: assistantMessage?.id ?? null,
+      id: message.id,
+      status: hasError ? "error" : isCompleted ? "completed" : assistantMessage ? "running" : "pending",
+      turnStartedAtMs: message.time.created,
+      finalAssistantStartedAtMs: assistantMessage?.time.created ?? null,
+      error: null,
       diff: null,
       items
     });
@@ -187,87 +340,83 @@ export function messagesToTurns(
   return turns;
 }
 
-export function partToTurnItem(part: Part): MappedTurnItem | null {
+export function partToTurnItem(part: Part): MappedTurnItem {
+  return mapPart(part);
+}
+
+export function mapOpenCodeEventToSsePayload(
+  event: Event,
+  sessionId: string
+): OpenCodeSsePayload {
+  const relatedSessionId = extractRelatedSessionId(event);
+
+  return {
+    type: "opencode-event",
+    sessionId,
+    relatedSessionId,
+    relevantToSession: relatedSessionId === null ? true : relatedSessionId === sessionId,
+    eventType: event.type,
+    payload: event
+  };
+}
+
+function mapPart<K extends OpenCodePartType>(part: PartByType<K>): MappedTurnItem {
+  return OPEN_CODE_PART_MAPPERS[part.type](part);
+}
+
+function extractRelatedSessionId<K extends OpenCodeEventType>(event: EventByType<K>): string | null {
+  return OPEN_CODE_EVENT_SESSION_ID_EXTRACTORS[event.type](event);
+}
+
+function partToUserMessageContent(part: Part): { type: "text"; text: string } {
   switch (part.type) {
-    case "text": {
-      const textPart = part as TextPart;
-      if (textPart.synthetic || textPart.ignored) {
-        return null;
-      }
-      return {
-        id: textPart.id,
-        type: "agentMessage",
-        text: textPart.text
-      };
-    }
-
-    case "reasoning": {
-      const reasoningPart = part as ReasoningPart;
-      return {
-        id: reasoningPart.id,
-        type: "reasoning",
-        text: reasoningPart.text
-      };
-    }
-
-    case "tool": {
-      const toolPart = part as ToolPart;
-      return toolPartToTurnItem(toolPart);
-    }
-
-    case "file": {
-      const filePart = part as FilePart;
-      return {
-        id: filePart.id,
-        type: "fileChange",
-        changes: [{
-          path: filePart.url,
-          kind: { type: "created" }
-        }],
-        status: "completed"
-      };
-    }
-
+    case "text":
+      return { type: "text", text: part.text };
+    case "tool":
+      return { type: "text", text: `[tool] ${part.tool}` };
+    case "file":
+      return { type: "text", text: `[file] ${part.url}` };
+    case "reasoning":
+      return { type: "text", text: `[reasoning] ${part.text}` };
     case "step-start":
+      return { type: "text", text: "[step-start]" };
     case "step-finish":
+      return { type: "text", text: `[step-finish] ${part.reason}` };
     case "snapshot":
+      return { type: "text", text: "[snapshot]" };
     case "patch":
+      return { type: "text", text: `[patch] ${part.files.join(", ")}` };
     case "agent":
+      return { type: "text", text: `[agent] ${part.name}` };
     case "retry":
+      return { type: "text", text: `[retry] ${part.error.data.message}` };
     case "compaction":
+      return { type: "text", text: "[compaction]" };
     case "subtask":
-      return null;
-
-    default:
-      return null;
+      return { type: "text", text: `[subtask] ${part.description}` };
   }
 }
 
 function toolPartToTurnItem(toolPart: ToolPart): MappedTurnItem {
   const state = toolPart.state;
-  const toolName = toolPart.tool;
   const status = resolveToolStatus(state);
 
-  if (isFileEditTool(toolName)) {
+  if (isFileEditTool(toolPart.tool)) {
     return {
       id: toolPart.id,
       type: "fileChange",
-      changes: extractFileChanges(toolName, state),
+      changes: extractFileChanges(toolPart.tool, state),
       status
     };
   }
 
-  const input = state.input;
-  const command = typeof input["command"] === "string"
-    ? input["command"]
-    : toolName;
-
+  const parsedInput = ToolInputSchema.parse(state.input);
   return {
     id: toolPart.id,
     type: "commandExecution",
-    command,
+    command: parsedInput.command ?? toolPart.tool,
     status,
-    ...(typeof input["cwd"] === "string" ? { cwd: input["cwd"] } : {}),
+    ...(parsedInput.cwd ? { cwd: parsedInput.cwd } : {}),
     aggregatedOutput: extractToolOutput(state),
     exitCode: extractExitCode(state),
     durationMs: extractDurationMs(state)
@@ -282,14 +431,10 @@ function extractFileChanges(
   toolName: string,
   state: ToolState
 ): Array<{ path: string; kind: { type: string }; diff?: string }> {
-  const input = state.input;
-  const filePath = typeof input["file_path"] === "string"
-    ? input["file_path"]
-    : typeof input["path"] === "string"
-      ? input["path"]
-      : "(unknown)";
-
+  const parsedInput = ToolInputSchema.parse(state.input);
+  const filePath = parsedInput.file_path ?? parsedInput.path ?? "(unavailable path)";
   const output = extractToolOutput(state);
+
   return [{
     path: filePath,
     kind: { type: toolName === "write" ? "created" : "modified" },
@@ -298,7 +443,7 @@ function extractFileChanges(
 }
 
 function resolveToolStatus(state: ToolState): string {
-  return state.status === "error" ? "error" : state.status;
+  return state.status;
 }
 
 function extractToolOutput(state: ToolState): string | null {
@@ -313,100 +458,48 @@ function extractToolOutput(state: ToolState): string | null {
 
 function extractExitCode(state: ToolState): number | null {
   if (state.status === "completed" || state.status === "error") {
-    const metadata = state.metadata;
-    if (metadata && typeof metadata["exit_code"] === "number") {
-      return metadata["exit_code"];
-    }
+    const metadata = ToolMetadataSchema.parse(state.metadata ?? {});
+    return metadata.exit_code ?? null;
   }
+
   return null;
 }
 
 function extractDurationMs(state: ToolState): number | null {
-  if (state.status === "completed") {
+  if (state.status === "completed" || state.status === "error") {
     return state.time.end - state.time.start;
   }
-  if (state.status === "error") {
-    return state.time.end - state.time.start;
-  }
+
   return null;
 }
 
-export type OpenCodeEvent =
-  | EventMessageUpdated
-  | EventMessagePartUpdated
-  | EventSessionUpdated
-  | EventSessionStatus
-  | EventPermissionUpdated;
+type AssertTrue<T extends true> = T;
+type IsNever<T> = [T] extends [never] ? true : false;
 
-/**
- * Maps OpenCode SSE events to a Farfield-compatible SSE payload.
- * Returns null for events that should be filtered out.
- */
-export function mapOpenCodeEventToSsePayload(
-  event: OpenCodeEvent,
-  sessionId: string
-): unknown | null {
-  switch (event.type) {
-    case "message.updated": {
-      const msg = event.properties.info;
-      if (msg.sessionID !== sessionId) {
-        return null;
-      }
-      return {
-        type: "opencode-message-updated",
-        sessionId,
-        message: msg
-      };
-    }
+type SdkEventType = Event["type"];
+type SdkPartType = Part["type"];
+type ManifestEventType = typeof OPENCODE_EVENT_TYPES[number];
+type ManifestPartType = typeof OPENCODE_PART_TYPES[number];
 
-    case "message.part.updated": {
-      const part = event.properties.part;
-      if (part.sessionID !== sessionId) {
-        return null;
-      }
-      return {
-        type: "opencode-part-updated",
-        sessionId,
-        part,
-        delta: event.properties.delta ?? null
-      };
-    }
+type MissingPartMapper = Exclude<SdkPartType, keyof typeof OPEN_CODE_PART_MAPPERS>;
+type ExtraPartMapper = Exclude<keyof typeof OPEN_CODE_PART_MAPPERS, SdkPartType>;
+type MissingEventExtractor = Exclude<SdkEventType, keyof typeof OPEN_CODE_EVENT_SESSION_ID_EXTRACTORS>;
+type ExtraEventExtractor = Exclude<keyof typeof OPEN_CODE_EVENT_SESSION_ID_EXTRACTORS, SdkEventType>;
+type MissingManifestEvent = Exclude<SdkEventType, ManifestEventType>;
+type ExtraManifestEvent = Exclude<ManifestEventType, SdkEventType>;
+type MissingManifestPart = Exclude<SdkPartType, ManifestPartType>;
+type ExtraManifestPart = Exclude<ManifestPartType, SdkPartType>;
 
-    case "session.updated": {
-      const info = event.properties.info;
-      if (info.id !== sessionId) {
-        return null;
-      }
-      return {
-        type: "opencode-session-updated",
-        sessionId,
-        session: info
-      };
-    }
+type _AssertNoMissingPartMapper = AssertTrue<IsNever<MissingPartMapper>>;
+type _AssertNoExtraPartMapper = AssertTrue<IsNever<ExtraPartMapper>>;
+type _AssertNoMissingEventExtractor = AssertTrue<IsNever<MissingEventExtractor>>;
+type _AssertNoExtraEventExtractor = AssertTrue<IsNever<ExtraEventExtractor>>;
+type _AssertManifestEventMatchesSdk = AssertTrue<IsNever<MissingManifestEvent | ExtraManifestEvent>>;
+type _AssertManifestPartMatchesSdk = AssertTrue<IsNever<MissingManifestPart | ExtraManifestPart>>;
 
-    case "session.status": {
-      if (event.properties.sessionID !== sessionId) {
-        return null;
-      }
-      return {
-        type: "opencode-session-status",
-        sessionId,
-        status: event.properties.status
-      };
-    }
-
-    case "permission.updated": {
-      if (event.properties.sessionID !== sessionId) {
-        return null;
-      }
-      return {
-        type: "opencode-permission-request",
-        sessionId,
-        permission: event.properties
-      };
-    }
-
-    default:
-      return null;
-  }
-}
+void ({
+  partTypes: OPENCODE_PART_TYPES,
+  eventTypes: OPENCODE_EVENT_TYPES,
+  partMappers: OPEN_CODE_PART_MAPPERS,
+  eventExtractors: OPEN_CODE_EVENT_SESSION_ID_EXTRACTORS
+});

@@ -1,7 +1,5 @@
 {
-  "generatedAt": "2026-02-18T22:38:47.130Z",
-  "codexExecutable": "/Applications/Codex.app/Contents/Resources/codex",
-  "codexVersion": "codex-cli 0.104.0-alpha.1",
+  "codexVersion": "codex-cli 0.107.0-alpha.5",
   "outputs": {
     "stable": {
       "typescript": "stable/typescript",

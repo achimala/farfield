@@ -59,7 +59,10 @@ export function applyStrictPatch(
   let parent: unknown = state;
   for (const segment of parentPath) {
     if (typeof segment === "number") {
-      parent = (parent as unknown[])[segment];
+      if (!Array.isArray(parent)) {
+        throw new Error(`Patch path invalid at segment ${patchPathSegmentLabel(segment)}`);
+      }
+      parent = parent[segment];
       continue;
     }
 
@@ -177,10 +180,9 @@ export function reduceThreadStreamEvents(
     }
 
     if (!next.conversationState) {
-      // The desktop app can emit patches before the first snapshot for a thread.
-      // Ignore these until we have a concrete base state.
-      byThread.set(threadId, next);
-      continue;
+      throw new Error(
+        `Thread stream reduction failed for thread ${threadId} at event ${eventIndex}: patch event arrived before snapshot`
+      );
     }
 
     let updated = next.conversationState;

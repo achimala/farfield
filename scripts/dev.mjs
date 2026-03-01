@@ -81,7 +81,12 @@ function runBuild(filter) {
 
 const args = parseArgs(process.argv.slice(2));
 
-const buildFilters = ["@farfield/protocol", "@farfield/api", "@farfield/opencode-api"];
+const buildFilters = [
+  "@farfield/protocol",
+  "@farfield/unified-surface",
+  "@farfield/api",
+  "@farfield/opencode-api"
+];
 for (const filter of buildFilters) {
   const status = runBuild(filter);
   if (status !== 0) {

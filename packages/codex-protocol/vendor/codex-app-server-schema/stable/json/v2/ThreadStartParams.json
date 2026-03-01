@@ -38,15 +38,25 @@
         "null"
       ]
     },
-    "modelProvider": {
-      "type": [
-        "string",
-        "null"
+    "personality": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Personality"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "ephemeral": {
       "type": [
         "boolean",
+        "null"
+      ]
+    },
+    "serviceName": {
+      "type": [
+        "string",
         "null"
       ]
     },
@@ -60,17 +70,13 @@
         }
       ]
     },
-    "personality": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/Personality"
-        },
-        {
-          "type": "null"
-        }
+    "model": {
+      "type": [
+        "string",
+        "null"
       ]
     },
-    "model": {
+    "modelProvider": {
       "type": [
         "string",
         "null"
@@ -79,12 +85,45 @@
   },
   "definitions": {
     "AskForApproval": {
-      "type": "string",
-      "enum": [
-        "untrusted",
-        "on-failure",
-        "on-request",
-        "never"
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "untrusted",
+            "on-failure",
+            "on-request",
+            "never"
+          ]
+        },
+        {
+          "type": "object",
+          "required": [
+            "reject"
+          ],
+          "properties": {
+            "reject": {
+              "type": "object",
+              "required": [
+                "mcp_elicitations",
+                "rules",
+                "sandbox_approval"
+              ],
+              "properties": {
+                "mcp_elicitations": {
+                  "type": "boolean"
+                },
+                "rules": {
+                  "type": "boolean"
+                },
+                "sandbox_approval": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "additionalProperties": false,
+          "title": "RejectAskForApproval"
+        }
       ]
     },
     "DynamicToolSpec": {

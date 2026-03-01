@@ -43,6 +43,13 @@
         "type": "string"
       }
     },
+    "searchTerm": {
+      "description": "Optional substring filter for the extracted thread title.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "sortKey": {
       "description": "Optional sort key; defaults to created_at.",
       "anyOf": [

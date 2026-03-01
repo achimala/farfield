@@ -40,7 +40,7 @@ function parseAgentsArg(raw: string): AgentId[] {
     const parsed = AgentIdSchema.safeParse(token);
     if (!parsed.success) {
       throw new Error(
-        `Unknown agent id "${token}". Allowed values: ${formatAllowedAgentIds()}, all`
+        `Unknown agent id "${token}". Allowed values: ${formatAllowedAgentIds()}, all`,
       );
     }
     expanded.push(parsed.data);
@@ -58,7 +58,7 @@ function parseAgentsArg(raw: string): AgentId[] {
 
   if (deduped.length === 0) {
     throw new Error(
-      `No valid agent ids were provided. Allowed values: ${formatAllowedAgentIds()}, all`
+      `No valid agent ids were provided. Allowed values: ${formatAllowedAgentIds()}, all`,
     );
   }
 
@@ -73,7 +73,7 @@ export function formatServerHelpText(): string {
     "",
     "Flags:",
     "  --agents=<ids>   Comma-separated agent ids. Allowed: codex, opencode, all",
-    "  --help           Show this help message"
+    "  --help           Show this help message",
   ].join("\n");
 }
 
@@ -117,6 +117,6 @@ export function parseServerCliOptions(argv: string[]): ServerCliOptions {
 
   return {
     agentIds: parsedAgents ?? [...DEFAULT_AGENT_IDS],
-    showHelp
+    showHelp,
   };
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUp, Loader2, Square } from "lucide-react";
+import { ArrowUp, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -18,7 +18,7 @@ export function ChatComposer({
   isGenerating,
   placeholder = "Message Codex…",
   onInterrupt,
-  onSend
+  onSend,
 }: ChatComposerProps): React.JSX.Element {
   const [draft, setDraft] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -65,7 +65,7 @@ export function ChatComposer({
 
   useEffect(() => {
     resizeTextarea();
-  }, [resizeTextarea]);
+  }, [draft, resizeTextarea]);
 
   useEffect(() => {
     return () => {
@@ -89,7 +89,15 @@ export function ChatComposer({
     previousHeightRef.current = 0;
   }, [canSend, draft, isBusy, isGenerating, onInterrupt, onSend]);
 
-  const disableSend = isGenerating ? !canSend || isBusy : !canSend || isBusy || !draft.trim();
+  const disableSend = isGenerating
+    ? !canSend || isBusy
+    : !canSend || isBusy || !draft.trim();
+  const shouldSendOnEnter = useCallback(() => {
+    if (typeof window.matchMedia !== "function") {
+      return true;
+    }
+    return !window.matchMedia("(pointer: coarse)").matches;
+  }, []);
 
   return (
     <div className="flex items-end gap-2 rounded-[28px] border border-border bg-card pl-4 pr-2.5 py-2.5 focus-within:border-muted-foreground/40 transition-colors">
@@ -101,7 +109,12 @@ export function ChatComposer({
           resizeTextarea();
         }}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+          if (
+            e.key === "Enter" &&
+            !e.shiftKey &&
+            !e.nativeEvent.isComposing &&
+            shouldSendOnEnter()
+          ) {
             e.preventDefault();
             void sendDraft();
           }
@@ -121,12 +134,12 @@ export function ChatComposer({
         size="icon"
         className={`h-9 w-9 shrink-0 self-end rounded-full disabled:opacity-30 ${
           isGenerating
-            ? "bg-destructive text-destructive-foreground hover:bg-destructive/85"
+            ? "bg-white text-black hover:bg-white/90"
             : "bg-foreground text-background hover:bg-foreground/80"
         }`}
       >
         {isGenerating ? (
-          <Square size={11} />
+          <span className="block h-2.5 w-2.5 rounded-[2px] bg-current" />
         ) : isBusy ? (
           <Loader2 size={13} className="animate-spin" />
         ) : (

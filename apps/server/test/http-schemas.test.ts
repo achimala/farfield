@@ -1,79 +1,41 @@
 import { describe, expect, it } from "vitest";
 import {
   parseBody,
-  ReplayBodySchema,
-  SendMessageBodySchema,
-  StartThreadBodySchema,
-  SetModeBodySchema,
-  SubmitUserInputBodySchema
+  TraceMarkBodySchema,
+  TraceStartBodySchema,
 } from "../src/http-schemas.js";
 
 describe("server request schemas", () => {
-  it("accepts valid send message body", () => {
-    const parsed = parseBody(SendMessageBodySchema, {
-      text: "hello",
-      isSteering: false
+  it("validates trace start body", () => {
+    const parsed = parseBody(TraceStartBodySchema, {
+      label: "capture",
     });
 
-    expect(parsed.text).toBe("hello");
+    expect(parsed.label).toBe("capture");
   });
 
-  it("rejects unknown fields", () => {
+  it("rejects trace start unknown fields", () => {
     expect(() =>
-      parseBody(SendMessageBodySchema, {
-        text: "hello",
-        extra: true
-      })
+      parseBody(TraceStartBodySchema, {
+        label: "capture",
+        extra: true,
+      }),
     ).toThrowError(/Unrecognized key/);
   });
 
-  it("validates set mode body", () => {
-    const parsed = parseBody(SetModeBodySchema, {
-      collaborationMode: {
-        mode: "plan",
-        settings: {
-          model: "gpt-5.3-codex",
-          reasoning_effort: "high",
-          developer_instructions: "x"
-        }
-      }
+  it("validates trace mark body", () => {
+    const parsed = parseBody(TraceMarkBodySchema, {
+      note: "checkpoint",
     });
 
-    expect(parsed.collaborationMode.mode).toBe("plan");
+    expect(parsed.note).toBe("checkpoint");
   });
 
-  it("rejects invalid request id type", () => {
+  it("rejects note over max length", () => {
     expect(() =>
-      parseBody(SubmitUserInputBodySchema, {
-        requestId: "bad",
-        response: {}
-      })
-    ).toThrowError(/Expected number/);
-  });
-
-  it("validates replay body", () => {
-    const parsed = parseBody(ReplayBodySchema, {
-      entryId: "abc",
-      waitForResponse: true
-    });
-
-    expect(parsed.waitForResponse).toBe(true);
-  });
-
-  it("validates start thread body with agentId", () => {
-    const parsed = parseBody(StartThreadBodySchema, {
-      agentId: "opencode",
-      cwd: "/tmp/workspace"
-    });
-
-    expect(parsed.agentId).toBe("opencode");
-  });
-
-  it("rejects deprecated agentKind field", () => {
-    expect(() =>
-      parseBody(StartThreadBodySchema, {
-        agentKind: "opencode"
-      })
-    ).toThrowError(/Unrecognized key/);
+      parseBody(TraceMarkBodySchema, {
+        note: "x".repeat(501),
+      }),
+    ).toThrowError(/at most 500/);
   });
 });

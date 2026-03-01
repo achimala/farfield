@@ -7,7 +7,13 @@ import {
   NullableStringSchema
 } from "./common.js";
 import { ProtocolValidationError } from "./errors.js";
-import { ToolRequestUserInputResponseSchema } from "./generated/app-server/index.js";
+import {
+  ExperimentalServerRequestSchema as GeneratedExperimentalServerRequestSchema,
+  RequestIdSchema as GeneratedRequestIdSchema,
+  StableServerRequestSchema as GeneratedStableServerRequestSchema,
+  ToolRequestUserInputParamsSchema as GeneratedToolRequestUserInputParamsSchema,
+  ToolRequestUserInputResponseSchema
+} from "./generated/app-server/index.js";
 
 export const CollaborationModeSettingsSchema = z
   .object({
@@ -132,6 +138,22 @@ export const PlanItemSchema = z
   })
   .passthrough();
 
+export const TodoListPlanStepSchema = z
+  .object({
+    step: z.string(),
+    status: NonEmptyStringSchema
+  })
+  .passthrough();
+
+export const TodoListItemSchema = z
+  .object({
+    id: NonEmptyStringSchema,
+    type: z.literal("todo-list"),
+    explanation: z.string().optional(),
+    plan: z.array(TodoListPlanStepSchema)
+  })
+  .passthrough();
+
 export const PlanImplementationItemSchema = z
   .object({
     id: NonEmptyStringSchema,
@@ -154,7 +176,7 @@ export const UserInputResponseItemSchema = z
   .object({
     id: NonEmptyStringSchema,
     type: z.literal("userInputResponse"),
-    requestId: NonNegativeIntSchema,
+    requestId: z.union([NonNegativeIntSchema, NonEmptyStringSchema]),
     turnId: NonEmptyStringSchema,
     questions: z.array(UserInputAnsweredQuestionSchema),
     answers: z.record(z.array(z.string())),
@@ -242,6 +264,15 @@ export const ModelChangedItemSchema = z
     id: NonEmptyStringSchema,
     fromModel: NullableStringSchema.optional(),
     toModel: NullableStringSchema.optional()
+  })
+  .passthrough();
+
+export const ForkedFromConversationItemSchema = z
+  .object({
+    type: z.literal("forkedFromConversation"),
+    id: NonEmptyStringSchema,
+    sourceConversationId: NonEmptyStringSchema,
+    sourceConversationTitle: NullableStringSchema.optional()
   })
   .passthrough();
 
@@ -344,6 +375,7 @@ export const TurnItemSchema = z.discriminatedUnion("type", [
   ErrorItemSchema,
   ReasoningItemSchema,
   PlanItemSchema,
+  TodoListItemSchema,
   PlanImplementationItemSchema,
   UserInputResponseItemSchema,
   CommandExecutionItemSchema,
@@ -355,44 +387,52 @@ export const TurnItemSchema = z.discriminatedUnion("type", [
   ImageViewItemSchema,
   EnteredReviewModeItemSchema,
   ExitedReviewModeItemSchema,
-  ModelChangedItemSchema
+  ModelChangedItemSchema,
+  ForkedFromConversationItemSchema
 ]);
 
-export const UserInputOptionSchema = z
-  .object({
-    label: z.string(),
-    description: z.string()
-  })
-  .passthrough();
-
-export const UserInputQuestionSchema = z
-  .object({
-    id: NonEmptyStringSchema,
-    header: z.string(),
-    question: z.string(),
-    isOther: z.boolean(),
-    isSecret: z.boolean(),
-    options: z.array(UserInputOptionSchema)
-  })
-  .passthrough();
-
-export const UserInputRequestParamsSchema = z
-  .object({
-    threadId: NonEmptyStringSchema,
-    turnId: NonEmptyStringSchema,
-    itemId: NonEmptyStringSchema,
-    questions: z.array(UserInputQuestionSchema)
-  })
-  .passthrough();
+export const UserInputRequestIdSchema = GeneratedRequestIdSchema;
 
 export const UserInputRequestSchema = z
   .object({
     method: z.literal("item/tool/requestUserInput"),
-    id: NonNegativeIntSchema,
-    params: UserInputRequestParamsSchema,
+    id: UserInputRequestIdSchema,
+    params: GeneratedToolRequestUserInputParamsSchema,
     completed: z.boolean().optional()
   })
   .passthrough();
+
+const GeneratedServerRequestSchema = z.union([
+  GeneratedStableServerRequestSchema,
+  GeneratedExperimentalServerRequestSchema
+]);
+
+const GeneratedThreadConversationRequestSchema = z
+  .object({
+    completed: z.boolean().optional()
+  })
+  .passthrough()
+  .and(GeneratedServerRequestSchema);
+
+export const PlanImplementationRequestSchema = z
+  .object({
+    method: z.literal("item/plan/requestImplementation"),
+    id: GeneratedRequestIdSchema,
+    params: z
+      .object({
+        threadId: NonEmptyStringSchema,
+        turnId: NonEmptyStringSchema,
+        planContent: z.string()
+      })
+      .passthrough(),
+    completed: z.boolean().optional()
+  })
+  .passthrough();
+
+export const ThreadConversationRequestSchema = z.union([
+  GeneratedThreadConversationRequestSchema,
+  PlanImplementationRequestSchema
+]);
 
 export const ThreadTurnSchema = z
   .object({
@@ -412,7 +452,7 @@ export const ThreadConversationStateSchema = z
   .object({
     id: NonEmptyStringSchema,
     turns: z.array(ThreadTurnSchema),
-    requests: z.array(UserInputRequestSchema).default([]),
+    requests: z.array(ThreadConversationRequestSchema).default([]),
     createdAt: NonNegativeIntSchema.optional(),
     updatedAt: NonNegativeIntSchema.optional(),
     title: NullableStringSchema.optional(),
@@ -486,9 +526,10 @@ export const ThreadStreamPatchesChangeSchema: z.ZodObject<
   })
   .passthrough();
 
-export const ThreadStreamChangeSchema: z.ZodUnion<
-  [typeof ThreadStreamSnapshotChangeSchema, typeof ThreadStreamPatchesChangeSchema]
-> = z.union([ThreadStreamSnapshotChangeSchema, ThreadStreamPatchesChangeSchema]);
+export const ThreadStreamChangeSchema = z.discriminatedUnion("type", [
+  ThreadStreamSnapshotChangeSchema,
+  ThreadStreamPatchesChangeSchema
+]);
 
 export const ThreadStreamStateChangedParamsSchema: z.ZodObject<
   {
@@ -509,7 +550,10 @@ export const ThreadStreamStateChangedParamsSchema: z.ZodObject<
 
 export type CollaborationMode = z.infer<typeof CollaborationModeSchema>;
 export type TurnStartParams = z.infer<typeof TurnStartParamsSchema>;
+export type UserInputRequestId = z.infer<typeof UserInputRequestIdSchema>;
 export type UserInputRequest = z.infer<typeof UserInputRequestSchema>;
+export type PlanImplementationRequest = z.infer<typeof PlanImplementationRequestSchema>;
+export type ThreadConversationRequest = z.infer<typeof ThreadConversationRequestSchema>;
 export type ThreadConversationState = z.infer<typeof ThreadConversationStateSchema>;
 export type ThreadStreamPatch = z.infer<typeof ThreadStreamPatchSchema>;
 export type ThreadStreamStateChangedParams = z.infer<typeof ThreadStreamStateChangedParamsSchema>;
@@ -538,7 +582,98 @@ export const UserInputAnswerSchema = z
   })
   .passthrough();
 
-export const UserInputResponsePayloadSchema = ToolRequestUserInputResponseSchema.passthrough();
+const ExecPolicyAmendmentSchema = z.array(z.string());
+
+const NetworkPolicyRuleActionSchema = z.enum(["allow", "deny"]);
+
+const NetworkPolicyAmendmentSchema = z
+  .object({
+    action: NetworkPolicyRuleActionSchema,
+    host: z.string()
+  })
+  .strict();
+
+const CommandExecutionApprovalDecisionSchema = z.union([
+  z.literal("accept"),
+  z.literal("acceptForSession"),
+  z.literal("decline"),
+  z.literal("cancel"),
+  z
+    .object({
+      acceptWithExecpolicyAmendment: z
+        .object({
+          execpolicy_amendment: ExecPolicyAmendmentSchema
+        })
+        .strict()
+    })
+    .strict(),
+  z
+    .object({
+      applyNetworkPolicyAmendment: z
+        .object({
+          network_policy_amendment: NetworkPolicyAmendmentSchema
+        })
+        .strict()
+    })
+    .strict()
+]);
+
+const FileChangeApprovalDecisionSchema = z.enum([
+  "accept",
+  "acceptForSession",
+  "decline",
+  "cancel"
+]);
+
+const ReviewDecisionSchema = z.union([
+  z.literal("approved"),
+  z.literal("approved_for_session"),
+  z.literal("denied"),
+  z.literal("abort"),
+  z
+    .object({
+      approved_execpolicy_amendment: z
+        .object({
+          proposed_execpolicy_amendment: ExecPolicyAmendmentSchema
+        })
+        .strict()
+    })
+    .strict(),
+  z
+    .object({
+      network_policy_amendment: z
+        .object({
+          network_policy_amendment: NetworkPolicyAmendmentSchema
+        })
+        .strict()
+    })
+    .strict()
+]);
+
+const CommandExecutionRequestApprovalResponseSchema = z
+  .object({
+    decision: CommandExecutionApprovalDecisionSchema
+  })
+  .strict();
+
+const FileChangeRequestApprovalResponseSchema = z
+  .object({
+    decision: FileChangeApprovalDecisionSchema
+  })
+  .strict();
+
+const LegacyReviewApprovalResponseSchema = z
+  .object({
+    decision: ReviewDecisionSchema
+  })
+  .strict();
+
+export const UserInputResponsePayloadSchema = z.union([
+  ToolRequestUserInputResponseSchema.passthrough(),
+  CommandExecutionRequestApprovalResponseSchema,
+  FileChangeRequestApprovalResponseSchema,
+  LegacyReviewApprovalResponseSchema
+]);
 
 export type UserInputResponsePayload = z.infer<typeof UserInputResponsePayloadSchema>;
 

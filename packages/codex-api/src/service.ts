@@ -2,6 +2,7 @@ import {
   type TurnStartParams,
   type CollaborationMode,
   parseUserInputResponsePayload,
+  type UserInputRequestId,
   type UserInputResponsePayload
 } from "@farfield/protocol";
 import type { DesktopIpcClient } from "./ipc-client.js";
@@ -27,7 +28,7 @@ export interface SetModeInput {
 export interface SubmitUserInputInput {
   threadId: string;
   ownerClientId: string;
-  requestId: number;
+  requestId: UserInputRequestId;
   response: UserInputResponsePayload;
 }
 

@@ -185,8 +185,6 @@ function generateVariant(codexExecutable, outDir, variantName, experimental) {
 
 function writeMetadataFile(codexExecutable, outDir) {
   const metadata = {
-    generatedAt: new Date().toISOString(),
-    codexExecutable,
     codexVersion: readCodexVersion(codexExecutable),
     outputs: {
       stable: {

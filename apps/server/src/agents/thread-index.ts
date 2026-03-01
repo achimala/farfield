@@ -1,20 +1,38 @@
 import type { AgentId } from "./types.js";
 
 export class ThreadIndex {
-  private readonly agentIdByThreadId = new Map<string, AgentId>();
+  private readonly agentIdsByThreadId = new Map<string, Set<AgentId>>();
 
   public register(threadId: string, agentId: AgentId): void {
-    this.agentIdByThreadId.set(threadId, agentId);
+    const existing = this.agentIdsByThreadId.get(threadId);
+    if (existing) {
+      existing.add(agentId);
+      return;
+    }
+
+    this.agentIdsByThreadId.set(threadId, new Set([agentId]));
   }
 
   public resolve(threadId: string): AgentId | null {
-    return this.agentIdByThreadId.get(threadId) ?? null;
+    const candidates = this.agentIdsByThreadId.get(threadId);
+    if (!candidates || candidates.size !== 1) {
+      return null;
+    }
+
+    const [resolved] = Array.from(candidates);
+    return resolved ?? null;
   }
 
-  public list(): Array<{ threadId: string; agentId: AgentId }> {
-    return Array.from(this.agentIdByThreadId.entries()).map(([threadId, agentId]) => ({
-      threadId,
-      agentId
-    }));
+  public providers(threadId: string): AgentId[] {
+    return Array.from(this.agentIdsByThreadId.get(threadId) ?? []);
+  }
+
+  public list(): Array<{ threadId: string; agentIds: AgentId[] }> {
+    return Array.from(this.agentIdsByThreadId.entries()).map(
+      ([threadId, agentIds]) => ({
+        threadId,
+        agentIds: Array.from(agentIds),
+      }),
+    );
   }
 }

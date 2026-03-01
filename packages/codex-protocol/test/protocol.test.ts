@@ -106,6 +106,88 @@ describe("codex-protocol schemas", () => {
     expect(parsed.params.change.type).toBe("snapshot");
   });
 
+  it("parses snapshot broadcast when requests include item/tool/call", () => {
+    const parsed = parseThreadStreamStateChangedBroadcast({
+      type: "broadcast",
+      method: "thread-stream-state-changed",
+      sourceClientId: "client-123",
+      version: 4,
+      params: {
+        conversationId: "thread-123",
+        type: "thread-stream-state-changed",
+        version: 4,
+        change: {
+          type: "snapshot",
+          conversationState: {
+            id: "thread-123",
+            turns: [],
+            requests: [
+              {
+                id: 7,
+                method: "item/tool/call",
+                params: {
+                  arguments: {
+                    value: "example"
+                  },
+                  callId: "call-1",
+                  threadId: "thread-123",
+                  tool: "exampleTool",
+                  turnId: "turn-1"
+                }
+              }
+            ]
+          }
+        }
+      }
+    });
+
+    expect(parsed.params.change.type).toBe("snapshot");
+    const request =
+      parsed.params.change.type === "snapshot"
+        ? parsed.params.change.conversationState.requests[0]
+        : null;
+    expect(request?.method).toBe("item/tool/call");
+  });
+
+  it("parses snapshot broadcast when requests include item/plan/requestImplementation", () => {
+    const parsed = parseThreadStreamStateChangedBroadcast({
+      type: "broadcast",
+      method: "thread-stream-state-changed",
+      sourceClientId: "client-123",
+      version: 4,
+      params: {
+        conversationId: "thread-123",
+        type: "thread-stream-state-changed",
+        version: 4,
+        change: {
+          type: "snapshot",
+          conversationState: {
+            id: "thread-123",
+            turns: [],
+            requests: [
+              {
+                id: "implement-plan:turn-1",
+                method: "item/plan/requestImplementation",
+                params: {
+                  threadId: "thread-123",
+                  turnId: "turn-1",
+                  planContent: "# Plan\n\nImplement everything"
+                }
+              }
+            ]
+          }
+        }
+      }
+    });
+
+    expect(parsed.params.change.type).toBe("snapshot");
+    const request =
+      parsed.params.change.type === "snapshot"
+        ? parsed.params.change.conversationState.requests[0]
+        : null;
+    expect(request?.method).toBe("item/plan/requestImplementation");
+  });
+
   it("parses snapshot broadcast when turn includes error item", () => {
     const parsed = parseThreadStreamStateChangedBroadcast({
       type: "broadcast",
@@ -144,6 +226,49 @@ describe("codex-protocol schemas", () => {
     expect(parsed.params.change.type).toBe("snapshot");
   });
 
+  it("parses snapshot broadcast when turn includes todo-list item", () => {
+    const parsed = parseThreadStreamStateChangedBroadcast({
+      type: "broadcast",
+      method: "thread-stream-state-changed",
+      sourceClientId: "client-123",
+      version: 4,
+      params: {
+        conversationId: "thread-123",
+        type: "thread-stream-state-changed",
+        version: 4,
+        change: {
+          type: "snapshot",
+          conversationState: {
+            id: "thread-123",
+            turns: [
+              {
+                status: "inProgress",
+                items: [
+                  {
+                    id: "todo-1",
+                    type: "todo-list",
+                    explanation: "Working through tasks",
+                    plan: [
+                      { step: "Gather context", status: "completed" },
+                      { step: "Implement fix", status: "inProgress" }
+                    ]
+                  }
+                ]
+              }
+            ],
+            requests: []
+          }
+        }
+      }
+    });
+
+    expect(parsed.params.change.type).toBe("snapshot");
+    const todoItem = parsed.params.change.type === "snapshot"
+      ? parsed.params.change.conversationState.turns[0]?.items[0]
+      : null;
+    expect(todoItem?.type).toBe("todo-list");
+  });
+
   it("rejects invalid patch value for remove operation", () => {
     expect(() =>
       parseThreadStreamStateChangedBroadcast({
@@ -168,6 +293,42 @@ describe("codex-protocol schemas", () => {
         }
       })
     ).toThrowError(/remove patches must not include value/);
+  });
+
+  it("rejects malformed snapshot request entries with schema details", () => {
+    expect(() =>
+      parseThreadStreamStateChangedBroadcast({
+        type: "broadcast",
+        method: "thread-stream-state-changed",
+        sourceClientId: "client-123",
+        version: 4,
+        params: {
+          conversationId: "thread-123",
+          type: "thread-stream-state-changed",
+          version: 4,
+          change: {
+            type: "snapshot",
+            conversationState: {
+              id: "thread-123",
+              turns: [],
+              requests: [
+                {
+                  id: "request-1",
+                  method: "item/tool/requestUserInput",
+                  params: {
+                    change: {
+                      conversationState: {
+                        requests: [{}]
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      })
+    ).toThrowError(/Invalid input: Should pass single schema/);
   });
 
   it("parses thread conversation state with userInputResponse item", () => {
@@ -561,6 +722,28 @@ describe("codex-protocol schemas", () => {
     expect(parsed.turns[0]?.items[0]?.type).toBe("modelChanged");
   });
 
+  it("parses thread conversation state with forkedFromConversation item", () => {
+    const parsed = parseThreadConversationState({
+      id: "thread-123",
+      turns: [
+        {
+          status: "completed",
+          items: [
+            {
+              id: "item-forked",
+              type: "forkedFromConversation",
+              sourceConversationId: "thread-456",
+              sourceConversationTitle: "Refactor plan"
+            }
+          ]
+        }
+      ],
+      requests: []
+    });
+
+    expect(parsed.turns[0]?.items[0]?.type).toBe("forkedFromConversation");
+  });
+
   it("parses generic ipc request frames", () => {
     const parsed = parseIpcFrame({
       type: "request",
@@ -604,7 +787,27 @@ describe("codex-protocol schemas", () => {
           }
         }
       })
-    ).toThrowError(/Expected string, received number/);
+    ).toThrowError(/UserInputResponsePayload did not match expected schema/);
+  });
+
+  it("parses command execution approval payload", () => {
+    const parsed = parseUserInputResponsePayload({
+      decision: "accept",
+    });
+
+    expect(parsed).toEqual({
+      decision: "accept",
+    });
+  });
+
+  it("parses legacy review approval payload", () => {
+    const parsed = parseUserInputResponsePayload({
+      decision: "approved_for_session",
+    });
+
+    expect(parsed).toEqual({
+      decision: "approved_for_session",
+    });
   });
 
   it("parses collaboration mode list response", () => {
@@ -713,6 +916,9 @@ describe("codex-protocol schemas", () => {
         updatedAt: 1700000000,
         cwd: "/tmp/workspace",
         source: "cli",
+        status: {
+          type: "idle"
+        },
         path: "/tmp/thread.jsonl",
         cliVersion: "0.1.0",
         turns: [
@@ -748,6 +954,9 @@ describe("codex-protocol schemas", () => {
         path: "/tmp/rollout.jsonl",
         cliVersion: "0.1.0",
         source: "vscode",
+        status: {
+          type: "idle"
+        },
         gitInfo: null,
         turns: []
       },

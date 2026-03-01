@@ -17,12 +17,45 @@
   },
   "definitions": {
     "AskForApproval": {
-      "type": "string",
-      "enum": [
-        "untrusted",
-        "on-failure",
-        "on-request",
-        "never"
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "untrusted",
+            "on-failure",
+            "on-request",
+            "never"
+          ]
+        },
+        {
+          "type": "object",
+          "required": [
+            "reject"
+          ],
+          "properties": {
+            "reject": {
+              "type": "object",
+              "required": [
+                "mcp_elicitations",
+                "rules",
+                "sandbox_approval"
+              ],
+              "properties": {
+                "mcp_elicitations": {
+                  "type": "boolean"
+                },
+                "rules": {
+                  "type": "boolean"
+                },
+                "sandbox_approval": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "additionalProperties": false,
+          "title": "RejectAskForApproval"
+        }
       ]
     },
     "ConfigRequirements": {
@@ -109,6 +142,12 @@
           "items": {
             "type": "string"
           }
+        },
+        "dangerouslyAllowAllUnixSockets": {
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "dangerouslyAllowNonLoopbackAdmin": {
           "type": [

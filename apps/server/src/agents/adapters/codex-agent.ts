@@ -1,23 +1,25 @@
-import fs from "node:fs";
-import path from "node:path";
 import {
   AppServerClient,
   AppServerRpcError,
   AppServerTransportError,
   CodexMonitorService,
+  DesktopIpcError,
   DesktopIpcClient,
-  findLatestTurnParamsTemplate,
   reduceThreadStreamEvents,
   ThreadStreamReductionError,
-  type SendRequestOptions
+  type SendRequestOptions,
 } from "@farfield/api";
 import {
+  ProtocolValidationError,
+  parseThreadConversationState,
   parseThreadStreamStateChangedBroadcast,
   parseUserInputResponsePayload,
-  ProtocolValidationError,
   type IpcFrame,
   type IpcRequestFrame,
-  type IpcResponseFrame
+  type IpcResponseFrame,
+  type ThreadConversationState,
+  type ThreadStreamStateChangedBroadcast,
+  type UserInputRequestId,
 } from "@farfield/protocol";
 import { logger } from "../../logger.js";
 import { resolveOwnerClientId } from "../../thread-owner.js";
@@ -35,8 +37,10 @@ import type {
   AgentSetCollaborationModeInput,
   AgentSubmitUserInputInput,
   AgentThreadLiveState,
-  AgentThreadStreamEvents
+  AgentThreadStreamEvents,
 } from "../types.js";
+
+type StreamSnapshotOrigin = "stream" | "readThreadWithTurns" | "readThread";
 
 export interface CodexAgentRuntimeState {
   appReady: boolean;
@@ -63,8 +67,6 @@ export interface CodexAgentOptions {
 }
 
 const ANSI_ESCAPE_REGEX = /\u001B\[[0-?]*[ -/]*[@-~]/g;
-const INVALID_STREAM_EVENTS_LOG_PATH = process.env["FARFIELD_INVALID_STREAM_LOG_PATH"] ??
-  path.resolve(process.cwd(), "invalid-thread-stream-events.jsonl");
 
 export class CodexAgentAdapter implements AgentAdapter {
   public readonly id = "codex";
@@ -76,7 +78,7 @@ export class CodexAgentAdapter implements AgentAdapter {
     canSubmitUserInput: true,
     canReadLiveState: true,
     canReadStreamEvents: true,
-    canReadRateLimits: true
+    canReadRateLimits: true,
   };
 
   private readonly appClient: AppServerClient;
@@ -87,14 +89,26 @@ export class CodexAgentAdapter implements AgentAdapter {
 
   private readonly threadOwnerById = new Map<string, string>();
   private readonly streamEventsByThreadId = new Map<string, IpcFrame[]>();
-  private readonly ipcFrameListeners = new Set<(event: CodexIpcFrameEvent) => void>();
+  private readonly streamSnapshotByThreadId = new Map<
+    string,
+    ThreadConversationState
+  >();
+  private readonly streamSnapshotOriginByThreadId = new Map<
+    string,
+    StreamSnapshotOrigin
+  >();
+  private readonly threadTitleById = new Map<string, string | null>();
+  private readonly ipcFrameListeners = new Set<
+    (event: CodexIpcFrameEvent) => void
+  >();
+  private lastKnownOwnerClientId: string | null = null;
 
   private runtimeState: CodexAgentRuntimeState = {
     appReady: false,
     ipcConnected: false,
     ipcInitialized: false,
     codexAvailable: true,
-    lastError: null
+    lastError: null,
   };
 
   private bootstrapInFlight: Promise<void> | null = null;
@@ -111,24 +125,22 @@ export class CodexAgentAdapter implements AgentAdapter {
       cwd: options.workspaceDir,
       onStderr: (line) => {
         const normalized = normalizeStderrLine(line);
-        if (isKnownBenignAppServerStderr(normalized)) {
-          logger.debug({ line: normalized }, "codex-app-server-stderr-ignored");
-          return;
-        }
         logger.error({ line: normalized }, "codex-app-server-stderr");
-      }
+      },
     });
 
     this.ipcClient = new DesktopIpcClient({
-      socketPath: options.socketPath
+      socketPath: options.socketPath,
     });
     this.service = new CodexMonitorService(this.ipcClient);
 
     this.ipcClient.onConnectionState((state) => {
       this.patchRuntimeState({
         ipcConnected: state.connected,
-        ipcInitialized: state.connected ? this.runtimeState.ipcInitialized : false,
-        ...(state.reason ? { lastError: state.reason } : {})
+        ipcInitialized: state.connected
+          ? this.runtimeState.ipcInitialized
+          : false,
+        ...(state.reason ? { lastError: state.reason } : {}),
       });
 
       if (!state.connected) {
@@ -141,26 +153,42 @@ export class CodexAgentAdapter implements AgentAdapter {
 
     this.ipcClient.onFrame((frame) => {
       const threadId = extractThreadId(frame);
-      const method = frame.type === "request" || frame.type === "broadcast"
-        ? frame.method
-        : frame.type === "response"
-          ? frame.method ?? "response"
-          : frame.type;
+      const method =
+        frame.type === "request" || frame.type === "broadcast"
+          ? frame.method
+          : frame.type === "response"
+            ? (frame.method ?? "response")
+            : frame.type;
+
+      const sourceClientIdRaw =
+        frame.type === "request" || frame.type === "broadcast"
+          ? frame.sourceClientId
+          : undefined;
+      const sourceClientId =
+        typeof sourceClientIdRaw === "string" ? sourceClientIdRaw.trim() : "";
+      if (sourceClientId) {
+        this.lastKnownOwnerClientId = sourceClientId;
+      }
 
       this.emitIpcFrame({
         direction: "in",
         frame,
         method,
-        threadId
+        threadId,
       });
 
-      if (frame.type !== "broadcast") {
-        return;
+      if (frame.type === "broadcast" && threadId) {
+        const current = this.streamEventsByThreadId.get(threadId) ?? [];
+        current.push(frame);
+        if (current.length > 400) {
+          current.splice(0, current.length - 400);
+        }
+        this.streamEventsByThreadId.set(threadId, current);
       }
 
       if (
-        frame.method !== "thread-stream-state-changed" &&
-        frame.method !== "thread/tokenUsage/updated"
+        frame.type !== "broadcast" ||
+        frame.method !== "thread-stream-state-changed"
       ) {
         return;
       }
@@ -170,23 +198,39 @@ export class CodexAgentAdapter implements AgentAdapter {
         return;
       }
 
-      const conversationId = frame.method === "thread-stream-state-changed"
-        ? (params as Record<string, string>)["conversationId"]
-        : (params as Record<string, string>)["threadId"];
+      const conversationId = (params as Record<string, string>)[
+        "conversationId"
+      ];
       if (!conversationId || !conversationId.trim()) {
         return;
       }
 
-      if (frame.sourceClientId && frame.sourceClientId.trim()) {
-        this.threadOwnerById.set(conversationId, frame.sourceClientId.trim());
+      if (sourceClientId) {
+        this.threadOwnerById.set(conversationId, sourceClientId);
       }
 
-      const current = this.streamEventsByThreadId.get(conversationId) ?? [];
-      current.push(frame);
-      if (current.length > 400) {
-        current.splice(0, current.length - 400);
+      try {
+        const parsedBroadcast = parseThreadStreamStateChangedBroadcast(frame);
+        if (parsedBroadcast.params.change.type !== "snapshot") {
+          return;
+        }
+
+        const snapshot = parsedBroadcast.params.change.conversationState;
+        this.streamSnapshotByThreadId.set(conversationId, snapshot);
+        this.streamSnapshotOriginByThreadId.set(conversationId, "stream");
+        this.setThreadTitle(conversationId, snapshot.title);
+      } catch (error) {
+        logger.error(
+          {
+            conversationId,
+            error: toErrorMessage(error),
+            ...(error instanceof ProtocolValidationError
+              ? { issues: error.issues }
+              : {}),
+          },
+          "thread-stream-broadcast-parse-failed",
+        );
       }
-      this.streamEventsByThreadId.set(conversationId, current);
     });
   }
 
@@ -203,30 +247,6 @@ export class CodexAgentAdapter implements AgentAdapter {
 
   public getThreadOwnerCount(): number {
     return this.threadOwnerById.size;
-  }
-
-  public isThreadNotLoadedError(error: Error): boolean {
-    if (!(error instanceof AppServerRpcError)) {
-      return false;
-    }
-
-    if (error.code !== -32600) {
-      return false;
-    }
-
-    return error.message.includes("thread not loaded");
-  }
-
-  public isConversationNotFoundError(error: unknown): boolean {
-    if (!(error instanceof AppServerRpcError)) {
-      return false;
-    }
-
-    if (error.code !== -32600) {
-      return false;
-    }
-
-    return error.message.includes("conversation not found");
   }
 
   public isEnabled(): boolean {
@@ -258,7 +278,9 @@ export class CodexAgentAdapter implements AgentAdapter {
     await this.appClient.close();
   }
 
-  public async listThreads(input: AgentListThreadsInput): Promise<AgentListThreadsResult> {
+  public async listThreads(
+    input: AgentListThreadsInput,
+  ): Promise<AgentListThreadsResult> {
     this.ensureCodexAvailable();
 
     const result = await this.runAppServerCall(() =>
@@ -269,37 +291,80 @@ export class CodexAgentAdapter implements AgentAdapter {
                   limit: input.limit,
                   archived: input.archived,
                   cursor: input.cursor,
-                  maxPages: input.maxPages
+                  maxPages: input.maxPages,
                 }
               : {
                   limit: input.limit,
                   archived: input.archived,
-                  maxPages: input.maxPages
-                }
+                  maxPages: input.maxPages,
+                },
           )
         : this.appClient.listThreads(
             input.cursor
               ? {
                   limit: input.limit,
                   archived: input.archived,
-                  cursor: input.cursor
+                  cursor: input.cursor,
                 }
               : {
                   limit: input.limit,
-                  archived: input.archived
-                }
-          )
+                  archived: input.archived,
+                },
+          ),
     );
 
+    const data = result.data.map((thread) => {
+      const title = this.resolveThreadTitle(thread.id, thread.title);
+      const snapshot = this.streamSnapshotByThreadId.get(thread.id);
+      const isGenerating = snapshot
+        ? isThreadStateGenerating(snapshot)
+        : undefined;
+      const waitingState = snapshot ? deriveThreadWaitingState(snapshot) : null;
+      const waitingFlags = waitingState
+        ? {
+            ...(waitingState.waitingOnApproval
+              ? { waitingOnApproval: true }
+              : {}),
+            ...(waitingState.waitingOnUserInput
+              ? { waitingOnUserInput: true }
+              : {}),
+          }
+        : {};
+      if (title === undefined) {
+        if (
+          isGenerating === undefined &&
+          Object.keys(waitingFlags).length === 0
+        ) {
+          return thread;
+        }
+        return {
+          ...thread,
+          ...(isGenerating !== undefined ? { isGenerating } : {}),
+          ...waitingFlags,
+        };
+      }
+
+      return {
+        ...thread,
+        title,
+        ...(isGenerating !== undefined ? { isGenerating } : {}),
+        ...waitingFlags,
+      };
+    });
+
     return {
-      data: result.data,
+      data,
       nextCursor: result.nextCursor ?? null,
       ...(typeof result.pages === "number" ? { pages: result.pages } : {}),
-      ...(typeof result.truncated === "boolean" ? { truncated: result.truncated } : {})
+      ...(typeof result.truncated === "boolean"
+        ? { truncated: result.truncated }
+        : {}),
     };
   }
 
-  public async createThread(input: AgentCreateThreadInput): Promise<AgentCreateThreadResult> {
+  public async createThread(
+    input: AgentCreateThreadInput,
+  ): Promise<AgentCreateThreadResult> {
     this.ensureCodexAvailable();
 
     const cwd = input.cwd;
@@ -314,10 +379,13 @@ export class CodexAgentAdapter implements AgentAdapter {
         ...(input.modelProvider ? { modelProvider: input.modelProvider } : {}),
         ...(input.personality ? { personality: input.personality } : {}),
         ...(input.sandbox ? { sandbox: input.sandbox } : {}),
-        ...(input.approvalPolicy ? { approvalPolicy: input.approvalPolicy } : {}),
-        ...(typeof input.ephemeral === "boolean" ? { ephemeral: input.ephemeral } : {})
-      })
+        ...(input.approvalPolicy
+          ? { approvalPolicy: input.approvalPolicy }
+          : {}),
+        ephemeral: input.ephemeral ?? false,
+      }),
     );
+    this.setThreadTitle(result.thread.id, result.thread.title);
 
     return {
       threadId: result.thread.id,
@@ -327,92 +395,167 @@ export class CodexAgentAdapter implements AgentAdapter {
       cwd: result.cwd,
       approvalPolicy: result.approvalPolicy,
       sandbox: result.sandbox,
-      reasoningEffort: result.reasoningEffort
+      reasoningEffort: result.reasoningEffort,
     };
   }
 
-  public async readThread(input: AgentReadThreadInput): Promise<AgentReadThreadResult> {
+  public async readThread(
+    input: AgentReadThreadInput,
+  ): Promise<AgentReadThreadResult> {
     this.ensureCodexAvailable();
-    const result = await this.runAppServerCall(() =>
-      this.appClient.readThread(input.threadId, input.includeTurns)
-    );
+    const readThreadWithOption = async (includeTurns: boolean) => {
+      return this.runAppServerCall(() =>
+        this.appClient.readThread(input.threadId, includeTurns),
+      );
+    };
+
+    let result: Awaited<ReturnType<typeof readThreadWithOption>>;
+    try {
+      result = await readThreadWithOption(input.includeTurns);
+    } catch (error) {
+      const typedError = error instanceof Error ? error : null;
+      const shouldTryResume =
+        isThreadNotLoadedAppServerRpcError(typedError) ||
+        (input.includeTurns &&
+          (isThreadNotMaterializedIncludeTurnsAppServerRpcError(typedError) ||
+            isThreadNoRolloutIncludeTurnsAppServerRpcError(typedError)));
+      if (!shouldTryResume) {
+        throw error;
+      }
+
+      try {
+        await this.resumeThread(input.threadId);
+        result = await readThreadWithOption(input.includeTurns);
+      } catch (resumeRetryError) {
+        const typedResumeRetryError =
+          resumeRetryError instanceof Error ? resumeRetryError : null;
+        const shouldRetryWithoutTurns =
+          input.includeTurns &&
+          (isThreadNotMaterializedIncludeTurnsAppServerRpcError(
+            typedResumeRetryError,
+          ) ||
+            isThreadNoRolloutIncludeTurnsAppServerRpcError(
+              typedResumeRetryError,
+            ));
+        if (!shouldRetryWithoutTurns) {
+          throw resumeRetryError;
+        }
+        result = await readThreadWithOption(false);
+      }
+    }
+    const parsedThread = parseThreadConversationState(result.thread);
+    const existingSnapshot = this.streamSnapshotByThreadId.get(input.threadId);
+    const shouldStoreSnapshot =
+      input.includeTurns ||
+      parsedThread.turns.length > 0 ||
+      existingSnapshot === undefined;
+    if (shouldStoreSnapshot) {
+      this.streamSnapshotByThreadId.set(input.threadId, parsedThread);
+      const snapshotOrigin: StreamSnapshotOrigin =
+        input.includeTurns && parsedThread.turns.length > 0
+          ? "readThreadWithTurns"
+          : "readThread";
+      this.streamSnapshotOriginByThreadId.set(input.threadId, snapshotOrigin);
+    }
+    this.setThreadTitle(input.threadId, parsedThread.title);
     return {
-      thread: result.thread
+      thread: parsedThread,
     };
   }
 
   public async sendMessage(input: AgentSendMessageInput): Promise<void> {
     this.ensureCodexAvailable();
-    if (input.isSteering === true) {
-      throw new Error("Steering messages are not supported on this endpoint.");
+    const text = input.text.trim();
+    if (text.length === 0) {
+      throw new Error("Message text is required");
     }
 
-    if (this.isIpcReady()) {
-      const mappedOwnerClientId = this.threadOwnerById.get(input.threadId);
-      const overrideOwnerClientId = input.ownerClientId;
-      const ownerClientId = mappedOwnerClientId && mappedOwnerClientId.trim()
-        ? mappedOwnerClientId.trim()
-        : overrideOwnerClientId && overrideOwnerClientId.trim()
-          ? overrideOwnerClientId.trim()
-          : null;
+    const ownerClientId = (() => {
+      const mapped = this.threadOwnerById.get(input.threadId);
+      if (mapped && mapped.trim().length > 0) {
+        return mapped.trim();
+      }
+      if (input.ownerClientId && input.ownerClientId.trim().length > 0) {
+        return input.ownerClientId.trim();
+      }
+      if (this.lastKnownOwnerClientId && this.lastKnownOwnerClientId.trim()) {
+        return this.lastKnownOwnerClientId.trim();
+      }
+      return null;
+    })();
 
-      if (ownerClientId) {
-        const readResult = await this.runAppServerCall(() =>
-          this.appClient.readThread(input.threadId, true)
-        );
-
-        let turnStartTemplate: ReturnType<typeof findLatestTurnParamsTemplate> | null = null;
-        try {
-          turnStartTemplate = findLatestTurnParamsTemplate(readResult.thread);
-        } catch {
-          turnStartTemplate = null;
-        }
-
+    if (ownerClientId && this.isIpcReady()) {
+      this.threadOwnerById.set(input.threadId, ownerClientId);
+      try {
         await this.service.sendMessage({
           threadId: input.threadId,
           ownerClientId,
-          text: input.text,
+          text,
           ...(input.cwd ? { cwd: input.cwd } : {}),
-          ...(typeof input.isSteering === "boolean" ? { isSteering: input.isSteering } : {}),
-          turnStartTemplate
+          ...(typeof input.isSteering === "boolean"
+            ? { isSteering: input.isSteering }
+            : {}),
+        });
+        return;
+      } catch (error) {
+        const typedError = error instanceof Error ? error : null;
+        if (!isIpcNoClientFoundError(typedError)) {
+          throw error;
+        }
+        const mappedOwnerClientId = this.threadOwnerById.get(input.threadId);
+        if (mappedOwnerClientId === ownerClientId) {
+          this.threadOwnerById.delete(input.threadId);
+        }
+        if (this.lastKnownOwnerClientId === ownerClientId) {
+          this.lastKnownOwnerClientId = null;
+        }
+        logger.info(
+          {
+            threadId: input.threadId,
+            ownerClientId,
+            error: toErrorMessage(error),
+          },
+          "thread-owner-unreachable-send-via-app-server",
+        );
+      }
+    }
+
+    const sendTurn = async (): Promise<void> => {
+      if (input.isSteering === true) {
+        const activeTurnId = await this.getActiveTurnId(input.threadId);
+        if (!activeTurnId) {
+          throw new Error("Cannot steer because there is no active turn");
+        }
+
+        await this.appClient.steerTurn({
+          threadId: input.threadId,
+          expectedTurnId: activeTurnId,
+          input: [{ type: "text", text }],
         });
         return;
       }
-    }
 
-    try {
-      await this.runAppServerCall(() =>
-        this.appClient.sendUserMessage(input.threadId, input.text)
-      );
-      return;
-    } catch (error) {
-      if (!this.isConversationNotFoundError(error)) {
-        throw error;
-      }
-    }
-
-    await this.runAppServerCall(() =>
-      this.appClient.resumeThread(input.threadId, { persistExtendedHistory: true })
-    );
-    await this.runAppServerCall(() =>
-      this.appClient.sendUserMessage(input.threadId, input.text)
-    );
+      await this.appClient.startTurn({
+        threadId: input.threadId,
+        input: [{ type: "text", text }],
+        ...(input.cwd ? { cwd: input.cwd } : {}),
+        attachments: [],
+      });
+    };
+    await this.runThreadOperationWithResumeRetry(input.threadId, sendTurn);
   }
 
   public async interrupt(input: AgentInterruptInput): Promise<void> {
     this.ensureCodexAvailable();
-    this.ensureIpcReady();
 
-    const ownerClientId = resolveOwnerClientId(
-      this.threadOwnerById,
-      input.threadId,
-      input.ownerClientId
-    );
-
-    await this.service.interrupt({
-      threadId: input.threadId,
-      ownerClientId
-    });
+    const interruptTurn = async (): Promise<void> => {
+      const activeTurnId = await this.getActiveTurnId(input.threadId);
+      if (!activeTurnId) {
+        return;
+      }
+      await this.appClient.interruptTurn(input.threadId, activeTurnId);
+    };
+    await this.runThreadOperationWithResumeRetry(input.threadId, interruptTurn);
   }
 
   public async listModels(limit: number) {
@@ -425,170 +568,200 @@ export class CodexAgentAdapter implements AgentAdapter {
     return this.runAppServerCall(() => this.appClient.listCollaborationModes());
   }
 
-  public async setCollaborationMode(input: AgentSetCollaborationModeInput): Promise<{ ownerClientId: string }> {
+  public async readRateLimits(): Promise<
+    import("@farfield/protocol").AppServerGetAccountRateLimitsResponse
+  > {
+    this.ensureCodexAvailable();
+    return this.runAppServerCall(() => this.appClient.readAccountRateLimits());
+  }
+
+  public async setCollaborationMode(
+    input: AgentSetCollaborationModeInput,
+  ): Promise<{ ownerClientId: string }> {
     this.ensureCodexAvailable();
     this.ensureIpcReady();
 
     const ownerClientId = resolveOwnerClientId(
       this.threadOwnerById,
       input.threadId,
-      input.ownerClientId
+      input.ownerClientId,
+      this.lastKnownOwnerClientId ?? undefined,
     );
 
     await this.service.setCollaborationMode({
       threadId: input.threadId,
       ownerClientId,
-      collaborationMode: input.collaborationMode
+      collaborationMode: input.collaborationMode,
     });
 
     return {
-      ownerClientId
+      ownerClientId,
     };
   }
 
   public async submitUserInput(
-    input: AgentSubmitUserInputInput
-  ): Promise<{ ownerClientId: string; requestId: number }> {
+    input: AgentSubmitUserInputInput,
+  ): Promise<{ ownerClientId: string; requestId: UserInputRequestId }> {
     this.ensureCodexAvailable();
     this.ensureIpcReady();
 
     const ownerClientId = resolveOwnerClientId(
       this.threadOwnerById,
       input.threadId,
-      input.ownerClientId
+      input.ownerClientId,
+      this.lastKnownOwnerClientId ?? undefined,
     );
 
     await this.service.submitUserInput({
       threadId: input.threadId,
       ownerClientId,
       requestId: input.requestId,
-      response: parseUserInputResponsePayload(input.response)
+      response: parseUserInputResponsePayload(input.response),
     });
 
     return {
       ownerClientId,
-      requestId: input.requestId
+      requestId: input.requestId,
     };
   }
 
   public async readLiveState(threadId: string): Promise<AgentThreadLiveState> {
+    const snapshotState = this.streamSnapshotByThreadId.get(threadId) ?? null;
+    const snapshotOrigin =
+      this.streamSnapshotOriginByThreadId.get(threadId) ?? null;
+    const ownerClientId =
+      this.threadOwnerById.get(threadId) ?? this.lastKnownOwnerClientId ?? null;
     const rawEvents = this.streamEventsByThreadId.get(threadId) ?? [];
     if (rawEvents.length === 0) {
       return {
-        ownerClientId: this.threadOwnerById.get(threadId) ?? null,
-        conversationState: null,
-        liveStateError: null
+        ownerClientId,
+        conversationState: snapshotState,
+        liveStateError: null,
       };
     }
 
-    const events: ReturnType<typeof parseThreadStreamStateChangedBroadcast>[] = [];
-    const validRawEvents: IpcFrame[] = [];
-    let invalidEventCount = 0;
-    let firstInvalidEventError: string | null = null;
+    const events: ReturnType<typeof parseThreadStreamStateChangedBroadcast>[] =
+      [];
 
-    for (const event of rawEvents) {
+    for (let eventIndex = 0; eventIndex < rawEvents.length; eventIndex += 1) {
+      const event = rawEvents[eventIndex];
       try {
         events.push(parseThreadStreamStateChangedBroadcast(event));
-        validRawEvents.push(event);
       } catch (error) {
-        invalidEventCount += 1;
-        if (!firstInvalidEventError) {
-          firstInvalidEventError = toErrorMessage(error);
-          logger.warn(
-            {
-              threadId,
-              error: firstInvalidEventError,
-              ...(error instanceof ProtocolValidationError ? { issues: error.issues } : {}),
-              rawPayload: event
-            },
-            "codex-invalid-thread-stream-event-detail"
-          );
-          writeInvalidStreamEventDetail({
+        logger.error(
+          {
             threadId,
-            error: firstInvalidEventError,
-            ...(error instanceof ProtocolValidationError ? { issues: error.issues } : {}),
-            rawPayload: event,
-            loggedAt: new Date().toISOString()
-          });
-        }
+            eventIndex,
+            error: toErrorMessage(error),
+            ...(error instanceof ProtocolValidationError
+              ? { issues: error.issues }
+              : {}),
+          },
+          "thread-stream-event-parse-failed",
+        );
+        return {
+          ownerClientId,
+          conversationState: snapshotState,
+          liveStateError: {
+            kind: "parseFailed",
+            message: toErrorMessage(error),
+            eventIndex,
+            patchIndex: null,
+          },
+        };
       }
-    }
-
-    if (invalidEventCount > 0) {
-      logger.warn(
-        {
-          threadId,
-          invalidEventCount,
-          eventCount: rawEvents.length,
-          error: firstInvalidEventError
-        },
-        "codex-invalid-thread-stream-events-pruned"
-      );
-      this.streamEventsByThreadId.set(threadId, validRawEvents);
     }
 
     if (events.length === 0) {
       return {
-        ownerClientId: this.threadOwnerById.get(threadId) ?? null,
-        conversationState: null,
-        liveStateError: null
+        ownerClientId,
+        conversationState: snapshotState,
+        liveStateError: null,
       };
     }
 
+    const reductionWindow = trimThreadStreamEventsForReduction(events);
+    const reductionEvents = reductionWindow.events;
+    const canUseSyntheticSnapshot =
+      !reductionWindow.hasSnapshot &&
+      snapshotState !== null &&
+      snapshotOrigin === "stream";
+    const hasReliableReductionBase =
+      reductionWindow.hasSnapshot || canUseSyntheticSnapshot;
+
+    if (!hasReliableReductionBase) {
+      return {
+        ownerClientId,
+        conversationState: snapshotState,
+        liveStateError: null,
+      };
+    }
+
+    const reductionInput = canUseSyntheticSnapshot
+      ? [
+          buildSyntheticSnapshotEvent(
+            threadId,
+            ownerClientId ?? "farfield",
+            snapshotState,
+          ),
+          ...reductionEvents,
+        ]
+      : reductionEvents;
     try {
-      const reduced = reduceThreadStreamEvents(events);
+      const reduced = reduceThreadStreamEvents(reductionInput);
       const state = reduced.get(threadId);
       return {
-        ownerClientId: state?.ownerClientId ?? this.threadOwnerById.get(threadId) ?? null,
-        conversationState: state?.conversationState ?? null,
-        liveStateError: null
+        ownerClientId: state?.ownerClientId ?? ownerClientId ?? null,
+        conversationState: state?.conversationState ?? snapshotState,
+        liveStateError: null,
       };
     } catch (error) {
-      const details =
-        error instanceof ThreadStreamReductionError
-          ? {
-              threadId: error.details.threadId,
-              eventIndex: error.details.eventIndex,
-              patchIndex: error.details.patchIndex
-            }
-          : null;
-      logger.error(
+      const reductionErrorDetails =
+        error instanceof ThreadStreamReductionError ? error.details : null;
+      const eventIndex = reductionErrorDetails?.eventIndex ?? null;
+      const patchIndex = reductionErrorDetails?.patchIndex ?? null;
+      const message = toErrorMessage(error);
+
+      logger.warn(
         {
           threadId,
-          eventCount: events.length,
-          error: toErrorMessage(error),
-          details
+          error: message,
+          eventIndex,
+          patchIndex,
         },
-        "codex-thread-stream-reduction-failed"
+        "thread-stream-reduction-failed",
       );
+
       return {
-        ownerClientId: this.threadOwnerById.get(threadId) ?? null,
-        conversationState: null,
+        ownerClientId,
+        conversationState: snapshotState,
         liveStateError: {
           kind: "reductionFailed",
-          message: toErrorMessage(error),
-          eventIndex: details?.eventIndex ?? null,
-          patchIndex: details?.patchIndex ?? null
-        }
+          message,
+          eventIndex,
+          patchIndex,
+        },
       };
     }
   }
 
-  public async readStreamEvents(threadId: string, limit: number): Promise<AgentThreadStreamEvents> {
+  public async readStreamEvents(
+    threadId: string,
+    limit: number,
+  ): Promise<AgentThreadStreamEvents> {
     return {
-      ownerClientId: this.threadOwnerById.get(threadId) ?? null,
-      events: (this.streamEventsByThreadId.get(threadId) ?? []).slice(-limit)
+      ownerClientId:
+        this.threadOwnerById.get(threadId) ??
+        this.lastKnownOwnerClientId ??
+        null,
+      events: (this.streamEventsByThreadId.get(threadId) ?? []).slice(-limit),
     };
-  }
-
-  public async readRateLimits(): Promise<import("@farfield/protocol").AppServerGetAccountRateLimitsResponse> {
-    return this.runAppServerCall(() => this.appClient.readAccountRateLimits());
   }
 
   public async replayRequest(
     method: string,
     params: IpcRequestFrame["params"],
-    options: SendRequestOptions = {}
+    options: SendRequestOptions = {},
   ): Promise<IpcResponseFrame["result"]> {
     this.ensureIpcReady();
     const previewFrame: IpcFrame = {
@@ -597,23 +770,27 @@ export class CodexAgentAdapter implements AgentAdapter {
       method,
       params,
       targetClientId: options.targetClientId,
-      version: options.version
+      version: options.version,
     };
     this.emitIpcFrame({
       direction: "out",
       frame: previewFrame,
       method,
-      threadId: extractThreadId(previewFrame)
+      threadId: extractThreadId(previewFrame),
     });
 
-    const response = await this.ipcClient.sendRequestAndWait(method, params, options);
+    const response = await this.ipcClient.sendRequestAndWait(
+      method,
+      params,
+      options,
+    );
     return response.result;
   }
 
   public replayBroadcast(
     method: string,
     params: IpcRequestFrame["params"],
-    options: SendRequestOptions = {}
+    options: SendRequestOptions = {},
   ): void {
     this.ensureIpcReady();
     const previewFrame: IpcFrame = {
@@ -621,7 +798,7 @@ export class CodexAgentAdapter implements AgentAdapter {
       method,
       params,
       targetClientId: options.targetClientId,
-      version: options.version
+      version: options.version,
     };
     this.emitIpcFrame({
       direction: "out",
@@ -633,8 +810,8 @@ export class CodexAgentAdapter implements AgentAdapter {
         method,
         params,
         targetClientId: options.targetClientId,
-        version: options.version
-      })
+        version: options.version,
+      }),
     });
 
     this.ipcClient.sendBroadcast(method, params, options);
@@ -653,11 +830,12 @@ export class CodexAgentAdapter implements AgentAdapter {
   }
 
   private setRuntimeState(next: CodexAgentRuntimeState): void {
-    const isSameState = this.runtimeState.appReady === next.appReady
-      && this.runtimeState.ipcConnected === next.ipcConnected
-      && this.runtimeState.ipcInitialized === next.ipcInitialized
-      && this.runtimeState.codexAvailable === next.codexAvailable
-      && this.runtimeState.lastError === next.lastError;
+    const isSameState =
+      this.runtimeState.appReady === next.appReady &&
+      this.runtimeState.ipcConnected === next.ipcConnected &&
+      this.runtimeState.ipcInitialized === next.ipcInitialized &&
+      this.runtimeState.codexAvailable === next.codexAvailable &&
+      this.runtimeState.lastError === next.lastError;
 
     if (isSameState) {
       return;
@@ -670,7 +848,7 @@ export class CodexAgentAdapter implements AgentAdapter {
   private patchRuntimeState(patch: Partial<CodexAgentRuntimeState>): void {
     this.setRuntimeState({
       ...this.runtimeState,
-      ...patch
+      ...patch,
     });
   }
 
@@ -682,12 +860,18 @@ export class CodexAgentAdapter implements AgentAdapter {
 
   private ensureIpcReady(): void {
     if (!this.isIpcReady()) {
-      throw new Error(this.runtimeState.lastError ?? "Desktop IPC is not connected");
+      throw new Error(
+        this.runtimeState.lastError ?? "Desktop IPC is not connected",
+      );
     }
   }
 
   private scheduleIpcReconnect(): void {
-    if (this.reconnectTimer || !this.runtimeState.codexAvailable || !this.started) {
+    if (
+      this.reconnectTimer ||
+      !this.runtimeState.codexAvailable ||
+      !this.started
+    ) {
       return;
     }
 
@@ -702,13 +886,13 @@ export class CodexAgentAdapter implements AgentAdapter {
       const result = await operation();
       this.patchRuntimeState({
         appReady: true,
-        lastError: null
+        lastError: null,
       });
       return result;
     } catch (error) {
       this.patchRuntimeState({
         appReady: !(error instanceof AppServerTransportError),
-        lastError: toErrorMessage(error)
+        lastError: toErrorMessage(error),
       });
       throw error;
     }
@@ -722,19 +906,21 @@ export class CodexAgentAdapter implements AgentAdapter {
     this.bootstrapInFlight = (async () => {
       try {
         await this.runAppServerCall(() =>
-          this.appClient.listThreads({ limit: 1, archived: false })
+          this.appClient.listThreads({ limit: 1, archived: false }),
         );
       } catch (error) {
         const message = toErrorMessage(error);
-        const isSpawnError = message.includes("ENOENT") ||
+        const isSpawnError =
+          message.includes("ENOENT") ||
           message.includes("not found") ||
-          (error instanceof Error && "code" in error &&
+          (error instanceof Error &&
+            "code" in error &&
             (error as NodeJS.ErrnoException).code === "ENOENT");
 
         if (isSpawnError) {
           this.patchRuntimeState({
             codexAvailable: false,
-            lastError: message
+            lastError: message,
           });
           logger.warn({ error: message }, "codex-not-found");
         }
@@ -750,18 +936,18 @@ export class CodexAgentAdapter implements AgentAdapter {
           await this.ipcClient.connect();
         }
         this.patchRuntimeState({
-          ipcConnected: true
+          ipcConnected: true,
         });
 
         await this.ipcClient.initialize(this.label);
         this.patchRuntimeState({
-          ipcInitialized: true
+          ipcInitialized: true,
         });
       } catch (error) {
         this.patchRuntimeState({
           ipcInitialized: false,
           ipcConnected: this.ipcClient.isConnected(),
-          lastError: toErrorMessage(error)
+          lastError: toErrorMessage(error),
         });
         this.scheduleIpcReconnect();
       } finally {
@@ -770,6 +956,146 @@ export class CodexAgentAdapter implements AgentAdapter {
     })();
 
     return this.bootstrapInFlight;
+  }
+
+  private async getActiveTurnId(threadId: string): Promise<string | null> {
+    const readResult = await this.runAppServerCall(() =>
+      this.appClient.readThread(threadId, true),
+    );
+    const turns = readResult.thread.turns;
+
+    for (let index = turns.length - 1; index >= 0; index -= 1) {
+      const turn = turns[index];
+      if (!turn) {
+        continue;
+      }
+
+      const status = turn.status.trim().toLowerCase();
+      const isTerminal =
+        status === "completed" ||
+        status === "failed" ||
+        status === "error" ||
+        status === "cancelled" ||
+        status === "canceled";
+      if (isTerminal) {
+        continue;
+      }
+
+      if (turn.turnId && turn.turnId.trim().length > 0) {
+        return turn.turnId.trim();
+      }
+
+      if (turn.id && turn.id.trim().length > 0) {
+        return turn.id.trim();
+      }
+    }
+
+    return null;
+  }
+
+  private async resumeThread(threadId: string): Promise<void> {
+    await this.runAppServerCall(() =>
+      this.appClient.resumeThread(threadId, {
+        persistExtendedHistory: true,
+      }),
+    );
+  }
+
+  private async isThreadLoaded(threadId: string): Promise<boolean> {
+    let cursor: string | null = null;
+
+    while (true) {
+      const response = await this.runAppServerCall(() =>
+        this.appClient.listLoadedThreads({
+          limit: 200,
+          ...(cursor ? { cursor } : {}),
+        }),
+      );
+      if (response.data.some((loadedThreadId) => loadedThreadId === threadId)) {
+        return true;
+      }
+
+      const nextCursor = response.nextCursor ?? null;
+      if (!nextCursor) {
+        return false;
+      }
+      cursor = nextCursor;
+    }
+  }
+
+  private async ensureThreadLoaded(threadId: string): Promise<void> {
+    if (await this.isThreadLoaded(threadId)) {
+      return;
+    }
+
+    await this.resumeThread(threadId);
+  }
+
+  private async runThreadOperationWithResumeRetry<T>(
+    threadId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    await this.ensureThreadLoaded(threadId);
+
+    try {
+      return await this.runAppServerCall(operation);
+    } catch (error) {
+      const typedError = error instanceof Error ? error : null;
+      if (!isInvalidRequestAppServerRpcError(typedError)) {
+        throw error;
+      }
+
+      const stillLoaded = await this.isThreadLoaded(threadId);
+      if (stillLoaded) {
+        throw error;
+      }
+    }
+
+    await this.resumeThread(threadId);
+    return this.runAppServerCall(operation);
+  }
+
+  private resolveThreadTitle(
+    threadId: string,
+    directTitle: string | null | undefined,
+  ): string | null | undefined {
+    if (directTitle !== undefined) {
+      return directTitle;
+    }
+
+    if (this.threadTitleById.has(threadId)) {
+      return this.threadTitleById.get(threadId);
+    }
+
+    const snapshot = this.streamSnapshotByThreadId.get(threadId);
+    if (!snapshot) {
+      return undefined;
+    }
+
+    return snapshot.title;
+  }
+
+  private setThreadTitle(
+    threadId: string,
+    title: string | null | undefined,
+  ): void {
+    if (title === undefined) {
+      this.threadTitleById.delete(threadId);
+      return;
+    }
+
+    if (title === null) {
+      this.threadTitleById.set(threadId, null);
+      return;
+    }
+
+    const normalized = title.trim();
+    if (normalized.length === 0) {
+      this.threadTitleById.set(threadId, null);
+      return;
+    }
+
+    this.threadTitleById.set(threadId, title);
   }
 }
 
@@ -783,65 +1109,184 @@ function toErrorMessage(error: Error | string | unknown): string {
   return String(error);
 }
 
+const INVALID_REQUEST_ERROR_CODE = -32600;
+
+export function isInvalidRequestAppServerRpcError(
+  error: Error | null,
+): boolean {
+  if (!(error instanceof AppServerRpcError)) {
+    return false;
+  }
+  return error.code === INVALID_REQUEST_ERROR_CODE;
+}
+
+export function isThreadNotMaterializedIncludeTurnsAppServerRpcError(
+  error: Error | null,
+): boolean {
+  if (!isInvalidRequestAppServerRpcError(error)) {
+    return false;
+  }
+  if (!error) {
+    return false;
+  }
+  const normalized = error.message.trim().toLowerCase();
+  return (
+    normalized.includes("not materialized yet") &&
+    normalized.includes("includeturns")
+  );
+}
+
+export function isThreadNotLoadedAppServerRpcError(
+  error: Error | null,
+): boolean {
+  if (!isInvalidRequestAppServerRpcError(error)) {
+    return false;
+  }
+  if (!error) {
+    return false;
+  }
+  const normalized = error.message.trim().toLowerCase();
+  return normalized.includes("thread not loaded");
+}
+
+export function isThreadNoRolloutIncludeTurnsAppServerRpcError(
+  error: Error | null,
+): boolean {
+  if (!isInvalidRequestAppServerRpcError(error)) {
+    return false;
+  }
+  if (!error) {
+    return false;
+  }
+  const normalized = error.message.trim().toLowerCase();
+  return (
+    normalized.includes("no rollout found for thread id") &&
+    normalized.includes("app-server error -32600")
+  );
+}
+
+export function isIpcNoClientFoundError(error: Error | null): boolean {
+  if (!(error instanceof DesktopIpcError)) {
+    return false;
+  }
+  const normalized = error.message.trim().toLowerCase();
+  return normalized.includes("no-client-found");
+}
+
 function normalizeStderrLine(line: string): string {
   return line.replace(ANSI_ESCAPE_REGEX, "").trim();
 }
 
-function isKnownBenignAppServerStderr(line: string): boolean {
-  return (
-    line.includes("codex_core::rollout::list") &&
-    line.includes("state db missing rollout path for thread")
-  );
+function isThreadStateGenerating(state: ThreadConversationState): boolean {
+  for (let index = state.turns.length - 1; index >= 0; index -= 1) {
+    const turn = state.turns[index];
+    if (!turn) {
+      continue;
+    }
+
+    const status = turn.status.trim().toLowerCase();
+    const isTerminal =
+      status === "completed" ||
+      status === "failed" ||
+      status === "error" ||
+      status === "cancelled" ||
+      status === "canceled" ||
+      status === "interrupted" ||
+      status === "aborted";
+    if (isTerminal) {
+      continue;
+    }
+    return true;
+  }
+
+  return false;
 }
 
-function writeInvalidStreamEventDetail(detail: Record<string, unknown>): void {
-  try {
-    fs.appendFileSync(
-      INVALID_STREAM_EVENTS_LOG_PATH,
-      JSON.stringify(detail) + "\n",
-      { encoding: "utf8" }
-    );
-  } catch (error) {
-    logger.warn(
-      {
-        path: INVALID_STREAM_EVENTS_LOG_PATH,
-        error: toErrorMessage(error)
-      },
-      "codex-invalid-thread-stream-event-detail-write-failed"
-    );
+function deriveThreadWaitingState(
+  state: ThreadConversationState,
+): {
+  waitingOnApproval: boolean;
+  waitingOnUserInput: boolean;
+} {
+  let waitingOnApproval = false;
+  let waitingOnUserInput = false;
+
+  for (const request of state.requests) {
+    if (request.completed === true) {
+      continue;
+    }
+
+    switch (request.method) {
+      case "item/tool/requestUserInput":
+        waitingOnUserInput = true;
+        break;
+      case "item/commandExecution/requestApproval":
+      case "item/fileChange/requestApproval":
+      case "applyPatchApproval":
+      case "execCommandApproval":
+        waitingOnApproval = true;
+        break;
+      case "item/tool/call":
+      case "account/chatgptAuthTokens/refresh":
+      case "item/plan/requestImplementation":
+        break;
+    }
   }
+
+  return {
+    waitingOnApproval,
+    waitingOnUserInput,
+  };
+}
+
+function buildSyntheticSnapshotEvent(
+  threadId: string,
+  sourceClientId: string,
+  conversationState: ThreadConversationState,
+): ThreadStreamStateChangedBroadcast {
+  return {
+    type: "broadcast",
+    method: "thread-stream-state-changed",
+    sourceClientId,
+    version: 0,
+    params: {
+      conversationId: threadId,
+      change: {
+        type: "snapshot",
+        conversationState,
+      },
+      version: 0,
+      type: "thread-stream-state-changed",
+    },
+  };
+}
+
+function trimThreadStreamEventsForReduction(
+  events: ThreadStreamStateChangedBroadcast[],
+): { events: ThreadStreamStateChangedBroadcast[]; hasSnapshot: boolean } {
+  let latestSnapshotIndex = -1;
+  for (let index = 0; index < events.length; index += 1) {
+    const event = events[index];
+    if (event?.params.change.type === "snapshot") {
+      latestSnapshotIndex = index;
+    }
+  }
+
+  if (latestSnapshotIndex === -1) {
+    return {
+      events,
+      hasSnapshot: false,
+    };
+  }
+
+  return {
+    events: events.slice(latestSnapshotIndex),
+    hasSnapshot: true,
+  };
 }
 
 function extractThreadId(frame: IpcFrame): string | null {
-  if (frame.type === "broadcast" && frame.method === "thread-stream-state-changed") {
-    const params = frame.params;
-    if (!params || typeof params !== "object") {
-      return null;
-    }
-
-    const conversationId = (params as Record<string, string>)["conversationId"];
-    if (typeof conversationId === "string" && conversationId.trim()) {
-      return conversationId.trim();
-    }
-
-    return null;
-  }
-
-  if (frame.type === "broadcast" && frame.method === "thread/tokenUsage/updated") {
-    const params = frame.params;
-    if (!params || typeof params !== "object") {
-      return null;
-    }
-
-    const threadId = (params as Record<string, string>)["threadId"];
-    if (typeof threadId === "string" && threadId.trim()) {
-      return threadId.trim();
-    }
-
-    return null;
-  }
-
-  if (frame.type !== "request") {
+  if (frame.type !== "request" && frame.type !== "broadcast") {
     return null;
   }
 
@@ -854,7 +1299,7 @@ function extractThreadId(frame: IpcFrame): string | null {
   const candidates = [
     asRecord["conversationId"],
     asRecord["threadId"],
-    asRecord["turnId"]
+    asRecord["turnId"],
   ];
 
   for (const candidate of candidates) {

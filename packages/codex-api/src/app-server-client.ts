@@ -5,15 +5,15 @@ import {
   AppServerListModelsResponseSchema,
   type AppServerListThreadsResponse,
   AppServerListThreadsResponseSchema,
+  type AppServerGetAccountRateLimitsResponse,
+  AppServerGetAccountRateLimitsResponseSchema,
   type AppServerReadThreadResponse,
   AppServerReadThreadResponseSchema,
-  AppServerSendUserMessageRequestSchema,
-  AppServerSendUserMessageResponseSchema,
   type AppServerStartThreadResponse,
   AppServerStartThreadRequestSchema,
   AppServerStartThreadResponseSchema,
-  type AppServerGetAccountRateLimitsResponse,
-  AppServerGetAccountRateLimitsResponseSchema
+  TurnStartParamsSchema,
+  type TurnStartParams
 } from "@farfield/protocol";
 import { ProtocolValidationError } from "@farfield/protocol";
 import { z } from "zod";
@@ -41,6 +41,11 @@ export interface ListThreadsOptions {
   cursor?: string;
 }
 
+export interface ListLoadedThreadsOptions {
+  limit?: number;
+  cursor?: string;
+}
+
 export interface ListThreadsAllOptions {
   limit: number;
   archived: boolean;
@@ -58,12 +63,42 @@ export interface StartThreadOptions {
   ephemeral?: boolean;
 }
 
+export interface SteerTurnOptions {
+  threadId: string;
+  expectedTurnId: string;
+  input: TurnStartParams["input"];
+}
+
 const AppServerResumeThreadRequestSchema = z
   .object({
     threadId: z.string().min(1),
     persistExtendedHistory: z.boolean()
   })
   .passthrough();
+
+const AppServerTurnInterruptRequestSchema = z
+  .object({
+    threadId: z.string().min(1),
+    turnId: z.string().min(1)
+  })
+  .passthrough();
+
+const AppServerTurnSteerRequestSchema = z
+  .object({
+    threadId: z.string().min(1),
+    expectedTurnId: z.string().min(1),
+    input: TurnStartParamsSchema.shape.input
+  })
+  .passthrough();
+
+const AppServerLoadedThreadListResponseSchema = z
+  .object({
+    data: z.array(z.string().min(1)),
+    nextCursor: z.union([z.string(), z.null()]).optional()
+  })
+  .passthrough();
+
+type AppServerLoadedThreadListResponse = z.infer<typeof AppServerLoadedThreadListResponseSchema>;
 
 export class AppServerClient {
   private readonly transport: AppServerTransport;
@@ -89,6 +124,21 @@ export class AppServerClient {
     });
 
     return parseWithSchema(AppServerListThreadsResponseSchema, result, "AppServerListThreadsResponse");
+  }
+
+  public async listLoadedThreads(
+    options: ListLoadedThreadsOptions = {}
+  ): Promise<AppServerLoadedThreadListResponse> {
+    const result = await this.transport.request("thread/loaded/list", {
+      limit: options.limit ?? null,
+      cursor: options.cursor ?? null
+    });
+
+    return parseWithSchema(
+      AppServerLoadedThreadListResponseSchema,
+      result,
+      "AppServerLoadedThreadListResponse"
+    );
   }
 
   public async listThreadsAll(options: ListThreadsAllOptions): Promise<AppServerListThreadsResponse> {
@@ -158,26 +208,54 @@ export class AppServerClient {
     );
   }
 
+  public async readAccountRateLimits(): Promise<AppServerGetAccountRateLimitsResponse> {
+    const result = await this.transport.request("account/rateLimits/read", {});
+    return parseWithSchema(
+      AppServerGetAccountRateLimitsResponseSchema,
+      result,
+      "AppServerGetAccountRateLimitsResponse"
+    );
+  }
+
   public async startThread(options: StartThreadOptions): Promise<AppServerStartThreadResponse> {
-    const request = AppServerStartThreadRequestSchema.parse(options);
+    const request = AppServerStartThreadRequestSchema.parse({
+      ...options,
+      ephemeral: options.ephemeral ?? false
+    });
     const result = await this.transport.request("thread/start", request);
     return parseWithSchema(AppServerStartThreadResponseSchema, result, "AppServerStartThreadResponse");
   }
 
   public async sendUserMessage(threadId: string, text: string): Promise<void> {
-    const request = AppServerSendUserMessageRequestSchema.parse({
-      conversationId: threadId,
-      items: [
+    const request = TurnStartParamsSchema.parse({
+      threadId,
+      input: [
         {
           type: "text",
-          data: {
-            text
-          }
+          text
         }
-      ]
+      ],
+      attachments: []
     });
-    const result = await this.transport.request("sendUserMessage", request);
-    parseWithSchema(AppServerSendUserMessageResponseSchema, result, "AppServerSendUserMessageResponse");
+    await this.transport.request("turn/start", request);
+  }
+
+  public async startTurn(params: TurnStartParams): Promise<void> {
+    const request = TurnStartParamsSchema.parse(params);
+    await this.transport.request("turn/start", request);
+  }
+
+  public async steerTurn(options: SteerTurnOptions): Promise<void> {
+    const request = AppServerTurnSteerRequestSchema.parse(options);
+    await this.transport.request("turn/steer", request);
+  }
+
+  public async interruptTurn(threadId: string, turnId: string): Promise<void> {
+    const request = AppServerTurnInterruptRequestSchema.parse({
+      threadId,
+      turnId
+    });
+    await this.transport.request("turn/interrupt", request);
   }
 
   public async resumeThread(
@@ -190,14 +268,5 @@ export class AppServerClient {
     });
     const result = await this.transport.request("thread/resume", request);
     return parseWithSchema(AppServerReadThreadResponseSchema, result, "AppServerResumeThreadResponse");
-  }
-
-  public async readAccountRateLimits(): Promise<AppServerGetAccountRateLimitsResponse> {
-    const result = await this.transport.request("account/rateLimits/read", {});
-    return parseWithSchema(
-      AppServerGetAccountRateLimitsResponseSchema,
-      result,
-      "AppServerGetAccountRateLimitsResponse"
-    );
   }
 }

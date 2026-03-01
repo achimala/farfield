@@ -195,14 +195,7 @@ export class DesktopIpcClient {
       const payloadBuffer = this.buffer.slice(4, 4 + size);
       this.buffer = this.buffer.slice(4 + size);
 
-      let raw: unknown;
-      try {
-        raw = JSON.parse(payloadBuffer.toString("utf8"));
-      } catch {
-        this.rejectAll(new DesktopIpcError("IPC frame contained invalid JSON"));
-        return;
-      }
-
+      const raw = JSON.parse(payloadBuffer.toString("utf8"));
       const frame = parseIpcFrame(raw);
       this.emitFrame(frame);
 
