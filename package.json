@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:remote": "node scripts/dev.mjs --remote",
+    "server": "bun run --filter @farfield/server dev:remote",
     "build": "bun run --workspaces build",
     "test": "bun run --workspaces test",
     "lint": "bun run --workspaces lint",
