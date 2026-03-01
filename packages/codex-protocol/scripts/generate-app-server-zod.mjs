@@ -59,6 +59,12 @@ const schemaTargets = [
     exportName: "ToolRequestUserInputResponseSchema"
   },
   {
+    id: "server-request",
+    source: path.join(vendorRoot, "stable", "json", "ServerRequest.json"),
+    fileName: "ServerRequestSchema.ts",
+    exportName: "ServerRequestSchema"
+  },
+  {
     id: "collaboration-mode-list-response",
     source: path.join(vendorRoot, "experimental", "json", "v2", "CollaborationModeListResponse.json"),
     fileName: "CollaborationModeListResponseSchema.ts",

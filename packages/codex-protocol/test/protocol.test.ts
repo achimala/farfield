@@ -106,6 +106,49 @@ describe("codex-protocol schemas", () => {
     expect(parsed.params.change.type).toBe("snapshot");
   });
 
+  it("parses snapshot broadcast when requests include item/tool/call", () => {
+    const parsed = parseThreadStreamStateChangedBroadcast({
+      type: "broadcast",
+      method: "thread-stream-state-changed",
+      sourceClientId: "client-123",
+      version: 4,
+      params: {
+        conversationId: "thread-123",
+        type: "thread-stream-state-changed",
+        version: 4,
+        change: {
+          type: "snapshot",
+          conversationState: {
+            id: "thread-123",
+            turns: [],
+            requests: [
+              {
+                id: 7,
+                method: "item/tool/call",
+                params: {
+                  arguments: {
+                    value: "example"
+                  },
+                  callId: "call-1",
+                  threadId: "thread-123",
+                  tool: "exampleTool",
+                  turnId: "turn-1"
+                }
+              }
+            ]
+          }
+        }
+      }
+    });
+
+    expect(parsed.params.change.type).toBe("snapshot");
+    const request =
+      parsed.params.change.type === "snapshot"
+        ? parsed.params.change.conversationState.requests[0]
+        : null;
+    expect(request?.method).toBe("item/tool/call");
+  });
+
   it("parses snapshot broadcast when turn includes error item", () => {
     const parsed = parseThreadStreamStateChangedBroadcast({
       type: "broadcast",

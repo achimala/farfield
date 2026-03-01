@@ -7,7 +7,10 @@ import {
   NullableStringSchema
 } from "./common.js";
 import { ProtocolValidationError } from "./errors.js";
-import { ToolRequestUserInputResponseSchema } from "./generated/app-server/index.js";
+import {
+  ServerRequestSchema as GeneratedServerRequestSchema,
+  ToolRequestUserInputResponseSchema
+} from "./generated/app-server/index.js";
 
 export const CollaborationModeSettingsSchema = z
   .object({
@@ -419,6 +422,11 @@ export const UserInputRequestSchema = z
   })
   .passthrough();
 
+export const ThreadConversationRequestSchema = z.union([
+  UserInputRequestSchema,
+  GeneratedServerRequestSchema
+]);
+
 export const ThreadTurnSchema = z
   .object({
     params: TurnStartParamsSchema.optional(),
@@ -437,7 +445,7 @@ export const ThreadConversationStateSchema = z
   .object({
     id: NonEmptyStringSchema,
     turns: z.array(ThreadTurnSchema),
-    requests: z.array(UserInputRequestSchema).default([]),
+    requests: z.array(ThreadConversationRequestSchema).default([]),
     createdAt: NonNegativeIntSchema.optional(),
     updatedAt: NonNegativeIntSchema.optional(),
     title: NullableStringSchema.optional(),
@@ -537,9 +545,14 @@ export type CollaborationMode = z.infer<typeof CollaborationModeSchema>;
 export type TurnStartParams = z.infer<typeof TurnStartParamsSchema>;
 export type UserInputRequestId = z.infer<typeof UserInputRequestIdSchema>;
 export type UserInputRequest = z.infer<typeof UserInputRequestSchema>;
+export type ThreadConversationRequest = z.infer<typeof ThreadConversationRequestSchema>;
 export type ThreadConversationState = z.infer<typeof ThreadConversationStateSchema>;
 export type ThreadStreamPatch = z.infer<typeof ThreadStreamPatchSchema>;
 export type ThreadStreamStateChangedParams = z.infer<typeof ThreadStreamStateChangedParamsSchema>;
+
+export function isUserInputRequest(request: ThreadConversationRequest): request is UserInputRequest {
+  return request.method === "item/tool/requestUserInput";
+}
 
 export function parseThreadConversationState(value: unknown): ThreadConversationState {
   const result = ThreadConversationStateSchema.safeParse(value);

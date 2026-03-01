@@ -1,4 +1,7 @@
-import { assertNever, type ThreadConversationState } from "@farfield/protocol";
+import {
+  assertNever,
+  type ThreadConversationState,
+} from "@farfield/protocol";
 import {
   JsonValueSchema,
   UnifiedFeatureMatrixSchema,
@@ -27,6 +30,15 @@ type UnifiedCommandResultByKind<K extends UnifiedCommandKind> = Extract<
   UnifiedCommandResult,
   { kind: K }
 >;
+
+function isUserInputRequest(
+  request: ThreadConversationState["requests"][number],
+): request is Extract<
+  ThreadConversationState["requests"][number],
+  { method: "item/tool/requestUserInput" }
+> {
+  return request.method === "item/tool/requestUserInput";
+}
 
 type UnifiedCommandHandler<K extends UnifiedCommandKind> = (
   command: UnifiedCommandByKind<K>,
@@ -588,29 +600,31 @@ function mapThread(
         : {}),
       items: turn.items.map(mapTurnItem),
     })),
-    requests: thread.requests.map((request) => ({
-      id: request.id,
-      method: request.method,
-      params: {
-        threadId: request.params.threadId,
-        turnId: request.params.turnId,
-        itemId: request.params.itemId,
-        questions: request.params.questions.map((question) => ({
-          id: question.id,
-          header: question.header,
-          question: question.question,
-          isOther: question.isOther ?? false,
-          isSecret: question.isSecret ?? false,
-          options: question.options.map((option) => ({
-            label: option.label,
-            description: option.description,
+    requests: thread.requests
+      .filter(isUserInputRequest)
+      .map((request) => ({
+        id: request.id,
+        method: request.method,
+        params: {
+          threadId: request.params.threadId,
+          turnId: request.params.turnId,
+          itemId: request.params.itemId,
+          questions: request.params.questions.map((question) => ({
+            id: question.id,
+            header: question.header,
+            question: question.question,
+            isOther: question.isOther ?? false,
+            isSecret: question.isSecret ?? false,
+            options: question.options.map((option) => ({
+              label: option.label,
+              description: option.description,
+            })),
           })),
-        })),
-      },
-      ...(typeof request.completed === "boolean"
-        ? { completed: request.completed }
-        : {}),
-    })),
+        },
+        ...(typeof request.completed === "boolean"
+          ? { completed: request.completed }
+          : {}),
+      })),
     ...(thread.createdAt !== undefined
       ? { createdAt: normalizeUnixTimestampSeconds(thread.createdAt) }
       : {}),

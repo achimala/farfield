@@ -7,5 +7,6 @@ export { ModelListResponseSchema } from "./ModelListResponseSchema.js";
 export { SendUserMessageParamsSchema } from "./SendUserMessageParamsSchema.js";
 export { SendUserMessageResponseSchema } from "./SendUserMessageResponseSchema.js";
 export { ToolRequestUserInputResponseSchema } from "./ToolRequestUserInputResponseSchema.js";
+export { ServerRequestSchema } from "./ServerRequestSchema.js";
 export { CollaborationModeListResponseSchema } from "./CollaborationModeListResponseSchema.js";
 export * from "./MethodManifest.js";
