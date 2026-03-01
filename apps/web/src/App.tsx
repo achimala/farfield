@@ -25,7 +25,6 @@ import {
   Plus,
   Sun,
   X,
-  Zap,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -882,6 +881,24 @@ function normalizeManualGroupOrder(
   return normalized;
 }
 
+function formatResetTimestamp(resetAtSeconds: number | null): string | null {
+  if (resetAtSeconds == null) {
+    return null;
+  }
+  const date = new Date(resetAtSeconds * 1000);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return date.toLocaleString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
 function parseUiStateFromPath(pathname: string): {
   threadId: string | null;
   tab: "chat" | "debug";
@@ -959,6 +976,55 @@ function IconBtn({
       <TooltipTrigger asChild>{buttonNode}</TooltipTrigger>
       <TooltipContent>{title}</TooltipContent>
     </Tooltip>
+  );
+}
+
+function UsageRing({
+  percent,
+  size = 14,
+  strokeWidth = 2,
+  className,
+}: {
+  percent: number | null;
+  size?: number;
+  strokeWidth?: number;
+  className?: string;
+}): React.JSX.Element {
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const normalizedPercent = clampNumber(percent ?? 0, 0, 100);
+  const dashOffset = circumference * (1 - normalizedPercent / 100);
+
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox={`0 0 ${size} ${size}`}
+      className={className}
+      aria-hidden="true"
+    >
+      <circle
+        cx={size / 2}
+        cy={size / 2}
+        r={radius}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        className="text-border/80"
+      />
+      <circle
+        cx={size / 2}
+        cy={size / 2}
+        r={radius}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeDasharray={circumference}
+        strokeDashoffset={dashOffset}
+        transform={`rotate(-90 ${size / 2} ${size / 2})`}
+      />
+    </svg>
   );
 }
 
@@ -3784,10 +3850,10 @@ export function App(): React.JSX.Element {
                       ? "bg-success"
                       : hasAnySystemFailure
                         ? "bg-danger"
-                        : "bg-muted-foreground/40"
+                      : "bg-muted-foreground/40"
                   }`}
                 />
-                <span className="font-mono truncate">commit {commitLabel}</span>
+                <span className="font-mono truncate">{commitLabel}</span>
               </div>
             </TooltipTrigger>
             <TooltipContent
@@ -3795,7 +3861,7 @@ export function App(): React.JSX.Element {
               align="start"
               className="space-y-1 text-xs"
             >
-              <div className="font-mono text-[11px]">commit {commitLabel}</div>
+              <div className="font-mono text-[11px]">{commitLabel}</div>
               {agentDescriptors
                 .filter((descriptor) => descriptor.enabled)
                 .map((descriptor) => (
@@ -3823,21 +3889,40 @@ export function App(): React.JSX.Element {
               )}
             </TooltipContent>
           </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <a
-                href="https://github.com/achimala/farfield"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="h-8 w-8 rounded-lg inline-flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
-              >
-                <Github size={14} />
-              </a>
-            </TooltipTrigger>
-            <TooltipContent side="top" align="end">
-              GitHub
-            </TooltipContent>
-          </Tooltip>
+          <div className="flex items-center gap-1 shrink-0">
+            <IconBtn
+              onClick={() => {
+                setActiveTab((currentTab) =>
+                  currentTab === "debug" ? "chat" : "debug",
+                );
+                if (viewport === "mobile") {
+                  closeMobileSidebar();
+                }
+              }}
+              active={activeTab === "debug"}
+              title="Debug"
+            >
+              <Bug size={14} />
+            </IconBtn>
+            <IconBtn onClick={toggleTheme} title="Toggle theme">
+              {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
+            </IconBtn>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <a
+                  href="https://github.com/achimala/farfield"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="h-8 w-8 rounded-lg inline-flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+                >
+                  <Github size={14} />
+                </a>
+              </TooltipTrigger>
+              <TooltipContent side="top" align="end">
+                GitHub
+              </TooltipContent>
+            </Tooltip>
+          </div>
         </div>
       </div>
     </>
@@ -3974,7 +4059,7 @@ export function App(): React.JSX.Element {
                 }> = [];
                 if (rateLimits.rateLimits.primary) {
                   windows.push({
-                    label: "Session",
+                    label: "5h",
                     usedPct: rateLimits.rateLimits.primary.usedPercent,
                     resetAt: rateLimits.rateLimits.primary.resetsAt ?? null,
                   });
@@ -3990,89 +4075,55 @@ export function App(): React.JSX.Element {
                   return null;
                 }
                 return (
-                  <>
-                    <div className="sm:hidden flex items-center gap-1 mr-1">
-                      {windows.slice(0, 2).map((windowEntry) => {
-                        const colorClass =
-                          windowEntry.usedPct > 85
-                            ? "text-danger"
-                            : windowEntry.usedPct > 60
-                              ? "text-amber-500 dark:text-amber-400"
-                              : "text-muted-foreground/70";
-                        return (
-                          <DropdownMenu key={`mobile-${windowEntry.label}`}>
-                            <DropdownMenuTrigger asChild>
-                              <button
-                                type="button"
-                                className={`inline-flex items-center gap-0.5 text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-muted/50 max-w-[3.75rem] ${colorClass}`}
-                              >
-                                <Zap size={8} />
-                                {windowEntry.usedPct}%
-                              </button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent
-                              side="bottom"
-                              align="end"
-                              className="w-44 p-2"
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="mr-1 inline-flex h-5 items-center overflow-hidden rounded-full border border-border/70 bg-muted/50">
+                        {windows.slice(0, 2).map((windowEntry, index) => {
+                          const colorClass =
+                            windowEntry.usedPct > 85
+                              ? "text-danger"
+                              : windowEntry.usedPct > 60
+                                ? "text-amber-500 dark:text-amber-400"
+                                : "text-muted-foreground/70";
+                          return (
+                            <span
+                              key={windowEntry.label}
+                              className="inline-flex h-full items-center"
                             >
-                              <div className="text-xs space-y-0.5">
-                                <div className="font-medium">
-                                  {windowEntry.label}
-                                </div>
-                                <div>{windowEntry.usedPct}% used</div>
-                                {windowEntry.resetAt && (
-                                  <div className="text-muted-foreground">
-                                    Resets{" "}
-                                    {new Date(
-                                      windowEntry.resetAt * 1000,
-                                    ).toLocaleTimeString()}
-                                  </div>
-                                )}
-                              </div>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        );
-                      })}
-                    </div>
-                    <div className="hidden sm:flex items-center gap-1.5 mr-1.5">
-                      {windows.map((windowEntry) => {
-                        const colorClass =
-                          windowEntry.usedPct > 85
-                            ? "text-danger"
-                            : windowEntry.usedPct > 60
-                              ? "text-amber-500 dark:text-amber-400"
-                              : "text-muted-foreground/60";
-                        return (
-                          <Tooltip key={windowEntry.label}>
-                            <TooltipTrigger asChild>
+                              {index > 0 && (
+                                <span className="h-full w-px bg-border/60" />
+                              )}
                               <span
-                                className={`inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-muted/50 ${colorClass}`}
+                                className={`inline-flex h-full items-center gap-1 px-2 text-[10px] font-mono ${colorClass}`}
                               >
-                                <Zap size={9} />
-                                {windowEntry.usedPct}%
+                                <span>{windowEntry.label}</span>
+                                <span>{windowEntry.usedPct}%</span>
                               </span>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              <div className="text-xs space-y-0.5">
-                                <div className="font-medium">
-                                  {windowEntry.label}
-                                </div>
-                                <div>{windowEntry.usedPct}% used</div>
-                                {windowEntry.resetAt && (
-                                  <div className="text-muted-foreground">
-                                    Resets{" "}
-                                    {new Date(
-                                      windowEntry.resetAt * 1000,
-                                    ).toLocaleTimeString()}
-                                  </div>
-                                )}
-                              </div>
-                            </TooltipContent>
-                          </Tooltip>
-                        );
-                      })}
-                    </div>
-                  </>
+                            </span>
+                          );
+                        })}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" align="end">
+                      <div className="space-y-0.5 text-xs">
+                        {windows.map((windowEntry) => {
+                          const resetLabel = formatResetTimestamp(windowEntry.resetAt);
+                          return (
+                            <div key={`quota-tip-${windowEntry.label}`}>
+                              <span className="font-medium">{windowEntry.label}</span>:{" "}
+                              {windowEntry.usedPct}% used
+                              {resetLabel && (
+                                <span className="text-muted-foreground">
+                                  {" "}
+                                  (resets {resetLabel})
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
                 );
               })()}
               {showUsageBadges && sessionTokenUsage && (() => {
@@ -4103,94 +4154,46 @@ export function App(): React.JSX.Element {
                     : String(sessionTotalTokens);
 
                 return (
-                  <>
-                    <div className="sm:hidden flex items-center mr-1">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <button
-                            type="button"
-                            className={`inline-flex items-center gap-0.5 text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-muted/50 max-w-[5.5rem] truncate ${colorClass}`}
-                          >
-                            <Activity size={8} />
-                            {windowLabel
-                              ? `${contextLabel}/${windowLabel}`
-                              : contextLabel}
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent
-                          side="bottom"
-                          align="end"
-                          className="w-52 p-2"
-                        >
-                          <div className="text-xs space-y-0.5">
-                            <div className="font-medium">Current chat</div>
-                            <div>{contextLabel} tokens in current context</div>
-                            {windowLabel && (
-                              <div className="text-muted-foreground">
-                                {windowLabel} token context window
-                              </div>
-                            )}
-                            {usedPct !== null && (
-                              <div className="text-muted-foreground">
-                                {usedPct}% of context used
-                              </div>
-                            )}
-                            <div className="text-muted-foreground">
-                              Session total: {sessionTotalLabel} tokens
-                            </div>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span
+                        className={`mr-1 inline-flex h-5 items-center gap-1 rounded-full border border-border/70 bg-muted/50 px-2 text-[10px] font-mono ${colorClass}`}
+                      >
+                        <UsageRing
+                          percent={usedPct}
+                          size={11}
+                          strokeWidth={1.75}
+                          className={colorClass}
+                        />
+                        <span className="hidden sm:inline">
+                          {windowLabel
+                            ? `${contextLabel}/${windowLabel}`
+                            : contextLabel}
+                        </span>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" align="end">
+                      <div className="text-xs space-y-0.5">
+                        <div className="font-medium">Current chat</div>
+                        <div>{contextLabel} tokens in current context</div>
+                        {windowLabel && (
+                          <div className="text-muted-foreground">
+                            {windowLabel} token context window
                           </div>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                    <div className="hidden sm:flex items-center gap-1.5 mr-1.5">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span
-                            className={`inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-muted/50 ${colorClass}`}
-                          >
-                            <Activity size={9} />
-                            Chat{" "}
-                            {windowLabel
-                              ? `${contextLabel}/${windowLabel}`
-                              : contextLabel}
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <div className="text-xs space-y-0.5">
-                            <div className="font-medium">Current chat</div>
-                            <div>{contextLabel} tokens in current context</div>
-                            {windowLabel && (
-                              <div className="text-muted-foreground">
-                                {windowLabel} token context window
-                              </div>
-                            )}
-                            {usedPct !== null && (
-                              <div className="text-muted-foreground">
-                                {usedPct}% of context used
-                              </div>
-                            )}
-                            <div className="text-muted-foreground">
-                              Session total: {sessionTotalLabel} tokens
-                            </div>
+                        )}
+                        {usedPct !== null && (
+                          <div className="text-muted-foreground">
+                            {usedPct}% of context used
                           </div>
-                        </TooltipContent>
-                      </Tooltip>
-                    </div>
-                  </>
+                        )}
+                        <div className="text-muted-foreground">
+                          Session total: {sessionTotalLabel} tokens
+                        </div>
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
                 );
               })()}
-              <IconBtn
-                onClick={() =>
-                  setActiveTab(activeTab === "debug" ? "chat" : "debug")
-                }
-                active={activeTab === "debug"}
-                title="Debug"
-              >
-                <Bug size={14} />
-              </IconBtn>
-              <IconBtn onClick={toggleTheme} title="Toggle theme">
-                {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
-              </IconBtn>
             </div>
           </header>
 
