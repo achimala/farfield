@@ -5,6 +5,7 @@ import {
   CodexMonitorService,
   DesktopIpcClient,
   reduceThreadStreamEvents,
+  ThreadStreamReductionError,
   type SendRequestOptions,
 } from "@farfield/api";
 import {
@@ -550,8 +551,7 @@ export class CodexAgentAdapter implements AgentAdapter {
     const reductionEvents = reductionWindow.events;
     const canUseSyntheticSnapshot =
       !reductionWindow.hasSnapshot &&
-      snapshotState !== null &&
-      snapshotState.turns.length > 0;
+      snapshotState !== null;
 
     const reductionInput = canUseSyntheticSnapshot
       ? [
@@ -563,13 +563,42 @@ export class CodexAgentAdapter implements AgentAdapter {
           ...reductionEvents,
         ]
       : reductionEvents;
-    const reduced = reduceThreadStreamEvents(reductionInput);
-    const state = reduced.get(threadId);
-    return {
-      ownerClientId: state?.ownerClientId ?? ownerClientId ?? null,
-      conversationState: state?.conversationState ?? snapshotState,
-      liveStateError: null,
-    };
+    try {
+      const reduced = reduceThreadStreamEvents(reductionInput);
+      const state = reduced.get(threadId);
+      return {
+        ownerClientId: state?.ownerClientId ?? ownerClientId ?? null,
+        conversationState: state?.conversationState ?? snapshotState,
+        liveStateError: null,
+      };
+    } catch (error) {
+      const reductionErrorDetails =
+        error instanceof ThreadStreamReductionError ? error.details : null;
+      const eventIndex = reductionErrorDetails?.eventIndex ?? null;
+      const patchIndex = reductionErrorDetails?.patchIndex ?? null;
+      const message = toErrorMessage(error);
+
+      logger.warn(
+        {
+          threadId,
+          error: message,
+          eventIndex,
+          patchIndex,
+        },
+        "thread-stream-reduction-failed",
+      );
+
+      return {
+        ownerClientId,
+        conversationState: snapshotState,
+        liveStateError: {
+          kind: "reductionFailed",
+          message,
+          eventIndex,
+          patchIndex,
+        },
+      };
+    }
   }
 
   public async readStreamEvents(

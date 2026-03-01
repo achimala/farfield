@@ -121,6 +121,42 @@ interface RefreshFlags {
   refreshSelectedThread: boolean;
 }
 
+interface LoadSelectedThreadOptions {
+  includeTurns: boolean;
+  includeStreamEvents: boolean;
+}
+
+interface CachedThreadViewState {
+  readThreadState: ReadThreadResponse | null;
+  liveState: LiveStateResponse | null;
+  streamEvents: StreamEventsResponse["events"];
+}
+
+interface AgentCacheEntry {
+  value: AgentsResponse;
+  fetchedAt: number;
+}
+
+interface ProviderCatalogCacheEntry {
+  modes: ModesResponse["data"];
+  models: ModelsResponse["data"];
+  fetchedAt: number;
+}
+
+interface AppViewSnapshot {
+  threads: ThreadsResponse["data"];
+  threadListErrors: ThreadListProviderErrors;
+  selectedThreadId: string | null;
+  liveState: LiveStateResponse | null;
+  readThreadState: ReadThreadResponse | null;
+  streamEvents: StreamEventsResponse["events"];
+  modes: ModesResponse["data"];
+  models: ModelsResponse["data"];
+  agentDescriptors: AgentDescriptor[];
+  selectedAgentId: AgentId;
+  activeTab: "chat" | "debug";
+}
+
 /* ── Helpers ────────────────────────────────────────────────── */
 function formatDate(value: number | string | null | undefined): string {
   if (typeof value === "number")
@@ -345,10 +381,18 @@ const ASSUMED_APP_DEFAULT_MODEL = "gpt-5.3-codex";
 const ASSUMED_APP_DEFAULT_EFFORT = "medium";
 const SIDEBAR_COLLAPSED_GROUPS_STORAGE_KEY =
   "farfield.sidebar.collapsed-groups.v1";
+const AGENT_CACHE_TTL_MS = 30_000;
+const PROVIDER_CATALOG_CACHE_TTL_MS = 20_000;
+const CORE_REFRESH_INTERVAL_MS = 5_000;
+const SELECTED_THREAD_REFRESH_INTERVAL_MS = 3_000;
 const AGENT_FAVICON_BY_ID: Record<AgentId, string> = {
   codex: "https://openai.com/favicon.ico",
   opencode: "https://opencode.ai/favicon.ico",
 };
+
+let appViewSnapshotCache: AppViewSnapshot | null = null;
+const ENABLE_VIEW_SNAPSHOT_CACHE =
+  typeof window !== "undefined" && import.meta.env.MODE !== "test";
 
 function agentFavicon(agentId: AgentId | null | undefined): string | null {
   if (!agentId) {
@@ -718,27 +762,42 @@ export function App(): React.JSX.Element {
     () => parseUiStateFromPath(window.location.pathname),
     [],
   );
+  const initialSnapshot = ENABLE_VIEW_SNAPSHOT_CACHE
+    ? appViewSnapshotCache
+    : null;
 
   /* State */
   const [error, setError] = useState("");
   const [health, setHealth] = useState<Health | null>(null);
-  const [threads, setThreads] = useState<ThreadsResponse["data"]>([]);
-  const [threadListErrors, setThreadListErrors] =
-    useState<ThreadListProviderErrors>({
-      codex: null,
-      opencode: null,
-    });
-  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(
-    initialUiState.threadId,
+  const [threads, setThreads] = useState<ThreadsResponse["data"]>(
+    initialSnapshot?.threads ?? [],
   );
-  const [liveState, setLiveState] = useState<LiveStateResponse | null>(null);
+  const [threadListErrors, setThreadListErrors] =
+    useState<ThreadListProviderErrors>(
+      initialSnapshot?.threadListErrors ?? {
+        codex: null,
+        opencode: null,
+      },
+    );
+  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(
+    initialSnapshot?.selectedThreadId ?? initialUiState.threadId,
+  );
+  const [liveState, setLiveState] = useState<LiveStateResponse | null>(
+    initialSnapshot?.liveState ?? null,
+  );
   const [readThreadState, setReadThreadState] =
-    useState<ReadThreadResponse | null>(null);
+    useState<ReadThreadResponse | null>(
+      initialSnapshot?.readThreadState ?? null,
+    );
   const [streamEvents, setStreamEvents] = useState<
     StreamEventsResponse["events"]
-  >([]);
-  const [modes, setModes] = useState<ModesResponse["data"]>([]);
-  const [models, setModels] = useState<ModelsResponse["data"]>([]);
+  >(initialSnapshot?.streamEvents ?? []);
+  const [modes, setModes] = useState<ModesResponse["data"]>(
+    initialSnapshot?.modes ?? [],
+  );
+  const [models, setModels] = useState<ModelsResponse["data"]>(
+    initialSnapshot?.models ?? [],
+  );
   const [selectedModeKey, setSelectedModeKey] = useState("");
   const [selectedModelId, setSelectedModelId] = useState("");
   const [selectedReasoningEffort, setSelectedReasoningEffort] = useState("");
@@ -757,13 +816,15 @@ export function App(): React.JSX.Element {
     Record<string, { option: string; freeform: string }>
   >({});
   const [agentDescriptors, setAgentDescriptors] = useState<AgentDescriptor[]>(
-    [],
+    initialSnapshot?.agentDescriptors ?? [],
   );
-  const [selectedAgentId, setSelectedAgentId] = useState<AgentId>("codex");
+  const [selectedAgentId, setSelectedAgentId] = useState<AgentId>(
+    initialSnapshot?.selectedAgentId ?? "codex",
+  );
 
   /* UI state */
   const [activeTab, setActiveTab] = useState<"chat" | "debug">(
-    initialUiState.tab,
+    initialSnapshot?.activeTab ?? initialUiState.tab,
   );
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true);
@@ -780,7 +841,9 @@ export function App(): React.JSX.Element {
 
   /* Refs */
   const selectedThreadIdRef = useRef<string | null>(null);
-  const activeTabRef = useRef<"chat" | "debug">(initialUiState.tab);
+  const activeTabRef = useRef<"chat" | "debug">(
+    initialSnapshot?.activeTab ?? initialUiState.tab,
+  );
   const refreshTimerRef = useRef<number | null>(null);
   const pendingRefreshFlagsRef = useRef<RefreshFlags>({
     refreshCore: false,
@@ -795,9 +858,31 @@ export function App(): React.JSX.Element {
   const lastAppliedModeSignatureRef = useRef("");
   const hasHydratedAgentSelectionRef = useRef(false);
   const threadProviderByIdRef = useRef<Map<string, AgentId>>(new Map());
+  const loadCoreDataRef = useRef<(() => Promise<void>) | null>(null);
   const loadSelectedThreadRef = useRef<
-    ((threadId: string) => Promise<void>) | null
+    (
+      threadId: string,
+      options?: Partial<LoadSelectedThreadOptions>,
+    ) => Promise<void>
   >(null);
+  const threadViewStateCacheRef = useRef<Map<string, CachedThreadViewState>>(
+    initialSnapshot?.selectedThreadId
+      ? new Map([
+          [
+            initialSnapshot.selectedThreadId,
+            {
+              readThreadState: initialSnapshot.readThreadState,
+              liveState: initialSnapshot.liveState,
+              streamEvents: initialSnapshot.streamEvents,
+            },
+          ],
+        ])
+      : new Map(),
+  );
+  const agentCacheRef = useRef<AgentCacheEntry | null>(null);
+  const providerCatalogCacheRef = useRef<
+    Map<AgentId, ProviderCatalogCacheEntry>
+  >(new Map());
   const threadsSignatureRef = useRef<string[]>([]);
   const modesSignatureRef = useRef<string[]>([]);
   const modelsSignatureRef = useRef<string[]>([]);
@@ -1164,10 +1249,25 @@ export function App(): React.JSX.Element {
   /* Data loading */
   const loadCoreData = useCallback(async () => {
     const shouldLoadDebugData = activeTabRef.current === "debug";
+    const now = Date.now();
+    const cachedAgents = agentCacheRef.current;
+    const shouldLoadAgents =
+      !cachedAgents || now - cachedAgents.fetchedAt >= AGENT_CACHE_TTL_MS;
+    const agentsPromise: Promise<AgentsResponse> =
+      shouldLoadAgents || !cachedAgents
+      ? listAgents().then((agents) => {
+          agentCacheRef.current = {
+            value: agents,
+            fetchedAt: Date.now(),
+          };
+          return agents;
+        })
+      : Promise.resolve(cachedAgents.value);
+
     const [nh, nt, nag, ntr, nhist] = await Promise.all([
       getHealth(),
       listThreads({ limit: 80, archived: false, all: false, maxPages: 1 }),
-      listAgents(),
+      agentsPromise,
       shouldLoadDebugData
         ? getTraceStatus()
         : Promise.resolve<TraceStatus | null>(null),
@@ -1197,20 +1297,43 @@ export function App(): React.JSX.Element {
     const activeDescriptor =
       nag.agents.find((agent) => agent.id === activeProviderId) ?? null;
 
-    const [nm, nmo] = await Promise.all([
-      canUseFeature(activeDescriptor, "listCollaborationModes")
-        ? listCollaborationModes(activeProviderId)
-        : Promise.resolve({ data: [] as ModesResponse["data"] }),
-      canUseFeature(activeDescriptor, "listModels")
-        ? listModels(activeProviderId)
-        : Promise.resolve({ data: [] as ModelsResponse["data"] }),
-    ]);
+    const canLoadModes = canUseFeature(activeDescriptor, "listCollaborationModes");
+    const canLoadModels = canUseFeature(activeDescriptor, "listModels");
+    const cachedCatalog =
+      providerCatalogCacheRef.current.get(activeProviderId) ?? null;
+    const shouldLoadCatalog =
+      !cachedCatalog ||
+      now - cachedCatalog.fetchedAt >= PROVIDER_CATALOG_CACHE_TTL_MS;
+
+    let nextModesData: ModesResponse["data"] = [];
+    let nextModelsData: ModelsResponse["data"] = [];
+
+    if ((canLoadModes || canLoadModels) && !shouldLoadCatalog && cachedCatalog) {
+      nextModesData = canLoadModes ? cachedCatalog.modes : [];
+      nextModelsData = canLoadModels ? cachedCatalog.models : [];
+    } else if (canLoadModes || canLoadModels) {
+      const [nextModesResult, nextModelsResult] = await Promise.all([
+        canLoadModes
+          ? listCollaborationModes(activeProviderId)
+          : Promise.resolve({ data: [] as ModesResponse["data"] }),
+        canLoadModels
+          ? listModels(activeProviderId)
+          : Promise.resolve({ data: [] as ModelsResponse["data"] }),
+      ]);
+      nextModesData = nextModesResult.data;
+      nextModelsData = nextModelsResult.data;
+      providerCatalogCacheRef.current.set(activeProviderId, {
+        modes: nextModesData,
+        models: nextModelsData,
+        fetchedAt: Date.now(),
+      });
+    }
 
     let preferredAgentId: AgentId | null = null;
-    const nextModesSignature = nm.data.map((mode) =>
+    const nextModesSignature = nextModesData.map((mode) =>
       [mode.mode, mode.name, mode.reasoningEffort ?? ""].join("|"),
     );
-    const nextModelsSignature = nmo.data.map((model) =>
+    const nextModelsSignature = nextModelsData.map((model) =>
       [model.id, model.displayName ?? ""].join("|"),
     );
 
@@ -1249,11 +1372,11 @@ export function App(): React.JSX.Element {
       });
       if (!signaturesMatch(modesSignatureRef.current, nextModesSignature)) {
         modesSignatureRef.current = nextModesSignature;
-        setModes(nm.data);
+        setModes(nextModesData);
       }
       if (!signaturesMatch(modelsSignatureRef.current, nextModelsSignature)) {
         modelsSignatureRef.current = nextModelsSignature;
-        setModels(nmo.data);
+        setModels(nextModelsData);
       }
       if (ntr) {
         setTraceStatus((prev) => {
@@ -1339,22 +1462,29 @@ export function App(): React.JSX.Element {
       });
       setSelectedModeKey((cur) => {
         if (cur) return cur;
-        const nonPlanDefault = nm.data.find((mode) => !isPlanModeOption(mode));
-        return nonPlanDefault?.mode ?? nm.data[0]?.mode ?? "";
+        const nonPlanDefault = nextModesData.find(
+          (mode) => !isPlanModeOption(mode),
+        );
+        return nonPlanDefault?.mode ?? nextModesData[0]?.mode ?? "";
       });
     });
   }, [selectedAgentId]);
 
   const loadSelectedThread = useCallback(
-    async (threadId: string) => {
+    async (
+      threadId: string,
+      options?: Partial<LoadSelectedThreadOptions>,
+    ) => {
+      const includeTurns = options?.includeTurns ?? true;
+      const includeStreamEvents = options?.includeStreamEvents ?? includeTurns;
       let threadAgentId = threadProviderByIdRef.current.get(threadId) ?? null;
-      const read =
+      let read =
         threadAgentId === null
           ? await readThread(threadId, {
-              includeTurns: true,
+              includeTurns,
             })
           : await readThread(threadId, {
-              includeTurns: true,
+              includeTurns,
               provider: threadAgentId,
             });
       threadAgentId = read.thread.provider;
@@ -1369,6 +1499,15 @@ export function App(): React.JSX.Element {
         descriptor === undefined
           ? threadAgentId === "codex"
           : canUseFeature(descriptor, "readStreamEvents");
+      const shouldReadTurns = includeTurns || !canReadLiveState;
+
+      if (shouldReadTurns && !includeTurns) {
+        read = await readThread(threadId, {
+          includeTurns: true,
+          provider: threadAgentId,
+        });
+      }
+
       const live = canReadLiveState
         ? await getLiveState(threadId, threadAgentId)
         : {
@@ -1379,9 +1518,14 @@ export function App(): React.JSX.Element {
             liveStateError: null,
           };
       const shouldLoadStreamEvents =
-        canReadStreamEvents && activeTabRef.current === "debug";
+        includeStreamEvents &&
+        canReadStreamEvents &&
+        activeTabRef.current === "debug";
       const shouldUpdateSelectedThread =
         selectedThreadIdRef.current === threadId;
+      const existingCachedState =
+        threadViewStateCacheRef.current.get(threadId) ?? null;
+      let nextStreamEvents = existingCachedState?.streamEvents ?? [];
       startTransition(() => {
         setThreads((previousThreads) => {
           const nextIsGenerating = live.conversationState
@@ -1438,15 +1582,25 @@ export function App(): React.JSX.Element {
           }
           return live;
         });
-        setReadThreadState((prev) => {
-          if (
-            buildReadThreadSyncSignature(prev) ===
-            buildReadThreadSyncSignature(read)
-          ) {
-            return prev;
-          }
-          return read;
-        });
+        if (shouldReadTurns) {
+          setReadThreadState((prev) => {
+            if (
+              buildReadThreadSyncSignature(prev) ===
+              buildReadThreadSyncSignature(read)
+            ) {
+              return prev;
+            }
+            return read;
+          });
+        }
+      });
+
+      threadViewStateCacheRef.current.set(threadId, {
+        readThreadState: shouldReadTurns
+          ? read
+          : (existingCachedState?.readThreadState ?? null),
+        liveState: live,
+        streamEvents: nextStreamEvents,
       });
 
       if (!shouldLoadStreamEvents) {
@@ -1454,6 +1608,14 @@ export function App(): React.JSX.Element {
       }
 
       const stream = await getStreamEvents(threadId, threadAgentId);
+      nextStreamEvents = stream.events;
+      threadViewStateCacheRef.current.set(threadId, {
+        readThreadState: shouldReadTurns
+          ? read
+          : (existingCachedState?.readThreadState ?? null),
+        liveState: live,
+        streamEvents: nextStreamEvents,
+      });
       if (selectedThreadIdRef.current !== threadId) {
         return;
       }
@@ -1481,7 +1643,10 @@ export function App(): React.JSX.Element {
       setError("");
       await loadCoreData();
       if (selectedThreadIdRef.current)
-        await loadSelectedThread(selectedThreadIdRef.current);
+        await loadSelectedThread(selectedThreadIdRef.current, {
+          includeTurns: true,
+          includeStreamEvents: true,
+        });
     } catch (e) {
       setError(toErrorMessage(e));
     }
@@ -1502,6 +1667,10 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     loadSelectedThreadRef.current = loadSelectedThread;
   }, [loadSelectedThread]);
+
+  useEffect(() => {
+    loadCoreDataRef.current = loadCoreData;
+  }, [loadCoreData]);
 
   useEffect(() => {
     activeTabRef.current = activeTab;
@@ -1526,15 +1695,46 @@ export function App(): React.JSX.Element {
   }, [activeTab, selectedThreadId]);
 
   useEffect(() => {
-    void refreshAll();
-  }, [refreshAll]);
+    void (async () => {
+      try {
+        setError("");
+        const loadCore = loadCoreDataRef.current;
+        if (loadCore) {
+          await loadCore();
+        }
+        if (selectedThreadIdRef.current) {
+          const loadThread = loadSelectedThreadRef.current;
+          if (loadThread) {
+            await loadThread(selectedThreadIdRef.current, {
+              includeTurns: true,
+              includeStreamEvents: true,
+            });
+          }
+        }
+      } catch (error) {
+        setError(toErrorMessage(error));
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    const loadCore = loadCoreDataRef.current;
+    if (!loadCore) {
+      return;
+    }
+    void loadCore().catch((error) => setError(toErrorMessage(error)));
+  }, [selectedAgentId]);
 
   useEffect(() => {
     const refreshCoreData = () => {
       if (document.visibilityState === "hidden") {
         return;
       }
-      void loadCoreData().catch((e) => setError(toErrorMessage(e)));
+      const loadCore = loadCoreDataRef.current;
+      if (!loadCore) {
+        return;
+      }
+      void loadCore().catch((e) => setError(toErrorMessage(e)));
     };
 
     const startCoreRefresh = () => {
@@ -1543,7 +1743,7 @@ export function App(): React.JSX.Element {
       }
       coreRefreshIntervalRef.current = window.setInterval(
         refreshCoreData,
-        5000,
+        CORE_REFRESH_INTERVAL_MS,
       );
     };
 
@@ -1579,7 +1779,7 @@ export function App(): React.JSX.Element {
       window.removeEventListener("pagehide", onPageHide);
       window.removeEventListener("pageshow", onPageShow);
     };
-  }, [loadCoreData]);
+  }, []);
 
   useEffect(() => {
     const stopSelectedThreadRefresh = () => {
@@ -1599,7 +1799,14 @@ export function App(): React.JSX.Element {
       if (document.visibilityState === "hidden") {
         return;
       }
-      void loadSelectedThread(selectedThreadId).catch((e) =>
+      const load = loadSelectedThreadRef.current;
+      if (!load) {
+        return;
+      }
+      void load(selectedThreadId, {
+        includeTurns: false,
+        includeStreamEvents: activeTabRef.current === "debug",
+      }).catch((e) =>
         setError(toErrorMessage(e)),
       );
     };
@@ -1610,7 +1817,7 @@ export function App(): React.JSX.Element {
       }
       selectedThreadRefreshIntervalRef.current = window.setInterval(
         refreshSelectedThreadData,
-        3000,
+        SELECTED_THREAD_REFRESH_INTERVAL_MS,
       );
     };
 
@@ -1638,7 +1845,7 @@ export function App(): React.JSX.Element {
       window.removeEventListener("pagehide", onPageHide);
       window.removeEventListener("pageshow", onPageShow);
     };
-  }, [loadSelectedThread, selectedThreadId]);
+  }, [selectedThreadId]);
 
   useEffect(() => {
     if (!selectedThreadId) {
@@ -1647,14 +1854,25 @@ export function App(): React.JSX.Element {
       setStreamEvents([]);
       return;
     }
-    setLiveState(null);
-    setReadThreadState(null);
-    setStreamEvents([]);
+    const cachedState =
+      threadViewStateCacheRef.current.get(selectedThreadId) ?? null;
+    if (cachedState) {
+      setLiveState(cachedState.liveState);
+      setReadThreadState(cachedState.readThreadState);
+      setStreamEvents(cachedState.streamEvents);
+    } else {
+      setLiveState(null);
+      setReadThreadState(null);
+      setStreamEvents([]);
+    }
     const load = loadSelectedThreadRef.current;
     if (!load) {
       return;
     }
-    void load(selectedThreadId).catch((e) => setError(toErrorMessage(e)));
+    void load(selectedThreadId, {
+      includeTurns: true,
+      includeStreamEvents: activeTabRef.current === "debug",
+    }).catch((e) => setError(toErrorMessage(e)));
   }, [selectedThreadId]);
 
   useEffect(() => {
@@ -1691,7 +1909,10 @@ export function App(): React.JSX.Element {
         void (async () => {
           try {
             if (flags.refreshCore) {
-              await loadCoreData();
+              const loadCore = loadCoreDataRef.current;
+              if (loadCore) {
+                await loadCore();
+              }
             } else if (
               flags.refreshHistory &&
               activeTabRef.current === "debug"
@@ -1711,7 +1932,13 @@ export function App(): React.JSX.Element {
               });
             }
             if (flags.refreshSelectedThread && selectedThreadIdRef.current) {
-              await loadSelectedThread(selectedThreadIdRef.current);
+              const loadThread = loadSelectedThreadRef.current;
+              if (loadThread) {
+                await loadThread(selectedThreadIdRef.current, {
+                  includeTurns: false,
+                  includeStreamEvents: activeTabRef.current === "debug",
+                });
+              }
             }
           } catch (e) {
             setError(toErrorMessage(e));
@@ -1769,6 +1996,8 @@ export function App(): React.JSX.Element {
           } else {
             const parsedEvent = parsedEventResult.data;
             if (parsedEvent.kind === "providerStateChanged") {
+              agentCacheRef.current = null;
+              providerCatalogCacheRef.current.clear();
               refreshCore = true;
             } else if (parsedEvent.kind === "threadUpdated") {
               refreshCore = true;
@@ -1856,7 +2085,7 @@ export function App(): React.JSX.Element {
       window.removeEventListener("pageshow", onPageShow);
       closeEvents();
     };
-  }, [loadCoreData, loadSelectedThread]);
+  }, []);
 
   useEffect(() => {
     if (!activeRequest) {
@@ -1956,6 +2185,37 @@ export function App(): React.JSX.Element {
     setHasHydratedModeFromLiveState(false);
     setIsModeSyncing(false);
   }, [selectedThreadId]);
+
+  useEffect(() => {
+    if (!ENABLE_VIEW_SNAPSHOT_CACHE) {
+      return;
+    }
+    appViewSnapshotCache = {
+      threads,
+      threadListErrors,
+      selectedThreadId,
+      liveState,
+      readThreadState,
+      streamEvents,
+      modes,
+      models,
+      agentDescriptors,
+      selectedAgentId,
+      activeTab,
+    };
+  }, [
+    activeTab,
+    agentDescriptors,
+    liveState,
+    modes,
+    models,
+    readThreadState,
+    selectedAgentId,
+    selectedThreadId,
+    streamEvents,
+    threadListErrors,
+    threads,
+  ]);
 
   useEffect(() => {
     writeSidebarCollapsedGroupsToStorage(sidebarCollapsedGroups);
@@ -2151,7 +2411,10 @@ export function App(): React.JSX.Element {
             },
           },
         });
-        await loadSelectedThread(selectedThreadId);
+        await loadSelectedThread(selectedThreadId, {
+          includeTurns: true,
+          includeStreamEvents: activeTabRef.current === "debug",
+        });
       } catch (e) {
         lastAppliedModeSignatureRef.current = previousSignature;
         setError(toErrorMessage(e));
