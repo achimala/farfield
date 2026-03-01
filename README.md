@@ -43,7 +43,7 @@ bun run dev:remote -- --agents=opencode      # network-accessible (opencode)
 
 ## Production Mode (No Extra Proxy)
 
-Build once and run in production mode with one command:
+Build once and run in production mode with two commands:
 
 ```bash
 bun run build
