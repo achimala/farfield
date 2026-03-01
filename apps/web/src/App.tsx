@@ -10,7 +10,6 @@ import {
 } from "react";
 import {
   Activity,
-  ArrowDown,
   Bug,
   Circle,
   CircleDot,
@@ -55,7 +54,7 @@ import {
   type UnifiedFeatureId,
 } from "@farfield/unified-surface";
 import { useTheme } from "@/hooks/useTheme";
-import { ConversationItem } from "@/components/ConversationItem";
+import { ChatTimeline, type ChatTimelineEntry } from "@/components/ChatTimeline";
 import { ChatComposer } from "@/components/ChatComposer";
 import { PendingRequestCard } from "@/components/PendingRequestCard";
 import { StreamEventCard } from "@/components/StreamEventCard";
@@ -104,17 +103,7 @@ type ConversationTurn = NonNullable<
   ReadThreadResponse["thread"]
 >["turns"][number];
 type ConversationTurnItem = NonNullable<ConversationTurn["items"]>[number];
-type ConversationItemType = ConversationTurnItem["type"];
-
-interface FlatConversationItem {
-  key: string;
-  item: ConversationTurnItem;
-  isLast: boolean;
-  turnIsInProgress: boolean;
-  previousItemType: ConversationItemType | undefined;
-  nextItemType: ConversationItemType | undefined;
-  spacingTop: number;
-}
+type FlatConversationItem = ChatTimelineEntry;
 
 interface RefreshFlags {
   refreshCore: boolean;
@@ -3355,107 +3344,30 @@ export function App(): React.JSX.Element {
                 />
 
                 {/* Conversation */}
-                <div
-                  ref={scrollRef}
-                  className="flex-1 overflow-y-auto"
-                  style={{ overflowAnchor: "none" }}
-                >
-                  <AnimatePresence initial={false} mode="wait">
-                    <motion.div
-                      key={selectedThreadId ?? "__no_thread__"}
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      transition={{ duration: 0.14, ease: "easeOut" }}
-                      className="max-w-3xl mx-auto px-4 pt-4 pb-6"
-                    >
-                      {turns.length === 0 ? (
-                        <div className="text-center py-20 text-sm text-muted-foreground">
-                          {selectedThreadId
-                            ? "No messages yet"
-                            : availableAgentIds.length > 0
-                              ? "Start typing to create a new thread"
-                              : "Select a thread from the sidebar"}
-                        </div>
-                      ) : (
-                        <motion.div
-                          ref={chatContentRef}
-                          className="space-y-0"
-                          layout="position"
-                          style={{ overflowAnchor: "none" }}
-                        >
-                          {hasHiddenChatItems && (
-                            <div className="flex justify-center pb-3">
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                className="rounded-full"
-                                onClick={() => {
-                                  setVisibleChatItemLimit((limit) =>
-                                    Math.min(
-                                      conversationItemCount,
-                                      limit + VISIBLE_CHAT_ITEMS_STEP,
-                                    ),
-                                  );
-                                }}
-                              >
-                                Show older messages ({firstVisibleChatItemIndex}
-                                )
-                              </Button>
-                            </div>
-                          )}
-                          {visibleConversationItems.map((entry) => (
-                            <motion.div
-                              key={entry.key}
-                              layout="position"
-                              initial={{ opacity: 0, y: 14 }}
-                              animate={{ opacity: 1, y: 0 }}
-                              transition={{
-                                duration: 0.22,
-                                ease: [0.22, 1, 0.36, 1],
-                              }}
-                              style={{ paddingTop: `${entry.spacingTop}px` }}
-                            >
-                              <ConversationItem
-                                item={entry.item}
-                                isLast={entry.isLast}
-                                turnIsInProgress={entry.turnIsInProgress}
-                                previousItemType={entry.previousItemType}
-                                nextItemType={entry.nextItemType}
-                              />
-                            </motion.div>
-                          ))}
-                        </motion.div>
-                      )}
-                    </motion.div>
-                  </AnimatePresence>
-                </div>
-
-                <AnimatePresence initial={false}>
-                  {!isChatAtBottom && turns.length > 0 && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, height: "auto" }}
-                      exit={{ opacity: 0, y: 8 }}
-                      transition={{ duration: 0.18 }}
-                      className="absolute left-1/2 -translate-x-1/2 bottom-[7.25rem] md:bottom-[7.75rem] z-20"
-                    >
-                      <Button
-                        type="button"
-                        onClick={() => {
-                          scrollChatToBottom();
-                          isChatAtBottomRef.current = true;
-                          setIsChatAtBottom(true);
-                        }}
-                        size="icon"
-                        className="h-10 w-10 rounded-full border border-border bg-card text-foreground shadow-lg hover:bg-muted"
-                      >
-                        <ArrowDown size={16} />
-                      </Button>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                <ChatTimeline
+                  selectedThreadId={selectedThreadId}
+                  turnsLength={turns.length}
+                  hasAnyAgent={availableAgentIds.length > 0}
+                  hasHiddenChatItems={hasHiddenChatItems}
+                  firstVisibleChatItemIndex={firstVisibleChatItemIndex}
+                  visibleConversationItems={visibleConversationItems}
+                  isChatAtBottom={isChatAtBottom}
+                  onShowOlder={() => {
+                    setVisibleChatItemLimit((limit) =>
+                      Math.min(
+                        conversationItemCount,
+                        limit + VISIBLE_CHAT_ITEMS_STEP,
+                      ),
+                    );
+                  }}
+                  onScrollToBottom={() => {
+                    scrollChatToBottom();
+                    isChatAtBottomRef.current = true;
+                    setIsChatAtBottom(true);
+                  }}
+                  scrollRef={scrollRef}
+                  chatContentRef={chatContentRef}
+                />
 
                 {/* Input area */}
                 <div className="relative z-10 -mt-6 px-4 pt-6 pb-0 md:pb-6 shrink-0">
