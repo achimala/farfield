@@ -38,6 +38,8 @@ import type {
   AgentThreadStreamEvents,
 } from "../types.js";
 
+type StreamSnapshotOrigin = "stream" | "readThreadWithTurns" | "readThread";
+
 export interface CodexAgentRuntimeState {
   appReady: boolean;
   ipcConnected: boolean;
@@ -87,6 +89,10 @@ export class CodexAgentAdapter implements AgentAdapter {
   private readonly streamSnapshotByThreadId = new Map<
     string,
     ThreadConversationState
+  >();
+  private readonly streamSnapshotOriginByThreadId = new Map<
+    string,
+    StreamSnapshotOrigin
   >();
   private readonly threadTitleById = new Map<string, string | null>();
   private readonly ipcFrameListeners = new Set<
@@ -206,6 +212,7 @@ export class CodexAgentAdapter implements AgentAdapter {
 
       const snapshot = parsedBroadcast.params.change.conversationState;
       this.streamSnapshotByThreadId.set(conversationId, snapshot);
+      this.streamSnapshotOriginByThreadId.set(conversationId, "stream");
       this.setThreadTitle(conversationId, snapshot.title);
     });
   }
@@ -394,6 +401,11 @@ export class CodexAgentAdapter implements AgentAdapter {
       existingSnapshot === undefined;
     if (shouldStoreSnapshot) {
       this.streamSnapshotByThreadId.set(input.threadId, parsedThread);
+      const snapshotOrigin: StreamSnapshotOrigin =
+        input.includeTurns && parsedThread.turns.length > 0
+          ? "readThreadWithTurns"
+          : "readThread";
+      this.streamSnapshotOriginByThreadId.set(input.threadId, snapshotOrigin);
     }
     this.setThreadTitle(input.threadId, parsedThread.title);
     return {
@@ -536,6 +548,8 @@ export class CodexAgentAdapter implements AgentAdapter {
 
   public async readLiveState(threadId: string): Promise<AgentThreadLiveState> {
     const snapshotState = this.streamSnapshotByThreadId.get(threadId) ?? null;
+    const snapshotOrigin =
+      this.streamSnapshotOriginByThreadId.get(threadId) ?? null;
     const ownerClientId =
       this.threadOwnerById.get(threadId) ?? this.lastKnownOwnerClientId ?? null;
     const rawEvents = this.streamEventsByThreadId.get(threadId) ?? [];
@@ -566,7 +580,19 @@ export class CodexAgentAdapter implements AgentAdapter {
     const reductionEvents = reductionWindow.events;
     const canUseSyntheticSnapshot =
       !reductionWindow.hasSnapshot &&
-      snapshotState !== null;
+      snapshotState !== null &&
+      (snapshotOrigin === "stream" ||
+        snapshotOrigin === "readThreadWithTurns");
+    const hasReliableReductionBase =
+      reductionWindow.hasSnapshot || canUseSyntheticSnapshot;
+
+    if (!hasReliableReductionBase) {
+      return {
+        ownerClientId,
+        conversationState: snapshotState,
+        liveStateError: null,
+      };
+    }
 
     const reductionInput = canUseSyntheticSnapshot
       ? [
