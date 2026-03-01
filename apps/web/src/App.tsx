@@ -163,21 +163,40 @@ interface MobileSidebarSwipeGesture {
 }
 
 /* ── Helpers ────────────────────────────────────────────────── */
-function formatDate(value: number | string | null | undefined): string {
-  if (typeof value === "number")
-    return new Date(
-      normalizeUnixTimestampSeconds(value) * 1000,
-    ).toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  if (typeof value === "string") {
-    const d = new Date(value);
-    if (!Number.isNaN(d.getTime()))
-      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    return value;
+function formatCompactRelativeTime(
+  value: number | string | null | undefined,
+): string {
+  let timestampSeconds: number | null = null;
+
+  if (typeof value === "number") {
+    timestampSeconds = normalizeUnixTimestampSeconds(value);
+  } else if (typeof value === "string") {
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) {
+      timestampSeconds = Math.floor(date.getTime() / 1000);
+    }
   }
-  return "";
+
+  if (timestampSeconds === null) {
+    return "";
+  }
+
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const diffSeconds = Math.max(0, nowSeconds - timestampSeconds);
+  const minute = 60;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  const week = 7 * day;
+  const month = 30 * day;
+  const year = 365 * day;
+
+  if (diffSeconds < minute) return "1m";
+  if (diffSeconds < hour) return `${Math.floor(diffSeconds / minute)}m`;
+  if (diffSeconds < day) return `${Math.floor(diffSeconds / hour)}h`;
+  if (diffSeconds < week) return `${Math.floor(diffSeconds / day)}d`;
+  if (diffSeconds < month) return `${Math.floor(diffSeconds / week)}w`;
+  if (diffSeconds < year) return `${Math.floor(diffSeconds / month)}mo`;
+  return `${Math.floor(diffSeconds / year)}y`;
 }
 
 function threadLabel(thread: Thread): string {
@@ -1026,6 +1045,7 @@ export function App(): React.JSX.Element {
         .map((descriptor) => descriptor.id),
     [agentDescriptors],
   );
+  const showProviderIcons = availableAgentIds.length > 1;
   const selectedAgentDescriptor = useMemo(
     () => agentsById[selectedAgentId] ?? null,
     [agentsById, selectedAgentId],
@@ -3400,6 +3420,8 @@ export function App(): React.JSX.Element {
                           isSelected && selectedThreadWaitingState
                             ? selectedThreadWaitingState.waitingOnUserInput
                             : Boolean(thread.waitingOnUserInput);
+                        const hasWaitingIndicator =
+                          waitingOnApproval || waitingOnUserInput;
                         return (
                           <Button
                             key={thread.id}
@@ -3416,16 +3438,18 @@ export function App(): React.JSX.Element {
                             }`}
                           >
                             <span className="min-w-0 flex-1 flex items-center gap-1.5 truncate leading-5">
-                              <span className="shrink-0 h-4 w-4 rounded-sm bg-muted/30 ring-1 ring-border/60 flex items-center justify-center overflow-hidden">
-                                <AgentFavicon
-                                  agentId={thread.provider}
-                                  label={
-                                    agentsById[thread.provider]?.label ??
-                                    "Agent"
-                                  }
-                                  className="h-3.5 w-3.5"
-                                />
-                              </span>
+                              {showProviderIcons && (
+                                <span className="shrink-0 h-4 w-4 rounded-sm bg-muted/30 ring-1 ring-border/60 flex items-center justify-center overflow-hidden">
+                                  <AgentFavicon
+                                    agentId={thread.provider}
+                                    label={
+                                      agentsById[thread.provider]?.label ??
+                                      "Agent"
+                                    }
+                                    className="h-3.5 w-3.5"
+                                  />
+                                </span>
+                              )}
                               <span className="truncate">
                                 {threadLabel(thread)}
                               </span>
@@ -3435,7 +3459,7 @@ export function App(): React.JSX.Element {
                                 waitingOnApproval={waitingOnApproval}
                                 waitingOnUserInput={waitingOnUserInput}
                               />
-                              {threadIsGenerating && (
+                              {!hasWaitingIndicator && threadIsGenerating && (
                                 <Loader2
                                   size={11}
                                   className="animate-spin text-muted-foreground/70"
@@ -3443,7 +3467,7 @@ export function App(): React.JSX.Element {
                               )}
                               {thread.updatedAt && (
                                 <span className="text-[10px] text-muted-foreground/50">
-                                  {formatDate(thread.updatedAt)}
+                                  {formatCompactRelativeTime(thread.updatedAt)}
                                 </span>
                               )}
                             </span>
@@ -3642,7 +3666,7 @@ export function App(): React.JSX.Element {
                   {selectedThread
                     ? threadLabel(selectedThread)
                     : "No thread selected"}
-                  {selectedThread && activeAgentLabel && (
+                  {selectedThread && activeAgentLabel && showProviderIcons && (
                     <span className="shrink-0 h-5 w-5 rounded-md bg-muted/30 ring-1 ring-border/60 flex items-center justify-center overflow-hidden">
                       <AgentFavicon
                         agentId={activeThreadAgentId}

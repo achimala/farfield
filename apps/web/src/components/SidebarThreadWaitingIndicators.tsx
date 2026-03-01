@@ -10,11 +10,11 @@ export function SidebarThreadWaitingIndicators({
   }
 
   return (
-    <span className="shrink-0 flex items-center gap-1">
+    <span className="shrink-0 flex items-center gap-0.5">
       {waitingOnApproval && (
         <span
           title="Waiting for approval"
-          className="rounded-full border border-amber-500/40 bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-amber-700 dark:text-amber-300"
+          className="rounded-full border border-amber-500/40 bg-amber-500/15 px-1 py-px text-[8px] font-medium uppercase tracking-wide text-amber-700 dark:text-amber-300"
         >
           Approval
         </span>
@@ -22,7 +22,7 @@ export function SidebarThreadWaitingIndicators({
       {waitingOnUserInput && (
         <span
           title="Waiting for user input"
-          className="rounded-full border border-sky-500/40 bg-sky-500/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-sky-700 dark:text-sky-300"
+          className="rounded-full border border-sky-500/40 bg-sky-500/15 px-1 py-px text-[8px] font-medium uppercase tracking-wide text-sky-700 dark:text-sky-300"
         >
           Input
         </span>
