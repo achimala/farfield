@@ -1296,35 +1296,77 @@ export function App(): React.JSX.Element {
         })
       : Promise.resolve(cachedAgents.value);
 
-    const [nh, nt, nag, ntr, nhist] = await Promise.all([
-      getHealth(),
-      listSidebarThreads({
-        limit: 80,
-        archived: false,
-        all: false,
-        maxPages: 1,
-      }),
-      agentsPromise,
-      shouldLoadDebugData
-        ? getTraceStatus()
-        : Promise.resolve<TraceStatus | null>(null),
-      shouldLoadDebugData
-        ? listDebugHistory(120)
-        : Promise.resolve<HistoryResponse | null>(null),
-    ]);
+    const healthPromise = getHealth();
+    const sidebarPromise = listSidebarThreads({
+      limit: 80,
+      archived: false,
+      all: false,
+      maxPages: 1,
+    });
+    const tracePromise = shouldLoadDebugData
+      ? getTraceStatus()
+      : Promise.resolve<TraceStatus | null>(null);
+    const historyPromise = shouldLoadDebugData
+      ? listDebugHistory(120)
+      : Promise.resolve<HistoryResponse | null>(null);
+
+    const nt = await sidebarPromise;
     const incomingThreads = sortThreadsByRecency(nt.rows);
     const nextThreadProviders = new Map(threadProviderByIdRef.current);
     for (const thread of incomingThreads) {
       nextThreadProviders.set(thread.id, thread.provider);
     }
     threadProviderByIdRef.current = nextThreadProviders;
+    setThreadListErrors((prev) =>
+      hasSameThreadListErrors(prev, nt.errors) ? prev : nt.errors,
+    );
+    setThreads((previousThreads) => {
+      const nextThreads = mergeIncomingThreads(
+        incomingThreads,
+        previousThreads,
+      );
+      const nextThreadsSignature = buildThreadsSignature(nextThreads);
+      if (signaturesMatch(threadsSignatureRef.current, nextThreadsSignature)) {
+        return previousThreads;
+      }
+      threadsSignatureRef.current = nextThreadsSignature;
+      return nextThreads;
+    });
 
-    const enabledAgents = nag.agents
+    const [healthResult, agentsResult, traceResult, historyResult] =
+      await Promise.allSettled([
+        healthPromise,
+        agentsPromise,
+        tracePromise,
+        historyPromise,
+      ]);
+
+    if (healthResult.status === "rejected") {
+      console.error("Failed to load health state", healthResult.reason);
+    }
+    if (agentsResult.status === "rejected") {
+      console.error("Failed to load agent descriptors", agentsResult.reason);
+    }
+    if (traceResult.status === "rejected") {
+      console.error("Failed to load trace status", traceResult.reason);
+    }
+    if (historyResult.status === "rejected") {
+      console.error("Failed to load debug history", historyResult.reason);
+    }
+
+    const nh = healthResult.status === "fulfilled" ? healthResult.value : null;
+    const nag = agentsResult.status === "fulfilled" ? agentsResult.value : null;
+    const ntr = traceResult.status === "fulfilled" ? traceResult.value : null;
+    const nhist = historyResult.status === "fulfilled" ? historyResult.value : null;
+
+    const nextAgents = nag?.agents ?? agentDescriptors;
+    const nextDefaultAgentId = nag?.defaultAgentId ?? selectedAgentId;
+    const enabledAgents = nextAgents
       .filter((agent) => agent.enabled)
       .map((agent) => agent.id);
-    const nextDefaultAgent = enabledAgents.includes(nag.defaultAgentId)
-      ? nag.defaultAgentId
-      : (enabledAgents[0] ?? nag.defaultAgentId);
+    const nextDefaultAgent = enabledAgents.includes(nextDefaultAgentId)
+      ? nextDefaultAgentId
+      : (enabledAgents[0] ?? nextDefaultAgentId);
     const threadForActiveProvider =
       incomingThreads.find(
         (thread) => thread.id === selectedThreadIdRef.current,
@@ -1332,7 +1374,7 @@ export function App(): React.JSX.Element {
     const activeProviderId =
       threadForActiveProvider?.provider ?? selectedAgentId;
     const activeDescriptor =
-      nag.agents.find((agent) => agent.id === activeProviderId) ?? null;
+      nextAgents.find((agent) => agent.id === activeProviderId) ?? null;
 
     const canLoadModes = canUseFeature(activeDescriptor, "listCollaborationModes");
     const canLoadModels = canUseFeature(activeDescriptor, "listModels");
@@ -1344,26 +1386,14 @@ export function App(): React.JSX.Element {
 
     let nextModesData: ModesResponse["data"] = [];
     let nextModelsData: ModelsResponse["data"] = [];
+    const hasCachedCatalog =
+      (canLoadModes || canLoadModels) && !shouldLoadCatalog && cachedCatalog;
+    const shouldFetchCatalog =
+      (canLoadModes || canLoadModels) && !hasCachedCatalog;
 
-    if ((canLoadModes || canLoadModels) && !shouldLoadCatalog && cachedCatalog) {
+    if (hasCachedCatalog) {
       nextModesData = canLoadModes ? cachedCatalog.modes : [];
       nextModelsData = canLoadModels ? cachedCatalog.models : [];
-    } else if (canLoadModes || canLoadModels) {
-      const [nextModesResult, nextModelsResult] = await Promise.all([
-        canLoadModes
-          ? listCollaborationModes(activeProviderId)
-          : Promise.resolve({ data: [] as ModesResponse["data"] }),
-        canLoadModels
-          ? listModels(activeProviderId)
-          : Promise.resolve({ data: [] as ModelsResponse["data"] }),
-      ]);
-      nextModesData = nextModesResult.data;
-      nextModelsData = nextModelsResult.data;
-      providerCatalogCacheRef.current.set(activeProviderId, {
-        modes: nextModesData,
-        models: nextModelsData,
-        fetchedAt: Date.now(),
-      });
     }
 
     let preferredAgentId: AgentId | null = null;
@@ -1374,7 +1404,7 @@ export function App(): React.JSX.Element {
       [model.id, model.displayName ?? ""].join("|"),
     );
 
-    startTransition(() => {
+    if (nh) {
       setHealth((prev) => {
         if (
           prev &&
@@ -1390,122 +1420,164 @@ export function App(): React.JSX.Element {
         }
         return nh;
       });
-      setThreadListErrors((prev) =>
-        hasSameThreadListErrors(prev, nt.errors) ? prev : nt.errors,
-      );
-      setThreads((previousThreads) => {
-        const nextThreads = mergeIncomingThreads(
-          incomingThreads,
-          previousThreads,
-        );
-        const nextThreadsSignature = buildThreadsSignature(nextThreads);
+    }
+    if (
+      hasCachedCatalog &&
+      !signaturesMatch(modesSignatureRef.current, nextModesSignature)
+    ) {
+      modesSignatureRef.current = nextModesSignature;
+      setModes(nextModesData);
+    }
+    if (
+      hasCachedCatalog &&
+      !signaturesMatch(modelsSignatureRef.current, nextModelsSignature)
+    ) {
+      modelsSignatureRef.current = nextModelsSignature;
+      setModels(nextModelsData);
+    }
+    if (ntr) {
+      setTraceStatus((prev) => {
         if (
-          signaturesMatch(threadsSignatureRef.current, nextThreadsSignature)
+          prev &&
+          prev.active?.id === ntr.active?.id &&
+          prev.active?.eventCount === ntr.active?.eventCount &&
+          prev.recent.length === ntr.recent.length &&
+          prev.recent[0]?.id === ntr.recent[0]?.id &&
+          prev.recent[0]?.eventCount === ntr.recent[0]?.eventCount
         ) {
-          return previousThreads;
+          return prev;
         }
-        threadsSignatureRef.current = nextThreadsSignature;
-        return nextThreads;
+        return ntr;
       });
-      if (!signaturesMatch(modesSignatureRef.current, nextModesSignature)) {
-        modesSignatureRef.current = nextModesSignature;
+    }
+    if (nhist) {
+      setHistory((prev) => {
+        if (
+          prev.length === nhist.history.length &&
+          prev[prev.length - 1]?.id ===
+            nhist.history[nhist.history.length - 1]?.id
+        ) {
+          return prev;
+        }
+        return nhist.history;
+      });
+    }
+    if (nag) {
+      setAgentDescriptors((prev) => {
+        if (
+          prev.length === nag.agents.length &&
+          prev.every((agent, index) => {
+            const nextAgent = nag.agents[index];
+            if (!nextAgent) {
+              return false;
+            }
+            return (
+              agent.id === nextAgent.id &&
+              agent.enabled === nextAgent.enabled &&
+              agent.connected === nextAgent.connected &&
+              agent.capabilities.canListModels ===
+                nextAgent.capabilities.canListModels &&
+              agent.capabilities.canListCollaborationModes ===
+                nextAgent.capabilities.canListCollaborationModes &&
+              agent.capabilities.canSetCollaborationMode ===
+                nextAgent.capabilities.canSetCollaborationMode &&
+              agent.capabilities.canSubmitUserInput ===
+                nextAgent.capabilities.canSubmitUserInput &&
+              agent.capabilities.canReadLiveState ===
+                nextAgent.capabilities.canReadLiveState &&
+              agent.capabilities.canReadStreamEvents ===
+                nextAgent.capabilities.canReadStreamEvents &&
+              agent.capabilities.canListProjectDirectories ===
+                nextAgent.capabilities.canListProjectDirectories
+            );
+          })
+        ) {
+          return prev;
+        }
+        return nag.agents;
+      });
+      preferredAgentId = nextDefaultAgent;
+      setSelectedAgentId((cur) => {
+        if (!hasHydratedAgentSelectionRef.current) {
+          hasHydratedAgentSelectionRef.current = true;
+          return nextDefaultAgent;
+        }
+        return enabledAgents.includes(cur) ? cur : nextDefaultAgent;
+      });
+    }
+    setSelectedThreadId((cur) => {
+      if (cur) return cur;
+      if (preferredAgentId) {
+        const preferredThread = incomingThreads.find(
+          (thread) => thread.provider === preferredAgentId,
+        );
+        if (preferredThread) {
+          return preferredThread.id;
+        }
+      }
+      return incomingThreads[0]?.id ?? null;
+    });
+    setSelectedModeKey((cur) => {
+      if (cur || nextModesData.length === 0) return cur;
+      const nonPlanDefault = nextModesData.find(
+        (mode) => !isPlanModeOption(mode),
+      );
+      return nonPlanDefault?.mode ?? nextModesData[0]?.mode ?? "";
+    });
+
+    if (!shouldFetchCatalog) {
+      return;
+    }
+
+    try {
+      const [nextModesResult, nextModelsResult] = await Promise.all([
+        canLoadModes
+          ? listCollaborationModes(activeProviderId)
+          : Promise.resolve({ data: [] as ModesResponse["data"] }),
+        canLoadModels
+          ? listModels(activeProviderId)
+          : Promise.resolve({ data: [] as ModelsResponse["data"] }),
+      ]);
+      nextModesData = nextModesResult.data;
+      nextModelsData = nextModelsResult.data;
+      providerCatalogCacheRef.current.set(activeProviderId, {
+        modes: nextModesData,
+        models: nextModelsData,
+        fetchedAt: Date.now(),
+      });
+    } catch (error) {
+      console.error("Failed to load provider model catalog", error);
+      setError(toErrorMessage(error));
+      return;
+    }
+
+    const fetchedModesSignature = nextModesData.map((mode) =>
+      [mode.mode, mode.name, mode.reasoningEffort ?? ""].join("|"),
+    );
+    const fetchedModelsSignature = nextModelsData.map((model) =>
+      [model.id, model.displayName ?? ""].join("|"),
+    );
+
+    startTransition(() => {
+      if (!signaturesMatch(modesSignatureRef.current, fetchedModesSignature)) {
+        modesSignatureRef.current = fetchedModesSignature;
         setModes(nextModesData);
       }
-      if (!signaturesMatch(modelsSignatureRef.current, nextModelsSignature)) {
-        modelsSignatureRef.current = nextModelsSignature;
+      if (!signaturesMatch(modelsSignatureRef.current, fetchedModelsSignature)) {
+        modelsSignatureRef.current = fetchedModelsSignature;
         setModels(nextModelsData);
       }
-      if (ntr) {
-        setTraceStatus((prev) => {
-          if (
-            prev &&
-            prev.active?.id === ntr.active?.id &&
-            prev.active?.eventCount === ntr.active?.eventCount &&
-            prev.recent.length === ntr.recent.length &&
-            prev.recent[0]?.id === ntr.recent[0]?.id &&
-            prev.recent[0]?.eventCount === ntr.recent[0]?.eventCount
-          ) {
-            return prev;
-          }
-          return ntr;
-        });
-      }
-      if (nhist) {
-        setHistory((prev) => {
-          if (
-            prev.length === nhist.history.length &&
-            prev[prev.length - 1]?.id ===
-              nhist.history[nhist.history.length - 1]?.id
-          ) {
-            return prev;
-          }
-          return nhist.history;
-        });
-      }
-      if (nag) {
-        setAgentDescriptors((prev) => {
-          if (
-            prev.length === nag.agents.length &&
-            prev.every((agent, index) => {
-              const nextAgent = nag.agents[index];
-              if (!nextAgent) {
-                return false;
-              }
-              return (
-                agent.id === nextAgent.id &&
-                agent.enabled === nextAgent.enabled &&
-                agent.connected === nextAgent.connected &&
-                agent.capabilities.canListModels ===
-                  nextAgent.capabilities.canListModels &&
-                agent.capabilities.canListCollaborationModes ===
-                  nextAgent.capabilities.canListCollaborationModes &&
-                agent.capabilities.canSetCollaborationMode ===
-                  nextAgent.capabilities.canSetCollaborationMode &&
-                agent.capabilities.canSubmitUserInput ===
-                  nextAgent.capabilities.canSubmitUserInput &&
-                agent.capabilities.canReadLiveState ===
-                  nextAgent.capabilities.canReadLiveState &&
-                agent.capabilities.canReadStreamEvents ===
-                  nextAgent.capabilities.canReadStreamEvents &&
-                agent.capabilities.canListProjectDirectories ===
-                  nextAgent.capabilities.canListProjectDirectories
-              );
-            })
-          ) {
-            return prev;
-          }
-          return nag.agents;
-        });
-        preferredAgentId = nextDefaultAgent;
-        setSelectedAgentId((cur) => {
-          if (!hasHydratedAgentSelectionRef.current) {
-            hasHydratedAgentSelectionRef.current = true;
-            return nextDefaultAgent;
-          }
-          return enabledAgents.includes(cur) ? cur : nextDefaultAgent;
-        });
-      }
-      setSelectedThreadId((cur) => {
-        if (cur) return cur;
-        if (preferredAgentId) {
-          const preferredThread = incomingThreads.find(
-            (thread) => thread.provider === preferredAgentId,
-          );
-          if (preferredThread) {
-            return preferredThread.id;
-          }
-        }
-        return incomingThreads[0]?.id ?? null;
-      });
       setSelectedModeKey((cur) => {
-        if (cur) return cur;
+        if (cur || nextModesData.length === 0) {
+          return cur;
+        }
         const nonPlanDefault = nextModesData.find(
           (mode) => !isPlanModeOption(mode),
         );
         return nonPlanDefault?.mode ?? nextModesData[0]?.mode ?? "";
       });
     });
-  }, [selectedAgentId]);
+  }, [agentDescriptors, selectedAgentId]);
 
   const loadSelectedThread = useCallback(
     async (
@@ -1773,6 +1845,10 @@ export function App(): React.JSX.Element {
       }
       void loadCore().catch((e) => setError(toErrorMessage(e)));
     };
+    const resumeCoreRefresh = () => {
+      startCoreRefresh();
+      refreshCoreData();
+    };
 
     const startCoreRefresh = () => {
       if (coreRefreshIntervalRef.current !== null) {
@@ -1792,19 +1868,19 @@ export function App(): React.JSX.Element {
       coreRefreshIntervalRef.current = null;
     };
 
-    startCoreRefresh();
+    resumeCoreRefresh();
     const onVisibilityChange = () => {
       if (document.visibilityState === "hidden") {
         stopCoreRefresh();
         return;
       }
-      startCoreRefresh();
+      resumeCoreRefresh();
     };
     const onPageHide = () => {
       stopCoreRefresh();
     };
     const onPageShow = () => {
-      startCoreRefresh();
+      resumeCoreRefresh();
     };
 
     document.addEventListener("visibilitychange", onVisibilityChange);
@@ -1847,6 +1923,10 @@ export function App(): React.JSX.Element {
         setError(toErrorMessage(e)),
       );
     };
+    const resumeSelectedThreadRefresh = () => {
+      startSelectedThreadRefresh();
+      refreshSelectedThreadData();
+    };
 
     const startSelectedThreadRefresh = () => {
       if (selectedThreadRefreshIntervalRef.current !== null) {
@@ -1858,19 +1938,19 @@ export function App(): React.JSX.Element {
       );
     };
 
-    startSelectedThreadRefresh();
+    resumeSelectedThreadRefresh();
     const onVisibilityChange = () => {
       if (document.visibilityState === "hidden") {
         stopSelectedThreadRefresh();
         return;
       }
-      startSelectedThreadRefresh();
+      resumeSelectedThreadRefresh();
     };
     const onPageHide = () => {
       stopSelectedThreadRefresh();
     };
     const onPageShow = () => {
-      startSelectedThreadRefresh();
+      resumeSelectedThreadRefresh();
     };
 
     document.addEventListener("visibilitychange", onVisibilityChange);

@@ -36,6 +36,7 @@ const PORT = Number(process.env["PORT"] ?? 4311);
 const HISTORY_LIMIT = 2_000;
 const USER_AGENT = "farfield/0.2.0";
 const IPC_RECONNECT_DELAY_MS = 1_000;
+const SIDEBAR_PREVIEW_MAX_CHARS = 180;
 
 const TRACE_DIR = path.resolve(process.cwd(), "traces");
 const DEFAULT_WORKSPACE = path.resolve(process.cwd());
@@ -177,6 +178,15 @@ function toErrorMessage(error: unknown): string {
     return error;
   }
   return String(error);
+}
+
+function compactSidebarPreview(preview: string): string {
+  const compact = preview.replace(/\s+/g, " ").trim();
+  if (compact.length <= SIDEBAR_PREVIEW_MAX_CHARS) {
+    return compact;
+  }
+  const sliceLength = Math.max(0, SIDEBAR_PREVIEW_MAX_CHARS - 3);
+  return `${compact.slice(0, sliceLength).trimEnd()}...`;
 }
 
 function ensureTraceDirectory(): void {
@@ -664,7 +674,10 @@ const server = http.createServer(async (req, res) => {
 
             for (const thread of result.data) {
               threadIndex.register(thread.id, thread.provider);
-              rows.push(thread);
+              rows.push({
+                ...thread,
+                preview: compactSidebarPreview(thread.preview),
+              });
             }
           } catch (error) {
             const message = toErrorMessage(error);
