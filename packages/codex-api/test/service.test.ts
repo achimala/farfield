@@ -123,8 +123,9 @@ describe("CodexMonitorService", () => {
     );
   });
 
-  it("submits user input with validated payload", async () => {
-    const service = new CodexMonitorService({ sendRequestAndWait: vi.fn().mockResolvedValue({}) } as never);
+  it("submits tool user input with validated payload", async () => {
+    const ipcClient = { sendRequestAndWait: vi.fn().mockResolvedValue({}) };
+    const service = new CodexMonitorService(ipcClient as never);
 
     await service.submitUserInput({
       threadId: "thread-1",
@@ -139,6 +140,77 @@ describe("CodexMonitorService", () => {
       }
     });
 
-    expect(true).toBe(true);
+    expect(ipcClient.sendRequestAndWait).toHaveBeenCalledWith(
+      "thread-follower-submit-user-input",
+      {
+        conversationId: "thread-1",
+        requestId: 7,
+        response: {
+          answers: {
+            q1: {
+              answers: ["Option A"]
+            }
+          }
+        }
+      },
+      {
+        targetClientId: "client-1",
+        version: 1
+      }
+    );
+  });
+
+  it("submits command approval decisions to the command approval IPC method", async () => {
+    const ipcClient = { sendRequestAndWait: vi.fn().mockResolvedValue({}) };
+    const service = new CodexMonitorService(ipcClient as never);
+
+    await service.submitCommandApprovalDecision({
+      threadId: "thread-1",
+      ownerClientId: "client-1",
+      requestId: 9,
+      response: {
+        decision: "acceptForSession"
+      }
+    });
+
+    expect(ipcClient.sendRequestAndWait).toHaveBeenCalledWith(
+      "thread-follower-command-approval-decision",
+      {
+        conversationId: "thread-1",
+        requestId: 9,
+        decision: "acceptForSession"
+      },
+      {
+        targetClientId: "client-1",
+        version: 1
+      }
+    );
+  });
+
+  it("submits file approval decisions to the file approval IPC method", async () => {
+    const ipcClient = { sendRequestAndWait: vi.fn().mockResolvedValue({}) };
+    const service = new CodexMonitorService(ipcClient as never);
+
+    await service.submitFileApprovalDecision({
+      threadId: "thread-1",
+      ownerClientId: "client-1",
+      requestId: 11,
+      response: {
+        decision: "decline"
+      }
+    });
+
+    expect(ipcClient.sendRequestAndWait).toHaveBeenCalledWith(
+      "thread-follower-file-approval-decision",
+      {
+        conversationId: "thread-1",
+        requestId: 11,
+        decision: "decline"
+      },
+      {
+        targetClientId: "client-1",
+        version: 1
+      }
+    );
   });
 });

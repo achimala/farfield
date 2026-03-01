@@ -258,6 +258,14 @@ export const WebSearchItemSchema = z
   })
   .passthrough();
 
+export const RemoteTaskCreatedItemSchema = z
+  .object({
+    type: z.literal("remoteTaskCreated"),
+    id: NonEmptyStringSchema,
+    taskId: NonEmptyStringSchema
+  })
+  .passthrough();
+
 export const ModelChangedItemSchema = z
   .object({
     type: z.literal("modelChanged"),
@@ -387,6 +395,7 @@ export const TurnItemSchema = z.discriminatedUnion("type", [
   ImageViewItemSchema,
   EnteredReviewModeItemSchema,
   ExitedReviewModeItemSchema,
+  RemoteTaskCreatedItemSchema,
   ModelChangedItemSchema,
   ForkedFromConversationItemSchema
 ]);
@@ -650,32 +659,86 @@ const ReviewDecisionSchema = z.union([
     .strict()
 ]);
 
-const CommandExecutionRequestApprovalResponseSchema = z
+export const ToolRequestUserInputResponsePayloadSchema =
+  ToolRequestUserInputResponseSchema.passthrough();
+
+export const CommandExecutionRequestApprovalResponseSchema = z
   .object({
     decision: CommandExecutionApprovalDecisionSchema
   })
   .strict();
 
-const FileChangeRequestApprovalResponseSchema = z
+export const FileChangeRequestApprovalResponseSchema = z
   .object({
     decision: FileChangeApprovalDecisionSchema
   })
   .strict();
 
-const LegacyReviewApprovalResponseSchema = z
+export const LegacyReviewApprovalResponseSchema = z
   .object({
     decision: ReviewDecisionSchema
   })
   .strict();
 
 export const UserInputResponsePayloadSchema = z.union([
-  ToolRequestUserInputResponseSchema.passthrough(),
+  ToolRequestUserInputResponsePayloadSchema,
   CommandExecutionRequestApprovalResponseSchema,
   FileChangeRequestApprovalResponseSchema,
   LegacyReviewApprovalResponseSchema
 ]);
 
+export type ToolRequestUserInputResponsePayload = z.infer<
+  typeof ToolRequestUserInputResponsePayloadSchema
+>;
+export type CommandExecutionRequestApprovalResponse = z.infer<
+  typeof CommandExecutionRequestApprovalResponseSchema
+>;
+export type FileChangeRequestApprovalResponse = z.infer<
+  typeof FileChangeRequestApprovalResponseSchema
+>;
+export type LegacyReviewApprovalResponse = z.infer<
+  typeof LegacyReviewApprovalResponseSchema
+>;
 export type UserInputResponsePayload = z.infer<typeof UserInputResponsePayloadSchema>;
+
+export function parseToolRequestUserInputResponsePayload(
+  value: unknown
+): ToolRequestUserInputResponsePayload {
+  const result = ToolRequestUserInputResponsePayloadSchema.safeParse(value);
+  if (!result.success) {
+    throw ProtocolValidationError.fromZod(
+      "ToolRequestUserInputResponsePayload",
+      result.error
+    );
+  }
+  return result.data;
+}
+
+export function parseCommandExecutionRequestApprovalResponse(
+  value: unknown
+): CommandExecutionRequestApprovalResponse {
+  const result = CommandExecutionRequestApprovalResponseSchema.safeParse(value);
+  if (!result.success) {
+    throw ProtocolValidationError.fromZod(
+      "CommandExecutionRequestApprovalResponse",
+      result.error
+    );
+  }
+  return result.data;
+}
+
+export function parseFileChangeRequestApprovalResponse(
+  value: unknown
+): FileChangeRequestApprovalResponse {
+  const result = FileChangeRequestApprovalResponseSchema.safeParse(value);
+  if (!result.success) {
+    throw ProtocolValidationError.fromZod(
+      "FileChangeRequestApprovalResponse",
+      result.error
+    );
+  }
+  return result.data;
+}
 
 export function parseUserInputResponsePayload(value: unknown): UserInputResponsePayload {
   const result = UserInputResponsePayloadSchema.safeParse(value);

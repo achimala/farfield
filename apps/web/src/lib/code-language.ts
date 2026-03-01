@@ -1,13 +1,15 @@
 const EXTENSION_LANGUAGE_MAP: Readonly<Record<string, string>> = {
   c: "c",
   cc: "cpp",
+  cjs: "javascript",
   cpp: "cpp",
   cs: "csharp",
   css: "css",
   go: "go",
   h: "c",
   hpp: "cpp",
-  html: "html",
+  htm: "markup",
+  html: "markup",
   java: "java",
   js: "javascript",
   json: "json",
@@ -18,34 +20,37 @@ const EXTENSION_LANGUAGE_MAP: Readonly<Record<string, string>> = {
   py: "python",
   rb: "ruby",
   rs: "rust",
+  scss: "scss",
   sh: "bash",
   sql: "sql",
-  svg: "xml",
+  svg: "markup",
+  swift: "swift",
   toml: "toml",
   ts: "typescript",
   tsx: "tsx",
   txt: "text",
-  xml: "xml",
+  xml: "markup",
   yaml: "yaml",
   yml: "yaml",
-  zsh: "bash"
+  zsh: "bash",
 };
 
 export function languageFromPath(path: string): string {
-  const fileName = path.split("/").pop()?.toLowerCase() ?? "";
-
-  if (fileName === "dockerfile") {
-    return "docker";
-  }
-  if (fileName === "makefile") {
-    return "makefile";
-  }
-
-  const lastDotIndex = fileName.lastIndexOf(".");
-  if (lastDotIndex === -1 || lastDotIndex === fileName.length - 1) {
+  const trimmedPath = path.trim();
+  if (trimmedPath.length === 0) {
     return "text";
   }
 
-  const extension = fileName.slice(lastDotIndex + 1);
+  const fileName = trimmedPath.split("/").pop()?.toLowerCase() ?? "";
+  if (fileName === "dockerfile") {
+    return "docker";
+  }
+
+  const extensionIndex = fileName.lastIndexOf(".");
+  if (extensionIndex < 0 || extensionIndex === fileName.length - 1) {
+    return "text";
+  }
+
+  const extension = fileName.slice(extensionIndex + 1);
   return EXTENSION_LANGUAGE_MAP[extension] ?? "text";
 }

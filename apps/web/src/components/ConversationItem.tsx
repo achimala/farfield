@@ -26,6 +26,7 @@ const TOOL_BLOCK_TYPES: readonly UnifiedItem["type"][] = [
   "webSearch",
   "mcpToolCall",
   "collabAgentToolCall",
+  "remoteTaskCreated",
   "forkedFromConversation",
 ];
 
@@ -313,6 +314,19 @@ const ITEM_RENDERERS = {
     </div>
   ),
 
+  remoteTaskCreated: ({ item, toolSpacing }) => (
+    <div
+      className={`${toolSpacing} rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground`}
+    >
+      <div className="text-[10px] text-muted-foreground font-mono mb-1 uppercase tracking-wider">
+        Remote task
+      </div>
+      <div className="text-xs text-foreground/90 whitespace-pre-wrap break-all">
+        Created task: {item.taskId}
+      </div>
+    </div>
+  ),
+
   modelChanged: (_args) => (
     <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
       Model changed
@@ -388,6 +402,8 @@ function renderItem(
       return ITEM_RENDERERS.enteredReviewMode({ item, ...context });
     case "exitedReviewMode":
       return ITEM_RENDERERS.exitedReviewMode({ item, ...context });
+    case "remoteTaskCreated":
+      return ITEM_RENDERERS.remoteTaskCreated({ item, ...context });
     case "modelChanged":
       return ITEM_RENDERERS.modelChanged({ item, ...context });
     case "forkedFromConversation":

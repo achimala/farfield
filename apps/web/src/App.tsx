@@ -1256,7 +1256,7 @@ export function App(): React.JSX.Element {
       return readConversationState;
     }
 
-    return readConversationState;
+    return liveConversationState;
   }, [liveState?.conversationState, readThreadState?.thread]);
 
   const pendingRequests = useMemo(() => {

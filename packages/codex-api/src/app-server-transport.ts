@@ -8,8 +8,11 @@ import {
 } from "./errors.js";
 import { JsonRpcRequestSchema, parseJsonRpcIncomingMessage } from "./json-rpc.js";
 
+export type AppServerRequestId = string | number;
+
 export interface AppServerTransport {
   request(method: AppServerClientRequestMethod, params: unknown, timeoutMs?: number): Promise<unknown>;
+  respond(requestId: AppServerRequestId, result: unknown): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -235,6 +238,33 @@ export class ChildProcessAppServerTransport implements AppServerTransport {
       this.initialized = true;
     }
     return result;
+  }
+
+  public async respond(requestId: AppServerRequestId, result: unknown): Promise<void> {
+    this.ensureStarted();
+    await this.ensureInitialized();
+
+    const processHandle = this.process;
+    if (!processHandle) {
+      throw new AppServerTransportError("app-server failed to start");
+    }
+
+    const encoded =
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: requestId,
+        result
+      }) + "\n";
+
+    await new Promise<void>((resolve, reject) => {
+      processHandle.stdin.write(encoded, (error) => {
+        if (!error) {
+          resolve();
+          return;
+        }
+        reject(new AppServerTransportError(`failed to write app-server response: ${error.message}`));
+      });
+    });
   }
 
   public async close(): Promise<void> {

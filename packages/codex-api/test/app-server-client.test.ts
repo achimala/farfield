@@ -22,6 +22,7 @@ describe("AppServerClient.startThread", () => {
   it("sets ephemeral to false when it is not provided", async () => {
     const transport: AppServerTransport = {
       request: vi.fn().mockResolvedValue(START_THREAD_RESPONSE),
+      respond: vi.fn().mockResolvedValue(undefined),
       close: vi.fn().mockResolvedValue(undefined),
     };
 
@@ -39,6 +40,7 @@ describe("AppServerClient.startThread", () => {
   it("keeps explicit ephemeral=true", async () => {
     const transport: AppServerTransport = {
       request: vi.fn().mockResolvedValue(START_THREAD_RESPONSE),
+      respond: vi.fn().mockResolvedValue(undefined),
       close: vi.fn().mockResolvedValue(undefined),
     };
 
@@ -59,6 +61,7 @@ describe("AppServerClient.sendUserMessage", () => {
   it("sends the expected request payload", async () => {
     const transport: AppServerTransport = {
       request: vi.fn().mockResolvedValue({}),
+      respond: vi.fn().mockResolvedValue(undefined),
       close: vi.fn().mockResolvedValue(undefined)
     };
 
@@ -80,6 +83,7 @@ describe("AppServerClient.sendUserMessage", () => {
   it("accepts success response from turn/start", async () => {
     const transport: AppServerTransport = {
       request: vi.fn().mockResolvedValue({ ok: true }),
+      respond: vi.fn().mockResolvedValue(undefined),
       close: vi.fn().mockResolvedValue(undefined)
     };
 
@@ -98,6 +102,7 @@ describe("AppServerClient.resumeThread", () => {
           requests: []
         }
       }),
+      respond: vi.fn().mockResolvedValue(undefined),
       close: vi.fn().mockResolvedValue(undefined)
     };
 
@@ -115,6 +120,7 @@ describe("AppServerClient.turn controls", () => {
   it("starts a turn with text input", async () => {
     const transport: AppServerTransport = {
       request: vi.fn().mockResolvedValue({}),
+      respond: vi.fn().mockResolvedValue(undefined),
       close: vi.fn().mockResolvedValue(undefined)
     };
 
@@ -136,6 +142,7 @@ describe("AppServerClient.turn controls", () => {
   it("steers an active turn", async () => {
     const transport: AppServerTransport = {
       request: vi.fn().mockResolvedValue({}),
+      respond: vi.fn().mockResolvedValue(undefined),
       close: vi.fn().mockResolvedValue(undefined)
     };
 
@@ -156,6 +163,7 @@ describe("AppServerClient.turn controls", () => {
   it("interrupts a specific turn", async () => {
     const transport: AppServerTransport = {
       request: vi.fn().mockResolvedValue({}),
+      respond: vi.fn().mockResolvedValue(undefined),
       close: vi.fn().mockResolvedValue(undefined)
     };
 
@@ -165,6 +173,25 @@ describe("AppServerClient.turn controls", () => {
     expect(transport.request).toHaveBeenCalledWith("turn/interrupt", {
       threadId: "thread-1",
       turnId: "turn-2"
+    });
+  });
+});
+
+describe("AppServerClient.submitUserInput", () => {
+  it("responds to server request id with the parsed payload", async () => {
+    const transport: AppServerTransport = {
+      request: vi.fn().mockResolvedValue({}),
+      respond: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const client = new AppServerClient(transport);
+    await client.submitUserInput(42, {
+      decision: "accept",
+    });
+
+    expect(transport.respond).toHaveBeenCalledWith(42, {
+      decision: "accept",
     });
   });
 });

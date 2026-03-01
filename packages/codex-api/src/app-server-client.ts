@@ -13,7 +13,11 @@ import {
   AppServerStartThreadRequestSchema,
   AppServerStartThreadResponseSchema,
   TurnStartParamsSchema,
-  type TurnStartParams
+  type TurnStartParams,
+  UserInputRequestIdSchema,
+  parseUserInputResponsePayload,
+  type UserInputRequestId,
+  type UserInputResponsePayload
 } from "@farfield/protocol";
 import { ProtocolValidationError } from "@farfield/protocol";
 import { z } from "zod";
@@ -256,6 +260,15 @@ export class AppServerClient {
       turnId
     });
     await this.transport.request("turn/interrupt", request);
+  }
+
+  public async submitUserInput(
+    requestId: UserInputRequestId,
+    response: UserInputResponsePayload
+  ): Promise<void> {
+    const parsedRequestId = UserInputRequestIdSchema.parse(requestId);
+    const payload = parseUserInputResponsePayload(response);
+    await this.transport.respond(parsedRequestId, payload);
   }
 
   public async resumeThread(

@@ -1,9 +1,13 @@
 import {
   type TurnStartParams,
   type CollaborationMode,
-  parseUserInputResponsePayload,
+  parseCommandExecutionRequestApprovalResponse,
+  parseFileChangeRequestApprovalResponse,
+  parseToolRequestUserInputResponsePayload,
+  type CommandExecutionRequestApprovalResponse,
+  type FileChangeRequestApprovalResponse,
+  type ToolRequestUserInputResponsePayload,
   type UserInputRequestId,
-  type UserInputResponsePayload
 } from "@farfield/protocol";
 import type { DesktopIpcClient } from "./ipc-client.js";
 
@@ -29,7 +33,21 @@ export interface SubmitUserInputInput {
   threadId: string;
   ownerClientId: string;
   requestId: UserInputRequestId;
-  response: UserInputResponsePayload;
+  response: ToolRequestUserInputResponsePayload;
+}
+
+export interface SubmitCommandApprovalInput {
+  threadId: string;
+  ownerClientId: string;
+  requestId: UserInputRequestId;
+  response: CommandExecutionRequestApprovalResponse;
+}
+
+export interface SubmitFileApprovalInput {
+  threadId: string;
+  ownerClientId: string;
+  requestId: UserInputRequestId;
+  response: FileChangeRequestApprovalResponse;
 }
 
 export interface InterruptInput {
@@ -108,7 +126,7 @@ export class CodexMonitorService {
   }
 
   public async submitUserInput(input: SubmitUserInputInput): Promise<void> {
-    const payload = parseUserInputResponsePayload(input.response);
+    const payload = parseToolRequestUserInputResponsePayload(input.response);
 
     await this.ipcClient.sendRequestAndWait(
       "thread-follower-submit-user-input",
@@ -116,6 +134,42 @@ export class CodexMonitorService {
         conversationId: input.threadId,
         requestId: input.requestId,
         response: payload
+      },
+      {
+        targetClientId: input.ownerClientId,
+        version: 1
+      }
+    );
+  }
+
+  public async submitCommandApprovalDecision(
+    input: SubmitCommandApprovalInput
+  ): Promise<void> {
+    const payload = parseCommandExecutionRequestApprovalResponse(input.response);
+
+    await this.ipcClient.sendRequestAndWait(
+      "thread-follower-command-approval-decision",
+      {
+        conversationId: input.threadId,
+        requestId: input.requestId,
+        decision: payload.decision
+      },
+      {
+        targetClientId: input.ownerClientId,
+        version: 1
+      }
+    );
+  }
+
+  public async submitFileApprovalDecision(input: SubmitFileApprovalInput): Promise<void> {
+    const payload = parseFileChangeRequestApprovalResponse(input.response);
+
+    await this.ipcClient.sendRequestAndWait(
+      "thread-follower-file-approval-decision",
+      {
+        conversationId: input.threadId,
+        requestId: input.requestId,
+        decision: payload.decision
       },
       {
         targetClientId: input.ownerClientId,
