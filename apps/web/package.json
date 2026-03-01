@@ -34,10 +34,10 @@
     "react-syntax-highlighter": "^16.1.0",
     "remark-gfm": "^4.0.1",
     "tailwind-merge": "^2.5.5",
-    "vite-plugin-pwa": "^1.2.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "vite-plugin-pwa": "^1.2.0",
     "@tailwindcss/vite": "^4.0.0",
     "@testing-library/react": "^16.1.0",
     "@types/react": "^19.2.2",
