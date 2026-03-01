@@ -255,6 +255,31 @@ const ThreadListResponseSchema = z
   })
   .strict();
 
+const SidebarThreadsEnvelopeSchema = z
+  .object({
+    ok: z.literal(true),
+    rows: z.array(UnifiedThreadSummarySchema),
+    errors: z
+      .object({
+        codex: z.union([UnifiedProviderErrorSchema, z.null()]),
+        opencode: z.union([UnifiedProviderErrorSchema, z.null()]),
+      })
+      .strict(),
+  })
+  .strict();
+
+const SidebarThreadsResponseSchema = z
+  .object({
+    rows: z.array(UnifiedThreadSummarySchema),
+    errors: z
+      .object({
+        codex: z.union([UnifiedProviderErrorSchema, z.null()]),
+        opencode: z.union([UnifiedProviderErrorSchema, z.null()]),
+      })
+      .strict(),
+  })
+  .strict();
+
 const ReadThreadResponseSchema = z
   .object({
     thread: UnifiedThreadSchema,
@@ -558,6 +583,33 @@ export async function listThreads(options: {
   return ThreadListResponseSchema.parse({
     data: payload.data,
     cursors: payload.cursors,
+    errors: payload.errors,
+  });
+}
+
+export async function listSidebarThreads(options: {
+  limit: number;
+  archived: boolean;
+  all: boolean;
+  maxPages: number;
+  cursor?: string | null;
+}): Promise<z.infer<typeof SidebarThreadsResponseSchema>> {
+  const params = new URLSearchParams();
+  params.set("limit", String(options.limit));
+  params.set("archived", options.archived ? "1" : "0");
+  params.set("all", options.all ? "1" : "0");
+  params.set("maxPages", String(options.maxPages));
+  if (typeof options.cursor === "string" && options.cursor.length > 0) {
+    params.set("cursor", options.cursor);
+  }
+
+  const payload = await requestEnvelope(
+    `/api/unified/sidebar?${params.toString()}`,
+    SidebarThreadsEnvelopeSchema,
+  );
+
+  return SidebarThreadsResponseSchema.parse({
+    rows: payload.rows,
     errors: payload.errors,
   });
 }

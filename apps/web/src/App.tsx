@@ -39,7 +39,7 @@ import {
   listCollaborationModes,
   listModels,
   listDebugHistory,
-  listThreads,
+  listSidebarThreads,
   markTrace,
   sendMessage,
   setCollaborationMode,
@@ -84,7 +84,7 @@ import { z } from "zod";
 
 /* ── Types ─────────────────────────────────────────────────── */
 type Health = Awaited<ReturnType<typeof getHealth>>;
-type ThreadsResponse = Awaited<ReturnType<typeof listThreads>>;
+type SidebarThreadsResponse = Awaited<ReturnType<typeof listSidebarThreads>>;
 type ModesResponse = Awaited<ReturnType<typeof listCollaborationModes>>;
 type ModelsResponse = Awaited<ReturnType<typeof listModels>>;
 type LiveStateResponse = Awaited<ReturnType<typeof getLiveState>>;
@@ -96,8 +96,8 @@ type HistoryResponse = Awaited<ReturnType<typeof listDebugHistory>>;
 type HistoryDetail = Awaited<ReturnType<typeof getHistoryEntry>>;
 type PendingRequest = ReturnType<typeof getPendingUserInputRequests>[number];
 type PendingRequestId = PendingRequest["id"];
-type Thread = ThreadsResponse["data"][number];
-type ThreadListProviderErrors = ThreadsResponse["errors"];
+type Thread = SidebarThreadsResponse["rows"][number];
+type ThreadListProviderErrors = SidebarThreadsResponse["errors"];
 type AgentDescriptor = AgentsResponse["agents"][number];
 type ConversationTurn = NonNullable<
   ReadThreadResponse["thread"]
@@ -144,7 +144,7 @@ interface ProviderCatalogCacheEntry {
 }
 
 interface AppViewSnapshot {
-  threads: ThreadsResponse["data"];
+  threads: SidebarThreadsResponse["rows"];
   threadListErrors: ThreadListProviderErrors;
   selectedThreadId: string | null;
   liveState: LiveStateResponse | null;
@@ -769,7 +769,7 @@ export function App(): React.JSX.Element {
   /* State */
   const [error, setError] = useState("");
   const [health, setHealth] = useState<Health | null>(null);
-  const [threads, setThreads] = useState<ThreadsResponse["data"]>(
+  const [threads, setThreads] = useState<SidebarThreadsResponse["rows"]>(
     initialSnapshot?.threads ?? [],
   );
   const [threadListErrors, setThreadListErrors] =
@@ -1266,7 +1266,12 @@ export function App(): React.JSX.Element {
 
     const [nh, nt, nag, ntr, nhist] = await Promise.all([
       getHealth(),
-      listThreads({ limit: 80, archived: false, all: false, maxPages: 1 }),
+      listSidebarThreads({
+        limit: 80,
+        archived: false,
+        all: false,
+        maxPages: 1,
+      }),
       agentsPromise,
       shouldLoadDebugData
         ? getTraceStatus()
@@ -1275,7 +1280,7 @@ export function App(): React.JSX.Element {
         ? listDebugHistory(120)
         : Promise.resolve<HistoryResponse | null>(null),
     ]);
-    const incomingThreads = sortThreadsByRecency(nt.data);
+    const incomingThreads = sortThreadsByRecency(nt.rows);
     const nextThreadProviders = new Map(threadProviderByIdRef.current);
     for (const thread of incomingThreads) {
       nextThreadProviders.set(thread.id, thread.provider);

@@ -610,6 +610,90 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "GET" && pathname === "/api/unified/sidebar") {
+      const limit = parseInteger(url.searchParams.get("limit"), 80);
+      const archived = parseBoolean(url.searchParams.get("archived"), false);
+      const all = parseBoolean(url.searchParams.get("all"), false);
+      const maxPages = parseInteger(url.searchParams.get("maxPages"), 20);
+      const cursor = url.searchParams.get("cursor") ?? null;
+
+      const rows: Array<{
+        id: string;
+        provider: UnifiedProviderId;
+        preview: string;
+        title?: string | null | undefined;
+        isGenerating?: boolean | undefined;
+        createdAt: number;
+        updatedAt: number;
+        cwd?: string | undefined;
+        source?: string | undefined;
+      }> = [];
+      const errors: Record<
+        UnifiedProviderId,
+        {
+          code: string;
+          message: string;
+          details?: Record<string, string>;
+        } | null
+      > = {
+        codex: null,
+        opencode: null,
+      };
+
+      await Promise.all(
+        listUnifiedProviders().map(async (provider) => {
+          const adapter = resolveUnifiedAdapter(provider);
+          if (!adapter) {
+            errors[provider] = {
+              code: "providerDisabled",
+              message: `Provider ${provider} is not available`,
+            };
+            return;
+          }
+
+          try {
+            const result = await adapter.execute({
+              kind: "listThreads",
+              provider,
+              limit,
+              archived,
+              all,
+              maxPages,
+              cursor,
+            });
+
+            for (const thread of result.data) {
+              threadIndex.register(thread.id, thread.provider);
+              rows.push(thread);
+            }
+          } catch (error) {
+            const message = toErrorMessage(error);
+            errors[provider] = {
+              code: "listThreadsFailed",
+              message,
+              details: {
+                provider,
+              },
+            };
+            logger.warn(
+              {
+                provider,
+                error: message,
+              },
+              "unified-sidebar-threads-failed",
+            );
+          }
+        }),
+      );
+
+      jsonResponse(res, 200, {
+        ok: true,
+        rows,
+        errors,
+      });
+      return;
+    }
+
     if (
       req.method === "GET" &&
       segments[0] === "api" &&

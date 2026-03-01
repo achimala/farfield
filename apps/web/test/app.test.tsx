@@ -541,6 +541,14 @@ vi.stubGlobal(
       return jsonResponse(threadsFixture);
     }
 
+    if (pathname === "/api/unified/sidebar") {
+      return jsonResponse({
+        ok: true,
+        rows: threadsFixture.data,
+        errors: threadsFixture.errors,
+      });
+    }
+
     if (pathname.startsWith("/api/unified/thread/")) {
       const segments = pathname
         .split("/")
