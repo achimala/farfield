@@ -368,8 +368,23 @@ export class CodexAgentAdapter implements AgentAdapter {
     if (input.includeTurns) {
       await this.ensureThreadLoaded(input.threadId);
     }
-    const result = await this.runAppServerCall(() =>
-      this.appClient.readThread(input.threadId, input.includeTurns),
+    const readThreadWithOption = async (includeTurns: boolean) => {
+      return this.runAppServerCall(() =>
+        this.appClient.readThread(input.threadId, includeTurns),
+      );
+    };
+
+    let result = await readThreadWithOption(input.includeTurns).catch(
+      async (error) => {
+        const typedError = error instanceof Error ? error : null;
+        const shouldRetryWithoutTurns =
+          input.includeTurns &&
+          isThreadNotMaterializedIncludeTurnsAppServerRpcError(typedError);
+        if (!shouldRetryWithoutTurns) {
+          throw error;
+        }
+        return readThreadWithOption(false);
+      },
     );
     const parsedThread = parseThreadConversationState(result.thread);
     const existingSnapshot = this.streamSnapshotByThreadId.get(input.threadId);
@@ -974,6 +989,22 @@ export function isInvalidRequestAppServerRpcError(
     return false;
   }
   return error.code === INVALID_REQUEST_ERROR_CODE;
+}
+
+export function isThreadNotMaterializedIncludeTurnsAppServerRpcError(
+  error: Error | null,
+): boolean {
+  if (!isInvalidRequestAppServerRpcError(error)) {
+    return false;
+  }
+  if (!error) {
+    return false;
+  }
+  const normalized = error.message.trim().toLowerCase();
+  return (
+    normalized.includes("not materialized yet") &&
+    normalized.includes("includeturns")
+  );
 }
 
 function normalizeStderrLine(line: string): string {

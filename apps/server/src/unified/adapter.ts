@@ -245,7 +245,7 @@ function createHandlerTable(
 
       const loaded = await adapter.readThread({
         threadId: created.threadId,
-        includeTurns: true,
+        includeTurns: false,
       });
 
       return {
