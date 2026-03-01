@@ -1,5 +1,5 @@
 {
-  "codexVersion": "codex-cli 0.104.0-alpha.1",
+  "codexVersion": "codex-cli 0.107.0-alpha.5",
   "outputs": {
     "stable": {
       "typescript": "stable/typescript",

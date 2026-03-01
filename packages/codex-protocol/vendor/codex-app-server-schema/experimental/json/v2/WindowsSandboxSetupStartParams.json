@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "WindowsSandboxSetupStartParams",
+  "type": "object",
+  "required": [
+    "mode"
+  ],
+  "properties": {
+    "mode": {
+      "$ref": "#/definitions/WindowsSandboxSetupMode"
+    }
+  },
+  "definitions": {
+    "WindowsSandboxSetupMode": {
+      "type": "string",
+      "enum": [
+        "elevated",
+        "unelevated"
+      ]
+    }
+  }
+}

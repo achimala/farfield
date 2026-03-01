@@ -42,8 +42,15 @@
         "null"
       ]
     },
-    "threadId": {
-      "type": "string"
+    "sandbox": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/SandboxMode"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "model": {
       "description": "Configuration overrides for the resumed thread, if any.",
@@ -58,16 +65,6 @@
         "null"
       ]
     },
-    "sandbox": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/SandboxMode"
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
     "personality": {
       "anyOf": [
         {
@@ -77,16 +74,52 @@
           "type": "null"
         }
       ]
+    },
+    "threadId": {
+      "type": "string"
     }
   },
   "definitions": {
     "AskForApproval": {
-      "type": "string",
-      "enum": [
-        "untrusted",
-        "on-failure",
-        "on-request",
-        "never"
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "untrusted",
+            "on-failure",
+            "on-request",
+            "never"
+          ]
+        },
+        {
+          "type": "object",
+          "required": [
+            "reject"
+          ],
+          "properties": {
+            "reject": {
+              "type": "object",
+              "required": [
+                "mcp_elicitations",
+                "rules",
+                "sandbox_approval"
+              ],
+              "properties": {
+                "mcp_elicitations": {
+                  "type": "boolean"
+                },
+                "rules": {
+                  "type": "boolean"
+                },
+                "sandbox_approval": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "additionalProperties": false,
+          "title": "RejectAskForApproval"
+        }
       ]
     },
     "ContentItem": {
@@ -667,7 +700,7 @@
               "type": "string"
             },
             "output": {
-              "type": "string"
+              "$ref": "#/definitions/FunctionCallOutputPayload"
             },
             "type": {
               "type": "string",

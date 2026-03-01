@@ -8,8 +8,9 @@ import {
 } from "./common.js";
 import { ProtocolValidationError } from "./errors.js";
 import {
+  ExperimentalServerRequestSchema as GeneratedExperimentalServerRequestSchema,
   RequestIdSchema as GeneratedRequestIdSchema,
-  ServerRequestSchema as GeneratedServerRequestSchema,
+  StableServerRequestSchema as GeneratedStableServerRequestSchema,
   ToolRequestUserInputParamsSchema as GeneratedToolRequestUserInputParamsSchema,
   ToolRequestUserInputResponseSchema
 } from "./generated/app-server/index.js";
@@ -391,12 +392,37 @@ export const UserInputRequestSchema = z
   })
   .passthrough();
 
-export const ThreadConversationRequestSchema = z
+const GeneratedServerRequestSchema = z.union([
+  GeneratedStableServerRequestSchema,
+  GeneratedExperimentalServerRequestSchema
+]);
+
+const GeneratedThreadConversationRequestSchema = z
   .object({
     completed: z.boolean().optional()
   })
   .passthrough()
   .and(GeneratedServerRequestSchema);
+
+export const PlanImplementationRequestSchema = z
+  .object({
+    method: z.literal("item/plan/requestImplementation"),
+    id: GeneratedRequestIdSchema,
+    params: z
+      .object({
+        threadId: NonEmptyStringSchema,
+        turnId: NonEmptyStringSchema,
+        planContent: z.string()
+      })
+      .passthrough(),
+    completed: z.boolean().optional()
+  })
+  .passthrough();
+
+export const ThreadConversationRequestSchema = z.union([
+  GeneratedThreadConversationRequestSchema,
+  PlanImplementationRequestSchema
+]);
 
 export const ThreadTurnSchema = z
   .object({
@@ -516,6 +542,7 @@ export type CollaborationMode = z.infer<typeof CollaborationModeSchema>;
 export type TurnStartParams = z.infer<typeof TurnStartParamsSchema>;
 export type UserInputRequestId = z.infer<typeof UserInputRequestIdSchema>;
 export type UserInputRequest = z.infer<typeof UserInputRequestSchema>;
+export type PlanImplementationRequest = z.infer<typeof PlanImplementationRequestSchema>;
 export type ThreadConversationRequest = z.infer<typeof ThreadConversationRequestSchema>;
 export type ThreadConversationState = z.infer<typeof ThreadConversationStateSchema>;
 export type ThreadStreamPatch = z.infer<typeof ThreadStreamPatchSchema>;

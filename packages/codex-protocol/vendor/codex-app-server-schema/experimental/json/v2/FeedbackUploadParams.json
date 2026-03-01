@@ -10,6 +10,15 @@
     "classification": {
       "type": "string"
     },
+    "extraLogFiles": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      }
+    },
     "includeLogs": {
       "type": "boolean"
     },

@@ -11,9 +11,9 @@ import {
   type AppServerServerNotificationMethod,
   type AppServerServerRequestMethod,
   CollaborationModeListResponseSchema as GeneratedCollaborationModeListResponseSchema,
+  ExperimentalServerRequestSchema as GeneratedExperimentalServerRequestSchema,
   ModelListResponseSchema as GeneratedModelListResponseSchema,
-  SendUserMessageParamsSchema as GeneratedSendUserMessageParamsSchema,
-  SendUserMessageResponseSchema as GeneratedSendUserMessageResponseSchema,
+  StableServerRequestSchema as GeneratedStableServerRequestSchema,
   ThreadListResponseSchema as GeneratedThreadListResponseSchema,
   ThreadReadResponseSchema as GeneratedThreadReadResponseSchema,
   ThreadStartParamsSchema as GeneratedThreadStartParamsSchema
@@ -25,8 +25,10 @@ const AppServerModelListResponseBaseSchema = GeneratedModelListResponseSchema.pa
 const AppServerCollaborationModeListResponseBaseSchema =
   GeneratedCollaborationModeListResponseSchema.passthrough();
 const AppServerStartThreadRequestBaseSchema = GeneratedThreadStartParamsSchema.passthrough();
-const AppServerSendUserMessageRequestBaseSchema = GeneratedSendUserMessageParamsSchema.passthrough();
-const AppServerSendUserMessageResponseBaseSchema = GeneratedSendUserMessageResponseSchema;
+const AppServerServerRequestBaseSchema = z.union([
+  GeneratedStableServerRequestSchema,
+  GeneratedExperimentalServerRequestSchema
+]);
 
 const ThreadTitleSchema = z.union([z.string(), z.null()]).optional();
 const ThreadIsGeneratingSchema = z.boolean().optional();
@@ -101,9 +103,7 @@ export const AppServerStartThreadResponseSchema = z
   })
   .passthrough();
 
-export const AppServerSendUserMessageRequestSchema = AppServerSendUserMessageRequestBaseSchema;
-
-export const AppServerSendUserMessageResponseSchema = AppServerSendUserMessageResponseBaseSchema;
+export const AppServerServerRequestSchema = AppServerServerRequestBaseSchema;
 
 export const AppServerLoadedThreadListResponseSchema = z
   .object({

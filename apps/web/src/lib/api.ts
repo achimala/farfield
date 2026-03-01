@@ -118,6 +118,14 @@ const LiveStateResponseSchema = z
             patchIndex: z.union([z.number().int().nonnegative(), z.null()]),
           })
           .strict(),
+        z
+          .object({
+            kind: z.literal("parseFailed"),
+            message: z.string(),
+            eventIndex: z.union([z.number().int().nonnegative(), z.null()]),
+            patchIndex: z.union([z.number().int().nonnegative(), z.null()]),
+          })
+          .strict(),
         z.null(),
       ])
       .nullable(),

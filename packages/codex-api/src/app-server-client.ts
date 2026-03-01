@@ -7,8 +7,6 @@ import {
   AppServerListThreadsResponseSchema,
   type AppServerReadThreadResponse,
   AppServerReadThreadResponseSchema,
-  AppServerSendUserMessageRequestSchema,
-  AppServerSendUserMessageResponseSchema,
   type AppServerStartThreadResponse,
   AppServerStartThreadRequestSchema,
   AppServerStartThreadResponseSchema,
@@ -215,19 +213,17 @@ export class AppServerClient {
   }
 
   public async sendUserMessage(threadId: string, text: string): Promise<void> {
-    const request = AppServerSendUserMessageRequestSchema.parse({
-      conversationId: threadId,
-      items: [
+    const request = TurnStartParamsSchema.parse({
+      threadId,
+      input: [
         {
           type: "text",
-          data: {
-            text
-          }
+          text
         }
-      ]
+      ],
+      attachments: []
     });
-    const result = await this.transport.request("sendUserMessage", request);
-    parseWithSchema(AppServerSendUserMessageResponseSchema, result, "AppServerSendUserMessageResponse");
+    await this.transport.request("turn/start", request);
   }
 
   public async startTurn(params: TurnStartParams): Promise<void> {

@@ -98,7 +98,7 @@ export interface AgentThreadLiveState {
   ownerClientId: string | null;
   conversationState: AppServerReadThreadResponse["thread"] | null;
   liveStateError: {
-    kind: "reductionFailed";
+    kind: "reductionFailed" | "parseFailed";
     message: string;
     eventIndex: number | null;
     patchIndex: number | null;

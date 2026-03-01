@@ -41,18 +41,6 @@ const schemaTargets = [
     exportName: "ModelListResponseSchema"
   },
   {
-    id: "send-user-message-params",
-    source: path.join(vendorRoot, "stable", "json", "v1", "SendUserMessageParams.json"),
-    fileName: "SendUserMessageParamsSchema.ts",
-    exportName: "SendUserMessageParamsSchema"
-  },
-  {
-    id: "send-user-message-response",
-    source: path.join(vendorRoot, "stable", "json", "v1", "SendUserMessageResponse.json"),
-    fileName: "SendUserMessageResponseSchema.ts",
-    exportName: "SendUserMessageResponseSchema"
-  },
-  {
     id: "request-id",
     source: path.join(vendorRoot, "stable", "json", "RequestId.json"),
     fileName: "RequestIdSchema.ts",
@@ -71,10 +59,16 @@ const schemaTargets = [
     exportName: "ToolRequestUserInputResponseSchema"
   },
   {
-    id: "server-request",
+    id: "stable-server-request",
     source: path.join(vendorRoot, "stable", "json", "ServerRequest.json"),
-    fileName: "ServerRequestSchema.ts",
-    exportName: "ServerRequestSchema"
+    fileName: "StableServerRequestSchema.ts",
+    exportName: "StableServerRequestSchema"
+  },
+  {
+    id: "experimental-server-request",
+    source: path.join(vendorRoot, "experimental", "json", "ServerRequest.json"),
+    fileName: "ExperimentalServerRequestSchema.ts",
+    exportName: "ExperimentalServerRequestSchema"
   },
   {
     id: "collaboration-mode-list-response",

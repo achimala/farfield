@@ -138,6 +138,30 @@
         "method": {
           "type": "string",
           "enum": [
+            "thread/unsubscribe"
+          ],
+          "title": "Thread/unsubscribeRequestMethod"
+        },
+        "params": {
+          "$ref": "#/definitions/ThreadUnsubscribeParams"
+        }
+      },
+      "title": "Thread/unsubscribeRequest"
+    },
+    {
+      "type": "object",
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "type": "string",
+          "enum": [
             "thread/name/set"
           ],
           "title": "Thread/name/setRequestMethod"
@@ -522,6 +546,102 @@
         "method": {
           "type": "string",
           "enum": [
+            "thread/realtime/start"
+          ],
+          "title": "Thread/realtime/startRequestMethod"
+        },
+        "params": {
+          "$ref": "#/definitions/ThreadRealtimeStartParams"
+        }
+      },
+      "title": "Thread/realtime/startRequest"
+    },
+    {
+      "type": "object",
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "type": "string",
+          "enum": [
+            "thread/realtime/appendAudio"
+          ],
+          "title": "Thread/realtime/appendAudioRequestMethod"
+        },
+        "params": {
+          "$ref": "#/definitions/ThreadRealtimeAppendAudioParams"
+        }
+      },
+      "title": "Thread/realtime/appendAudioRequest"
+    },
+    {
+      "type": "object",
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "type": "string",
+          "enum": [
+            "thread/realtime/appendText"
+          ],
+          "title": "Thread/realtime/appendTextRequestMethod"
+        },
+        "params": {
+          "$ref": "#/definitions/ThreadRealtimeAppendTextParams"
+        }
+      },
+      "title": "Thread/realtime/appendTextRequest"
+    },
+    {
+      "type": "object",
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "type": "string",
+          "enum": [
+            "thread/realtime/stop"
+          ],
+          "title": "Thread/realtime/stopRequestMethod"
+        },
+        "params": {
+          "$ref": "#/definitions/ThreadRealtimeStopParams"
+        }
+      },
+      "title": "Thread/realtime/stopRequest"
+    },
+    {
+      "type": "object",
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "type": "string",
+          "enum": [
             "review/start"
           ],
           "title": "Review/startRequestMethod"
@@ -715,6 +835,30 @@
         "method": {
           "type": "string",
           "enum": [
+            "windowsSandbox/setupStart"
+          ],
+          "title": "WindowsSandbox/setupStartRequestMethod"
+        },
+        "params": {
+          "$ref": "#/definitions/WindowsSandboxSetupStartParams"
+        }
+      },
+      "title": "WindowsSandbox/setupStartRequest"
+    },
+    {
+      "type": "object",
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "type": "string",
+          "enum": [
             "account/login/start"
           ],
           "title": "Account/login/startRequestMethod"
@@ -882,6 +1026,54 @@
         "method": {
           "type": "string",
           "enum": [
+            "externalAgentConfig/detect"
+          ],
+          "title": "ExternalAgentConfig/detectRequestMethod"
+        },
+        "params": {
+          "$ref": "#/definitions/ExternalAgentConfigDetectParams"
+        }
+      },
+      "title": "ExternalAgentConfig/detectRequest"
+    },
+    {
+      "type": "object",
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "type": "string",
+          "enum": [
+            "externalAgentConfig/import"
+          ],
+          "title": "ExternalAgentConfig/importRequestMethod"
+        },
+        "params": {
+          "$ref": "#/definitions/ExternalAgentConfigImportParams"
+        }
+      },
+      "title": "ExternalAgentConfig/importRequest"
+    },
+    {
+      "type": "object",
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "type": "string",
+          "enum": [
             "config/value/write"
           ],
           "title": "Config/value/writeRequestMethod"
@@ -962,510 +1154,6 @@
         }
       },
       "title": "Account/readRequest"
-    },
-    {
-      "description": "DEPRECATED APIs below",
-      "type": "object",
-      "required": [
-        "id",
-        "method",
-        "params"
-      ],
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "type": "string",
-          "enum": [
-            "newConversation"
-          ],
-          "title": "NewConversationRequestMethod"
-        },
-        "params": {
-          "$ref": "#/definitions/NewConversationParams"
-        }
-      },
-      "title": "NewConversationRequest"
-    },
-    {
-      "type": "object",
-      "required": [
-        "id",
-        "method",
-        "params"
-      ],
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "type": "string",
-          "enum": [
-            "getConversationSummary"
-          ],
-          "title": "GetConversationSummaryRequestMethod"
-        },
-        "params": {
-          "$ref": "#/definitions/GetConversationSummaryParams"
-        }
-      },
-      "title": "GetConversationSummaryRequest"
-    },
-    {
-      "description": "List recorded Codex conversations (rollouts) with optional pagination and search.",
-      "type": "object",
-      "required": [
-        "id",
-        "method",
-        "params"
-      ],
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "type": "string",
-          "enum": [
-            "listConversations"
-          ],
-          "title": "ListConversationsRequestMethod"
-        },
-        "params": {
-          "$ref": "#/definitions/ListConversationsParams"
-        }
-      },
-      "title": "ListConversationsRequest"
-    },
-    {
-      "description": "Resume a recorded Codex conversation from a rollout file.",
-      "type": "object",
-      "required": [
-        "id",
-        "method",
-        "params"
-      ],
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "type": "string",
-          "enum": [
-            "resumeConversation"
-          ],
-          "title": "ResumeConversationRequestMethod"
-        },
-        "params": {
-          "$ref": "#/definitions/ResumeConversationParams"
-        }
-      },
-      "title": "ResumeConversationRequest"
-    },
-    {
-      "description": "Fork a recorded Codex conversation into a new session.",
-      "type": "object",
-      "required": [
-        "id",
-        "method",
-        "params"
-      ],
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "type": "string",
-          "enum": [
-            "forkConversation"
-          ],
-          "title": "ForkConversationRequestMethod"
-        },
-        "params": {
-          "$ref": "#/definitions/ForkConversationParams"
-        }
-      },
-      "title": "ForkConversationRequest"
-    },
-    {
-      "type": "object",
-      "required": [
-        "id",
-        "method",
-        "params"
-      ],
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "type": "string",
-          "enum": [
-            "archiveConversation"
-          ],
-          "title": "ArchiveConversationRequestMethod"
-        },
-        "params": {
-          "$ref": "#/definitions/ArchiveConversationParams"
-        }
-      },
-      "title": "ArchiveConversationRequest"
-    },
-    {
-      "type": "object",
-      "required": [
-        "id",
-        "method",
-        "params"
-      ],
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "type": "string",
-          "enum": [
-            "sendUserMessage"
-          ],
-          "title": "SendUserMessageRequestMethod"
-        },
-        "params": {
-          "$ref": "#/definitions/SendUserMessageParams"
-        }
-      },
-      "title": "SendUserMessageRequest"
-    },
-    {
-      "type": "object",
-      "required": [
-        "id",
-        "method",
-        "params"
-      ],
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "type": "string",
-          "enum": [
-            "sendUserTurn"
-          ],
-          "title": "SendUserTurnRequestMethod"
-        },
-        "params": {
-          "$ref": "#/definitions/SendUserTurnParams"
-        }
-      },
-      "title": "SendUserTurnRequest"
-    },
-    {
-      "type": "object",
-      "required": [
-        "id",
-        "method",
-        "params"
-      ],
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "type": "string",
-          "enum": [
-            "interruptConversation"
-          ],
-          "title": "InterruptConversationRequestMethod"
-        },
-        "params": {
-          "$ref": "#/definitions/InterruptConversationParams"
-        }
-      },
-      "title": "InterruptConversationRequest"
-    },
-    {
-      "type": "object",
-      "required": [
-        "id",
-        "method",
-        "params"
-      ],
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "type": "string",
-          "enum": [
-            "addConversationListener"
-          ],
-          "title": "AddConversationListenerRequestMethod"
-        },
-        "params": {
-          "$ref": "#/definitions/AddConversationListenerParams"
-        }
-      },
-      "title": "AddConversationListenerRequest"
-    },
-    {
-      "type": "object",
-      "required": [
-        "id",
-        "method",
-        "params"
-      ],
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "type": "string",
-          "enum": [
-            "removeConversationListener"
-          ],
-          "title": "RemoveConversationListenerRequestMethod"
-        },
-        "params": {
-          "$ref": "#/definitions/RemoveConversationListenerParams"
-        }
-      },
-      "title": "RemoveConversationListenerRequest"
-    },
-    {
-      "type": "object",
-      "required": [
-        "id",
-        "method",
-        "params"
-      ],
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "type": "string",
-          "enum": [
-            "gitDiffToRemote"
-          ],
-          "title": "GitDiffToRemoteRequestMethod"
-        },
-        "params": {
-          "$ref": "#/definitions/GitDiffToRemoteParams"
-        }
-      },
-      "title": "GitDiffToRemoteRequest"
-    },
-    {
-      "type": "object",
-      "required": [
-        "id",
-        "method",
-        "params"
-      ],
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "type": "string",
-          "enum": [
-            "loginApiKey"
-          ],
-          "title": "LoginApiKeyRequestMethod"
-        },
-        "params": {
-          "$ref": "#/definitions/LoginApiKeyParams"
-        }
-      },
-      "title": "LoginApiKeyRequest"
-    },
-    {
-      "type": "object",
-      "required": [
-        "id",
-        "method"
-      ],
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "type": "string",
-          "enum": [
-            "loginChatGpt"
-          ],
-          "title": "LoginChatGptRequestMethod"
-        },
-        "params": {
-          "type": "null"
-        }
-      },
-      "title": "LoginChatGptRequest"
-    },
-    {
-      "type": "object",
-      "required": [
-        "id",
-        "method",
-        "params"
-      ],
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "type": "string",
-          "enum": [
-            "cancelLoginChatGpt"
-          ],
-          "title": "CancelLoginChatGptRequestMethod"
-        },
-        "params": {
-          "$ref": "#/definitions/CancelLoginChatGptParams"
-        }
-      },
-      "title": "CancelLoginChatGptRequest"
-    },
-    {
-      "type": "object",
-      "required": [
-        "id",
-        "method"
-      ],
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "type": "string",
-          "enum": [
-            "logoutChatGpt"
-          ],
-          "title": "LogoutChatGptRequestMethod"
-        },
-        "params": {
-          "type": "null"
-        }
-      },
-      "title": "LogoutChatGptRequest"
-    },
-    {
-      "description": "DEPRECATED in favor of GetAccount",
-      "type": "object",
-      "required": [
-        "id",
-        "method",
-        "params"
-      ],
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "type": "string",
-          "enum": [
-            "getAuthStatus"
-          ],
-          "title": "GetAuthStatusRequestMethod"
-        },
-        "params": {
-          "$ref": "#/definitions/GetAuthStatusParams"
-        }
-      },
-      "title": "GetAuthStatusRequest"
-    },
-    {
-      "type": "object",
-      "required": [
-        "id",
-        "method"
-      ],
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "type": "string",
-          "enum": [
-            "getUserSavedConfig"
-          ],
-          "title": "GetUserSavedConfigRequestMethod"
-        },
-        "params": {
-          "type": "null"
-        }
-      },
-      "title": "GetUserSavedConfigRequest"
-    },
-    {
-      "type": "object",
-      "required": [
-        "id",
-        "method",
-        "params"
-      ],
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "type": "string",
-          "enum": [
-            "setDefaultModel"
-          ],
-          "title": "SetDefaultModelRequestMethod"
-        },
-        "params": {
-          "$ref": "#/definitions/SetDefaultModelParams"
-        }
-      },
-      "title": "SetDefaultModelRequest"
-    },
-    {
-      "type": "object",
-      "required": [
-        "id",
-        "method"
-      ],
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "type": "string",
-          "enum": [
-            "getUserAgent"
-          ],
-          "title": "GetUserAgentRequestMethod"
-        },
-        "params": {
-          "type": "null"
-        }
-      },
-      "title": "GetUserAgentRequest"
-    },
-    {
-      "type": "object",
-      "required": [
-        "id",
-        "method"
-      ],
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "type": "string",
-          "enum": [
-            "userInfo"
-          ],
-          "title": "UserInfoRequestMethod"
-        },
-        "params": {
-          "type": "null"
-        }
-      },
-      "title": "UserInfoRequest"
     },
     {
       "type": "object",
@@ -1562,52 +1250,12 @@
         }
       },
       "title": "FuzzyFileSearch/sessionStopRequest"
-    },
-    {
-      "description": "Execute a command (argv vector) under the server's sandbox.",
-      "type": "object",
-      "required": [
-        "id",
-        "method",
-        "params"
-      ],
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "type": "string",
-          "enum": [
-            "execOneOffCommand"
-          ],
-          "title": "ExecOneOffCommandRequestMethod"
-        },
-        "params": {
-          "$ref": "#/definitions/ExecOneOffCommandParams"
-        }
-      },
-      "title": "ExecOneOffCommandRequest"
     }
   ],
   "definitions": {
     "AbsolutePathBuf": {
       "description": "A path that is guaranteed to be absolute and normalized (though it is not guaranteed to be canonicalized or exist on the filesystem).\n\nIMPORTANT: When deserializing an `AbsolutePathBuf`, a base path must be set using [AbsolutePathBufGuard::new]. If no base path is set, the deserialization will fail unless the path being deserialized is already absolute.",
       "type": "string"
-    },
-    "AddConversationListenerParams": {
-      "type": "object",
-      "required": [
-        "conversationId"
-      ],
-      "properties": {
-        "conversationId": {
-          "$ref": "#/definitions/ThreadId"
-        },
-        "experimentalRawEvents": {
-          "default": false,
-          "type": "boolean"
-        }
-      }
     },
     "AppsListParams": {
       "description": "EXPERIMENTAL - list available apps/connectors.",
@@ -1642,60 +1290,45 @@
         }
       }
     },
-    "ArchiveConversationParams": {
-      "type": "object",
-      "required": [
-        "conversationId",
-        "rolloutPath"
-      ],
-      "properties": {
-        "conversationId": {
-          "$ref": "#/definitions/ThreadId"
-        },
-        "rolloutPath": {
-          "type": "string"
-        }
-      }
-    },
     "AskForApproval": {
-      "type": "string",
-      "enum": [
-        "untrusted",
-        "on-failure",
-        "on-request",
-        "never"
-      ]
-    },
-    "AskForApproval2": {
-      "description": "Determines the conditions under which the user is consulted to approve running the command proposed by Codex.",
       "oneOf": [
         {
-          "description": "Under this policy, only \"known safe\" commands—as determined by `is_safe_command()`—that **only read files** are auto‑approved. Everything else will ask the user to approve.",
           "type": "string",
           "enum": [
-            "untrusted"
-          ]
-        },
-        {
-          "description": "DEPRECATED: *All* commands are auto‑approved, but they are expected to run inside a sandbox where network access is disabled and writes are confined to a specific set of paths. If the command fails, it will be escalated to the user to approve execution without a sandbox. Prefer `OnRequest` for interactive runs or `Never` for non-interactive runs.",
-          "type": "string",
-          "enum": [
-            "on-failure"
-          ]
-        },
-        {
-          "description": "The model decides when to ask the user for approval.",
-          "type": "string",
-          "enum": [
-            "on-request"
-          ]
-        },
-        {
-          "description": "Never ask the user to approve commands. Failures are immediately returned to the model, and never escalated to the user for approval.",
-          "type": "string",
-          "enum": [
+            "untrusted",
+            "on-failure",
+            "on-request",
             "never"
           ]
+        },
+        {
+          "type": "object",
+          "required": [
+            "reject"
+          ],
+          "properties": {
+            "reject": {
+              "type": "object",
+              "required": [
+                "mcp_elicitations",
+                "rules",
+                "sandbox_approval"
+              ],
+              "properties": {
+                "mcp_elicitations": {
+                  "type": "boolean"
+                },
+                "rules": {
+                  "type": "boolean"
+                },
+                "sandbox_approval": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "additionalProperties": false,
+          "title": "RejectAskForApproval"
         }
       ]
     },
@@ -1719,17 +1352,6 @@
       }
     },
     "CancelLoginAccountParams": {
-      "type": "object",
-      "required": [
-        "loginId"
-      ],
-      "properties": {
-        "loginId": {
-          "type": "string"
-        }
-      }
-    },
-    "CancelLoginChatGptParams": {
       "type": "object",
       "required": [
         "loginId"
@@ -1989,44 +1611,6 @@
         }
       }
     },
-    "ExecOneOffCommandParams": {
-      "type": "object",
-      "required": [
-        "command"
-      ],
-      "properties": {
-        "command": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "cwd": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "sandboxPolicy": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/SandboxPolicy2"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "timeoutMs": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "minimum": 0.0
-        }
-      }
-    },
     "ExperimentalFeatureListParams": {
       "type": "object",
       "properties": {
@@ -2048,6 +1632,70 @@
         }
       }
     },
+    "ExternalAgentConfigDetectParams": {
+      "type": "object",
+      "properties": {
+        "cwds": {
+          "description": "Zero or more working directories to include for repo-scoped detection.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "includeHome": {
+          "description": "If true, include detection under the user's home (~/.claude, ~/.codex, etc.).",
+          "type": "boolean"
+        }
+      }
+    },
+    "ExternalAgentConfigImportParams": {
+      "type": "object",
+      "required": [
+        "migrationItems"
+      ],
+      "properties": {
+        "migrationItems": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ExternalAgentConfigMigrationItem"
+          }
+        }
+      }
+    },
+    "ExternalAgentConfigMigrationItem": {
+      "type": "object",
+      "required": [
+        "description",
+        "itemType"
+      ],
+      "properties": {
+        "cwd": {
+          "description": "Null or empty means home-scoped migration; non-empty means repo-scoped migration.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": "string"
+        },
+        "itemType": {
+          "$ref": "#/definitions/ExternalAgentConfigMigrationItemType"
+        }
+      }
+    },
+    "ExternalAgentConfigMigrationItemType": {
+      "type": "string",
+      "enum": [
+        "AGENTS_MD",
+        "CONFIG",
+        "SKILLS",
+        "MCP_SERVER_CONFIG"
+      ]
+    },
     "FeedbackUploadParams": {
       "type": "object",
       "required": [
@@ -2057,6 +1705,15 @@
       "properties": {
         "classification": {
           "type": "string"
+        },
+        "extraLogFiles": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
         },
         "includeLogs": {
           "type": "boolean"
@@ -2068,37 +1725,6 @@
           ]
         },
         "threadId": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      }
-    },
-    "ForkConversationParams": {
-      "type": "object",
-      "properties": {
-        "conversationId": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/ThreadId"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "overrides": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/NewConversationParams"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "path": {
           "type": [
             "string",
             "null"
@@ -2260,51 +1886,6 @@
         }
       }
     },
-    "GetAuthStatusParams": {
-      "type": "object",
-      "properties": {
-        "includeToken": {
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "refreshToken": {
-          "type": [
-            "boolean",
-            "null"
-          ]
-        }
-      }
-    },
-    "GetConversationSummaryParams": {
-      "anyOf": [
-        {
-          "type": "object",
-          "required": [
-            "rolloutPath"
-          ],
-          "properties": {
-            "rolloutPath": {
-              "type": "string"
-            }
-          },
-          "title": "RolloutPathGetConversationSummaryParams"
-        },
-        {
-          "type": "object",
-          "required": [
-            "conversationId"
-          ],
-          "properties": {
-            "conversationId": {
-              "$ref": "#/definitions/ThreadId"
-            }
-          },
-          "title": "ConversationIdGetConversationSummaryParams"
-        }
-      ]
-    },
     "GhostCommit": {
       "description": "Details of a ghost commit created from a repository state.",
       "type": "object",
@@ -2334,17 +1915,6 @@
           "items": {
             "type": "string"
           }
-        }
-      }
-    },
-    "GitDiffToRemoteParams": {
-      "type": "object",
-      "required": [
-        "cwd"
-      ],
-      "properties": {
-        "cwd": {
-          "type": "string"
         }
       }
     },
@@ -2396,141 +1966,6 @@
         },
         "clientInfo": {
           "$ref": "#/definitions/ClientInfo"
-        }
-      }
-    },
-    "InputItem": {
-      "oneOf": [
-        {
-          "type": "object",
-          "required": [
-            "data",
-            "type"
-          ],
-          "properties": {
-            "data": {
-              "type": "object",
-              "required": [
-                "text"
-              ],
-              "properties": {
-                "text": {
-                  "type": "string"
-                },
-                "text_elements": {
-                  "description": "UI-defined spans within `text` used to render or persist special elements.",
-                  "default": [],
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/definitions/V1TextElement"
-                  }
-                }
-              }
-            },
-            "type": {
-              "type": "string",
-              "enum": [
-                "text"
-              ],
-              "title": "TextInputItemType"
-            }
-          },
-          "title": "TextInputItem"
-        },
-        {
-          "type": "object",
-          "required": [
-            "data",
-            "type"
-          ],
-          "properties": {
-            "data": {
-              "type": "object",
-              "required": [
-                "image_url"
-              ],
-              "properties": {
-                "image_url": {
-                  "type": "string"
-                }
-              }
-            },
-            "type": {
-              "type": "string",
-              "enum": [
-                "image"
-              ],
-              "title": "ImageInputItemType"
-            }
-          },
-          "title": "ImageInputItem"
-        },
-        {
-          "type": "object",
-          "required": [
-            "data",
-            "type"
-          ],
-          "properties": {
-            "data": {
-              "type": "object",
-              "required": [
-                "path"
-              ],
-              "properties": {
-                "path": {
-                  "type": "string"
-                }
-              }
-            },
-            "type": {
-              "type": "string",
-              "enum": [
-                "localImage"
-              ],
-              "title": "LocalImageInputItemType"
-            }
-          },
-          "title": "LocalImageInputItem"
-        }
-      ]
-    },
-    "InterruptConversationParams": {
-      "type": "object",
-      "required": [
-        "conversationId"
-      ],
-      "properties": {
-        "conversationId": {
-          "$ref": "#/definitions/ThreadId"
-        }
-      }
-    },
-    "ListConversationsParams": {
-      "type": "object",
-      "properties": {
-        "cursor": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "modelProviders": {
-          "type": [
-            "array",
-            "null"
-          ],
-          "items": {
-            "type": "string"
-          }
-        },
-        "pageSize": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint",
-          "minimum": 0.0
         }
       }
     },
@@ -2693,17 +2128,6 @@
         }
       ]
     },
-    "LoginApiKeyParams": {
-      "type": "object",
-      "required": [
-        "apiKey"
-      ],
-      "properties": {
-        "apiKey": {
-          "type": "string"
-        }
-      }
-    },
     "McpServerOauthLoginParams": {
       "type": "object",
       "required": [
@@ -2812,94 +2236,6 @@
         "enabled"
       ]
     },
-    "NetworkAccess2": {
-      "description": "Represents whether outbound network access is available to the agent.",
-      "type": "string",
-      "enum": [
-        "restricted",
-        "enabled"
-      ]
-    },
-    "NewConversationParams": {
-      "type": "object",
-      "properties": {
-        "approvalPolicy": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/AskForApproval2"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "baseInstructions": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "compactPrompt": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "config": {
-          "type": [
-            "object",
-            "null"
-          ],
-          "additionalProperties": true
-        },
-        "cwd": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "developerInstructions": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "includeApplyPatchTool": {
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "model": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "modelProvider": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "profile": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "sandbox": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/SandboxMode2"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      }
-    },
     "Personality": {
       "type": "string",
       "enum": [
@@ -2961,57 +2297,6 @@
             }
           },
           "title": "FullAccessReadOnlyAccess"
-        }
-      ]
-    },
-    "ReadOnlyAccess2": {
-      "description": "Determines how read-only file access is granted inside a restricted sandbox.",
-      "oneOf": [
-        {
-          "description": "Restrict reads to an explicit set of roots.\n\nWhen `include_platform_defaults` is `true`, platform defaults required for basic execution are included in addition to `readable_roots`.",
-          "type": "object",
-          "required": [
-            "type"
-          ],
-          "properties": {
-            "include_platform_defaults": {
-              "description": "Include built-in platform read roots required for basic process execution.",
-              "default": true,
-              "type": "boolean"
-            },
-            "readable_roots": {
-              "description": "Additional absolute roots that should be readable.",
-              "type": "array",
-              "items": {
-                "$ref": "#/definitions/AbsolutePathBuf"
-              }
-            },
-            "type": {
-              "type": "string",
-              "enum": [
-                "restricted"
-              ],
-              "title": "RestrictedReadOnlyAccess2Type"
-            }
-          },
-          "title": "RestrictedReadOnlyAccess2"
-        },
-        {
-          "description": "Allow unrestricted file reads.",
-          "type": "object",
-          "required": [
-            "type"
-          ],
-          "properties": {
-            "type": {
-              "type": "string",
-              "enum": [
-                "full-access"
-              ],
-              "title": "FullAccessReadOnlyAccess2Type"
-            }
-          },
-          "title": "FullAccessReadOnlyAccess2"
         }
       ]
     },
@@ -3114,17 +2399,6 @@
           ]
         }
       ]
-    },
-    "RemoveConversationListenerParams": {
-      "type": "object",
-      "required": [
-        "subscriptionId"
-      ],
-      "properties": {
-        "subscriptionId": {
-          "type": "string"
-        }
-      }
     },
     "RequestId": {
       "anyOf": [
@@ -3384,7 +2658,7 @@
               "type": "string"
             },
             "output": {
-              "type": "string"
+              "$ref": "#/definitions/FunctionCallOutputPayload"
             },
             "type": {
               "type": "string",
@@ -3492,46 +2766,6 @@
           "title": "OtherResponseItem"
         }
       ]
-    },
-    "ResumeConversationParams": {
-      "type": "object",
-      "properties": {
-        "conversationId": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/ThreadId"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "history": {
-          "type": [
-            "array",
-            "null"
-          ],
-          "items": {
-            "$ref": "#/definitions/ResponseItem"
-          }
-        },
-        "overrides": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/NewConversationParams"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "path": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      }
     },
     "ReviewDelivery": {
       "type": "string",
@@ -3666,14 +2900,6 @@
         "danger-full-access"
       ]
     },
-    "SandboxMode2": {
-      "type": "string",
-      "enum": [
-        "read-only",
-        "workspace-write",
-        "danger-full-access"
-      ]
-    },
     "SandboxPolicy": {
       "oneOf": [
         {
@@ -3788,216 +3014,6 @@
           "title": "WorkspaceWriteSandboxPolicy"
         }
       ]
-    },
-    "SandboxPolicy2": {
-      "description": "Determines execution restrictions for model shell commands.",
-      "oneOf": [
-        {
-          "description": "No restrictions whatsoever. Use with caution.",
-          "type": "object",
-          "required": [
-            "type"
-          ],
-          "properties": {
-            "type": {
-              "type": "string",
-              "enum": [
-                "danger-full-access"
-              ],
-              "title": "DangerFullAccessSandboxPolicy2Type"
-            }
-          },
-          "title": "DangerFullAccessSandboxPolicy2"
-        },
-        {
-          "description": "Read-only access configuration.",
-          "type": "object",
-          "required": [
-            "type"
-          ],
-          "properties": {
-            "access": {
-              "description": "Read access granted while running under this policy.",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/ReadOnlyAccess2"
-                }
-              ]
-            },
-            "type": {
-              "type": "string",
-              "enum": [
-                "read-only"
-              ],
-              "title": "ReadOnlySandboxPolicy2Type"
-            }
-          },
-          "title": "ReadOnlySandboxPolicy2"
-        },
-        {
-          "description": "Indicates the process is already in an external sandbox. Allows full disk access while honoring the provided network setting.",
-          "type": "object",
-          "required": [
-            "type"
-          ],
-          "properties": {
-            "network_access": {
-              "description": "Whether the external sandbox permits outbound network traffic.",
-              "default": "restricted",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/NetworkAccess2"
-                }
-              ]
-            },
-            "type": {
-              "type": "string",
-              "enum": [
-                "external-sandbox"
-              ],
-              "title": "ExternalSandboxSandboxPolicy2Type"
-            }
-          },
-          "title": "ExternalSandboxSandboxPolicy2"
-        },
-        {
-          "description": "Same as `ReadOnly` but additionally grants write access to the current working directory (\"workspace\").",
-          "type": "object",
-          "required": [
-            "type"
-          ],
-          "properties": {
-            "exclude_slash_tmp": {
-              "description": "When set to `true`, will NOT include the `/tmp` among the default writable roots on UNIX. Defaults to `false`.",
-              "default": false,
-              "type": "boolean"
-            },
-            "exclude_tmpdir_env_var": {
-              "description": "When set to `true`, will NOT include the per-user `TMPDIR` environment variable among the default writable roots. Defaults to `false`.",
-              "default": false,
-              "type": "boolean"
-            },
-            "network_access": {
-              "description": "When set to `true`, outbound network access is allowed. `false` by default.",
-              "default": false,
-              "type": "boolean"
-            },
-            "read_only_access": {
-              "description": "Read access granted while running under this policy.",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/ReadOnlyAccess2"
-                }
-              ]
-            },
-            "type": {
-              "type": "string",
-              "enum": [
-                "workspace-write"
-              ],
-              "title": "WorkspaceWriteSandboxPolicy2Type"
-            },
-            "writable_roots": {
-              "description": "Additional folders (beyond cwd and possibly TMPDIR) that should be writable from within the sandbox.",
-              "type": "array",
-              "items": {
-                "$ref": "#/definitions/AbsolutePathBuf"
-              }
-            }
-          },
-          "title": "WorkspaceWriteSandboxPolicy2"
-        }
-      ]
-    },
-    "SendUserMessageParams": {
-      "type": "object",
-      "required": [
-        "conversationId",
-        "items"
-      ],
-      "properties": {
-        "conversationId": {
-          "$ref": "#/definitions/ThreadId"
-        },
-        "items": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/InputItem"
-          }
-        }
-      }
-    },
-    "SendUserTurnParams": {
-      "type": "object",
-      "required": [
-        "approvalPolicy",
-        "conversationId",
-        "cwd",
-        "items",
-        "model",
-        "sandboxPolicy",
-        "summary"
-      ],
-      "properties": {
-        "approvalPolicy": {
-          "$ref": "#/definitions/AskForApproval2"
-        },
-        "conversationId": {
-          "$ref": "#/definitions/ThreadId"
-        },
-        "cwd": {
-          "type": "string"
-        },
-        "effort": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/ReasoningEffort"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "items": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/InputItem"
-          }
-        },
-        "model": {
-          "type": "string"
-        },
-        "outputSchema": {
-          "description": "Optional JSON Schema used to constrain the final assistant message for this turn."
-        },
-        "sandboxPolicy": {
-          "$ref": "#/definitions/SandboxPolicy2"
-        },
-        "summary": {
-          "$ref": "#/definitions/ReasoningSummary"
-        }
-      }
-    },
-    "SetDefaultModelParams": {
-      "type": "object",
-      "properties": {
-        "model": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "reasoningEffort": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/ReasoningEffort"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      }
     },
     "Settings": {
       "description": "Settings for a collaboration mode.",
@@ -4261,9 +3277,6 @@
         }
       }
     },
-    "ThreadId": {
-      "type": "string"
-    },
     "ThreadListParams": {
       "type": "object",
       "properties": {
@@ -4306,6 +3319,13 @@
           "items": {
             "type": "string"
           }
+        },
+        "searchTerm": {
+          "description": "Optional substring filter for the extracted thread title.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "sortKey": {
           "description": "Optional sort key; defaults to created_at.",
@@ -4362,6 +3382,104 @@
           "default": false,
           "type": "boolean"
         },
+        "threadId": {
+          "type": "string"
+        }
+      }
+    },
+    "ThreadRealtimeAppendAudioParams": {
+      "description": "EXPERIMENTAL - append audio input to thread realtime.",
+      "type": "object",
+      "required": [
+        "audio",
+        "threadId"
+      ],
+      "properties": {
+        "audio": {
+          "$ref": "#/definitions/ThreadRealtimeAudioChunk"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      }
+    },
+    "ThreadRealtimeAppendTextParams": {
+      "description": "EXPERIMENTAL - append text input to thread realtime.",
+      "type": "object",
+      "required": [
+        "text",
+        "threadId"
+      ],
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      }
+    },
+    "ThreadRealtimeAudioChunk": {
+      "description": "EXPERIMENTAL - thread realtime audio chunk.",
+      "type": "object",
+      "required": [
+        "data",
+        "numChannels",
+        "sampleRate"
+      ],
+      "properties": {
+        "data": {
+          "type": "string"
+        },
+        "numChannels": {
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "sampleRate": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "samplesPerChannel": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    },
+    "ThreadRealtimeStartParams": {
+      "description": "EXPERIMENTAL - start a thread-scoped realtime session.",
+      "type": "object",
+      "required": [
+        "prompt",
+        "threadId"
+      ],
+      "properties": {
+        "prompt": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "threadId": {
+          "type": "string"
+        }
+      }
+    },
+    "ThreadRealtimeStopParams": {
+      "description": "EXPERIMENTAL - stop thread realtime.",
+      "type": "object",
+      "required": [
+        "threadId"
+      ],
+      "properties": {
         "threadId": {
           "type": "string"
         }
@@ -4625,10 +3743,27 @@
               "type": "null"
             }
           ]
+        },
+        "serviceName": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },
     "ThreadUnarchiveParams": {
+      "type": "object",
+      "required": [
+        "threadId"
+      ],
+      "properties": {
+        "threadId": {
+          "type": "string"
+        }
+      }
+    },
+    "ThreadUnsubscribeParams": {
       "type": "object",
       "required": [
         "threadId"
@@ -4898,50 +4033,6 @@
         }
       ]
     },
-    "V1ByteRange": {
-      "type": "object",
-      "required": [
-        "end",
-        "start"
-      ],
-      "properties": {
-        "end": {
-          "description": "End byte offset (exclusive) within the UTF-8 text buffer.",
-          "type": "integer",
-          "format": "uint",
-          "minimum": 0.0
-        },
-        "start": {
-          "description": "Start byte offset (inclusive) within the UTF-8 text buffer.",
-          "type": "integer",
-          "format": "uint",
-          "minimum": 0.0
-        }
-      }
-    },
-    "V1TextElement": {
-      "type": "object",
-      "required": [
-        "byteRange"
-      ],
-      "properties": {
-        "byteRange": {
-          "description": "Byte range in the parent `text` buffer that this element occupies.",
-          "allOf": [
-            {
-              "$ref": "#/definitions/V1ByteRange"
-            }
-          ]
-        },
-        "placeholder": {
-          "description": "Optional human-readable placeholder for the element, displayed in the UI.",
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      }
-    },
     "WebSearchAction": {
       "oneOf": [
         {
@@ -5042,6 +4133,24 @@
           "title": "OtherWebSearchAction"
         }
       ]
+    },
+    "WindowsSandboxSetupMode": {
+      "type": "string",
+      "enum": [
+        "elevated",
+        "unelevated"
+      ]
+    },
+    "WindowsSandboxSetupStartParams": {
+      "type": "object",
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "$ref": "#/definitions/WindowsSandboxSetupMode"
+        }
+      }
     }
   }
 }

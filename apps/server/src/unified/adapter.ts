@@ -357,9 +357,6 @@ function createHandlerTable(
           ...(mode.reasoning_effort !== undefined
             ? { reasoningEffort: mode.reasoning_effort }
             : {}),
-          ...(mode.developer_instructions !== undefined
-            ? { developerInstructions: mode.developer_instructions }
-            : {}),
         })),
       };
     },
@@ -618,7 +615,7 @@ function mapThread(
             question: question.question,
             isOther: question.isOther ?? false,
             isSecret: question.isSecret ?? false,
-            options: question.options.map((option) => ({
+            options: (question.options ?? []).map((option) => ({
               label: option.label,
               description: option.description,
             })),

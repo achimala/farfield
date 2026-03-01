@@ -309,6 +309,58 @@
         "declined"
       ]
     },
+    "DynamicToolCallOutputContentItem": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "text",
+            "type"
+          ],
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "inputText"
+              ],
+              "title": "InputTextDynamicToolCallOutputContentItemType"
+            }
+          },
+          "title": "InputTextDynamicToolCallOutputContentItem"
+        },
+        {
+          "type": "object",
+          "required": [
+            "imageUrl",
+            "type"
+          ],
+          "properties": {
+            "imageUrl": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "inputImage"
+              ],
+              "title": "InputImageDynamicToolCallOutputContentItemType"
+            }
+          },
+          "title": "InputImageDynamicToolCallOutputContentItem"
+        }
+      ]
+    },
+    "DynamicToolCallStatus": {
+      "type": "string",
+      "enum": [
+        "inProgress",
+        "completed",
+        "failed"
+      ]
+    },
     "FileUpdateChange": {
       "type": "object",
       "required": [
@@ -381,6 +433,25 @@
         "inProgress",
         "completed",
         "failed"
+      ]
+    },
+    "MessagePhase": {
+      "description": "Classifies an assistant message as interim commentary or final answer text.\n\nProviders do not emit this consistently, so callers must treat `None` as \"phase unknown\" and keep compatibility behavior for legacy models.",
+      "oneOf": [
+        {
+          "description": "Mid-turn assistant text (for example preamble/progress narration).\n\nAdditional tool calls or assistant output may follow before turn completion.",
+          "type": "string",
+          "enum": [
+            "commentary"
+          ]
+        },
+        {
+          "description": "The assistant's terminal answer text for the current turn.",
+          "type": "string",
+          "enum": [
+            "final_answer"
+          ]
+        }
       ]
     },
     "PatchApplyStatus": {
@@ -500,6 +571,20 @@
                 "parent_thread_id"
               ],
               "properties": {
+                "agent_nickname": {
+                  "default": null,
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "agent_role": {
+                  "default": null,
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "depth": {
                   "type": "integer",
                   "format": "int32"
@@ -561,10 +646,25 @@
         "modelProvider",
         "preview",
         "source",
+        "status",
         "turns",
         "updatedAt"
       ],
       "properties": {
+        "agentNickname": {
+          "description": "Optional random unique nickname assigned to an AgentControl-spawned sub-agent.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "agentRole": {
+          "description": "Optional role (agent_role) assigned to an AgentControl-spawned sub-agent.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "cliVersion": {
           "description": "Version of the CLI that created the thread.",
           "type": "string"
@@ -596,6 +696,13 @@
           "description": "Model provider used for this thread (for example, 'openai').",
           "type": "string"
         },
+        "name": {
+          "description": "Optional user-facing thread title.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "path": {
           "description": "[UNSTABLE] Path to the thread on disk.",
           "type": [
@@ -615,6 +722,14 @@
             }
           ]
         },
+        "status": {
+          "description": "Current runtime status for the thread.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ThreadStatus"
+            }
+          ]
+        },
         "turns": {
           "description": "Only populated on `thread/resume`, `thread/rollback`, `thread/fork`, and `thread/read` (when `includeTurns` is true) responses. For all other responses and notifications returning a Thread, the turns field will be an empty list.",
           "type": "array",
@@ -628,6 +743,13 @@
           "format": "int64"
         }
       }
+    },
+    "ThreadActiveFlag": {
+      "type": "string",
+      "enum": [
+        "waitingOnApproval",
+        "waitingOnUserInput"
+      ]
     },
     "ThreadId": {
       "type": "string"
@@ -671,6 +793,17 @@
           "properties": {
             "id": {
               "type": "string"
+            },
+            "phase": {
+              "default": null,
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/MessagePhase"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "text": {
               "type": "string"
@@ -912,6 +1045,59 @@
         {
           "type": "object",
           "required": [
+            "arguments",
+            "id",
+            "status",
+            "tool",
+            "type"
+          ],
+          "properties": {
+            "arguments": true,
+            "contentItems": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/definitions/DynamicToolCallOutputContentItem"
+              }
+            },
+            "durationMs": {
+              "description": "The duration of the dynamic tool call in milliseconds.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            },
+            "id": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/definitions/DynamicToolCallStatus"
+            },
+            "success": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "tool": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "dynamicToolCall"
+              ],
+              "title": "DynamicToolCallThreadItemType"
+            }
+          },
+          "title": "DynamicToolCallThreadItem"
+        },
+        {
+          "type": "object",
+          "required": [
             "agentsStates",
             "id",
             "receiverThreadIds",
@@ -1101,6 +1287,81 @@
             }
           },
           "title": "ContextCompactionThreadItem"
+        }
+      ]
+    },
+    "ThreadStatus": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "notLoaded"
+              ],
+              "title": "NotLoadedThreadStatusType"
+            }
+          },
+          "title": "NotLoadedThreadStatus"
+        },
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "idle"
+              ],
+              "title": "IdleThreadStatusType"
+            }
+          },
+          "title": "IdleThreadStatus"
+        },
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "systemError"
+              ],
+              "title": "SystemErrorThreadStatusType"
+            }
+          },
+          "title": "SystemErrorThreadStatus"
+        },
+        {
+          "type": "object",
+          "required": [
+            "activeFlags",
+            "type"
+          ],
+          "properties": {
+            "activeFlags": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ThreadActiveFlag"
+              }
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "active"
+              ],
+              "title": "ActiveThreadStatusType"
+            }
+          },
+          "title": "ActiveThreadStatus"
         }
       ]
     },

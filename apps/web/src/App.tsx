@@ -1007,9 +1007,9 @@ export function App(): React.JSX.Element {
     if (!conversationState) return [] as PendingRequest[];
     return getPendingUserInputRequests(conversationState);
   }, [conversationState]);
-  const liveStateReductionError = useMemo(() => {
+  const liveStateStreamError = useMemo(() => {
     const errorState = liveState?.liveStateError;
-    if (!errorState || errorState.kind !== "reductionFailed") {
+    if (!errorState) {
       return null;
     }
     return errorState;
@@ -3311,7 +3311,7 @@ export function App(): React.JSX.Element {
               )}
             </AnimatePresence>
             <AnimatePresence>
-              {liveStateReductionError && activeTab === "chat" && (
+              {liveStateStreamError && activeTab === "chat" && (
                 <motion.div
                   initial={{ height: 0, opacity: 0 }}
                   animate={{ height: "auto", opacity: 1 }}
@@ -3320,14 +3320,14 @@ export function App(): React.JSX.Element {
                 >
                   <div className="px-4 py-2 bg-amber-500/10 border-b border-amber-500/30 text-sm text-amber-200">
                     Live updates failed for this thread.
-                    {liveStateReductionError.eventIndex !== null && (
+                    {liveStateStreamError.eventIndex !== null && (
                       <span className="ml-2 text-xs text-amber-300/90">
-                        event {liveStateReductionError.eventIndex}
+                        event {liveStateStreamError.eventIndex}
                       </span>
                     )}
-                    {liveStateReductionError.patchIndex !== null && (
+                    {liveStateStreamError.patchIndex !== null && (
                       <span className="ml-1 text-xs text-amber-300/90">
-                        patch {liveStateReductionError.patchIndex}
+                        patch {liveStateStreamError.patchIndex}
                       </span>
                     )}
                   </div>

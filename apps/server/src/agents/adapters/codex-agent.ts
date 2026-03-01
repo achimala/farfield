@@ -9,6 +9,7 @@ import {
   type SendRequestOptions,
 } from "@farfield/api";
 import {
+  ProtocolValidationError,
   parseThreadConversationState,
   parseThreadStreamStateChangedBroadcast,
   parseUserInputResponsePayload,
@@ -204,16 +205,28 @@ export class CodexAgentAdapter implements AgentAdapter {
       }
       this.streamEventsByThreadId.set(conversationId, current);
 
-      const parsedBroadcast = parseThreadStreamStateChangedBroadcast(frame);
+      try {
+        const parsedBroadcast = parseThreadStreamStateChangedBroadcast(frame);
+        if (parsedBroadcast.params.change.type !== "snapshot") {
+          return;
+        }
 
-      if (parsedBroadcast.params.change.type !== "snapshot") {
-        return;
+        const snapshot = parsedBroadcast.params.change.conversationState;
+        this.streamSnapshotByThreadId.set(conversationId, snapshot);
+        this.streamSnapshotOriginByThreadId.set(conversationId, "stream");
+        this.setThreadTitle(conversationId, snapshot.title);
+      } catch (error) {
+        logger.error(
+          {
+            conversationId,
+            error: toErrorMessage(error),
+            ...(error instanceof ProtocolValidationError
+              ? { issues: error.issues }
+              : {}),
+          },
+          "thread-stream-broadcast-parse-failed",
+        );
       }
-
-      const snapshot = parsedBroadcast.params.change.conversationState;
-      this.streamSnapshotByThreadId.set(conversationId, snapshot);
-      this.streamSnapshotOriginByThreadId.set(conversationId, "stream");
-      this.setThreadTitle(conversationId, snapshot.title);
     });
   }
 
@@ -564,8 +577,33 @@ export class CodexAgentAdapter implements AgentAdapter {
     const events: ReturnType<typeof parseThreadStreamStateChangedBroadcast>[] =
       [];
 
-    for (const event of rawEvents) {
-      events.push(parseThreadStreamStateChangedBroadcast(event));
+    for (let eventIndex = 0; eventIndex < rawEvents.length; eventIndex += 1) {
+      const event = rawEvents[eventIndex];
+      try {
+        events.push(parseThreadStreamStateChangedBroadcast(event));
+      } catch (error) {
+        logger.error(
+          {
+            threadId,
+            eventIndex,
+            error: toErrorMessage(error),
+            ...(error instanceof ProtocolValidationError
+              ? { issues: error.issues }
+              : {}),
+          },
+          "thread-stream-event-parse-failed",
+        );
+        return {
+          ownerClientId,
+          conversationState: snapshotState,
+          liveStateError: {
+            kind: "parseFailed",
+            message: toErrorMessage(error),
+            eventIndex,
+            patchIndex: null,
+          },
+        };
+      }
     }
 
     if (events.length === 0) {

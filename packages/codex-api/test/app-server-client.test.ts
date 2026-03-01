@@ -12,20 +12,19 @@ describe("AppServerClient.sendUserMessage", () => {
     const client = new AppServerClient(transport);
     await client.sendUserMessage("thread-1", "hello");
 
-    expect(transport.request).toHaveBeenCalledWith("sendUserMessage", {
-      conversationId: "thread-1",
-      items: [
+    expect(transport.request).toHaveBeenCalledWith("turn/start", {
+      threadId: "thread-1",
+      input: [
         {
           type: "text",
-          data: {
-            text: "hello"
-          }
+          text: "hello"
         }
-      ]
+      ],
+      attachments: []
     });
   });
 
-  it("accepts response when server adds extra keys", async () => {
+  it("accepts success response from turn/start", async () => {
     const transport: AppServerTransport = {
       request: vi.fn().mockResolvedValue({ ok: true }),
       close: vi.fn().mockResolvedValue(undefined)

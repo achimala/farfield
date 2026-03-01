@@ -149,6 +149,45 @@ describe("codex-protocol schemas", () => {
     expect(request?.method).toBe("item/tool/call");
   });
 
+  it("parses snapshot broadcast when requests include item/plan/requestImplementation", () => {
+    const parsed = parseThreadStreamStateChangedBroadcast({
+      type: "broadcast",
+      method: "thread-stream-state-changed",
+      sourceClientId: "client-123",
+      version: 4,
+      params: {
+        conversationId: "thread-123",
+        type: "thread-stream-state-changed",
+        version: 4,
+        change: {
+          type: "snapshot",
+          conversationState: {
+            id: "thread-123",
+            turns: [],
+            requests: [
+              {
+                id: "implement-plan:turn-1",
+                method: "item/plan/requestImplementation",
+                params: {
+                  threadId: "thread-123",
+                  turnId: "turn-1",
+                  planContent: "# Plan\n\nImplement everything"
+                }
+              }
+            ]
+          }
+        }
+      }
+    });
+
+    expect(parsed.params.change.type).toBe("snapshot");
+    const request =
+      parsed.params.change.type === "snapshot"
+        ? parsed.params.change.conversationState.requests[0]
+        : null;
+    expect(request?.method).toBe("item/plan/requestImplementation");
+  });
+
   it("parses snapshot broadcast when turn includes error item", () => {
     const parsed = parseThreadStreamStateChangedBroadcast({
       type: "broadcast",
@@ -254,6 +293,42 @@ describe("codex-protocol schemas", () => {
         }
       })
     ).toThrowError(/remove patches must not include value/);
+  });
+
+  it("rejects malformed snapshot request entries with schema details", () => {
+    expect(() =>
+      parseThreadStreamStateChangedBroadcast({
+        type: "broadcast",
+        method: "thread-stream-state-changed",
+        sourceClientId: "client-123",
+        version: 4,
+        params: {
+          conversationId: "thread-123",
+          type: "thread-stream-state-changed",
+          version: 4,
+          change: {
+            type: "snapshot",
+            conversationState: {
+              id: "thread-123",
+              turns: [],
+              requests: [
+                {
+                  id: "request-1",
+                  method: "item/tool/requestUserInput",
+                  params: {
+                    change: {
+                      conversationState: {
+                        requests: [{}]
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      })
+    ).toThrowError(/Invalid input: Should pass single schema/);
   });
 
   it("parses thread conversation state with userInputResponse item", () => {
@@ -799,6 +874,9 @@ describe("codex-protocol schemas", () => {
         updatedAt: 1700000000,
         cwd: "/tmp/workspace",
         source: "cli",
+        status: {
+          type: "idle"
+        },
         path: "/tmp/thread.jsonl",
         cliVersion: "0.1.0",
         turns: [
@@ -834,6 +912,9 @@ describe("codex-protocol schemas", () => {
         path: "/tmp/rollout.jsonl",
         cliVersion: "0.1.0",
         source: "vscode",
+        status: {
+          type: "idle"
+        },
         gitInfo: null,
         turns: []
       },
