@@ -28,7 +28,9 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  clearServerBaseUrl,
   createThread,
+  getDefaultServerBaseUrl,
   getAccountRateLimits,
   getHealth,
   getHistoryEntry,
@@ -36,7 +38,10 @@ import {
   getPendingApprovalRequests,
   getPendingThreadRequests,
   getPendingUserInputRequests,
+  getSavedServerBaseUrl,
+  getServerBaseUrl,
   getStreamEvents,
+  getUnifiedEventsUrl,
   readThread,
   getTraceStatus,
   interruptThread,
@@ -51,6 +56,7 @@ import {
   startTrace,
   stopTrace,
   submitUserInput,
+  setServerBaseUrl,
   type AgentId,
 } from "@/lib/api";
 import {
@@ -1035,6 +1041,11 @@ export function App(): React.JSX.Element {
     () => parseUiStateFromPath(window.location.pathname),
     [],
   );
+  const initialServerBaseUrl = useMemo(() => getServerBaseUrl(), []);
+  const initialHasSavedServerBaseUrl = useMemo(
+    () => getSavedServerBaseUrl() !== null,
+    [],
+  );
   const initialSnapshot = ENABLE_VIEW_SNAPSHOT_CACHE
     ? appViewSnapshotCache
     : null;
@@ -1094,6 +1105,14 @@ export function App(): React.JSX.Element {
   const [selectedAgentId, setSelectedAgentId] = useState<AgentId>(
     initialSnapshot?.selectedAgentId ?? "codex",
   );
+  const [serverBaseUrl, setServerBaseUrlState] =
+    useState<string>(initialServerBaseUrl);
+  const [serverBaseUrlDraft, setServerBaseUrlDraft] =
+    useState<string>(initialServerBaseUrl);
+  const [hasSavedServerTarget, setHasSavedServerTarget] = useState<boolean>(
+    initialHasSavedServerBaseUrl,
+  );
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
   /* UI state */
   const [activeTab, setActiveTab] = useState<"chat" | "debug">(
@@ -1205,6 +1224,12 @@ export function App(): React.JSX.Element {
     [threadListErrors],
   );
   const selectedAgentLabel = selectedAgentDescriptor?.label ?? "Agent";
+  const hasServerBaseUrlDraftChanges =
+    serverBaseUrlDraft.trim() !== serverBaseUrl;
+  const unifiedEventsUrl = useMemo(
+    () => getUnifiedEventsUrl(serverBaseUrl),
+    [serverBaseUrl],
+  );
   const upsertSidebarThread = useCallback((threadSummary: Thread) => {
     setThreads((previousThreads) => {
       const nextThreads = (() => {
@@ -2239,6 +2264,37 @@ export function App(): React.JSX.Element {
     }
   }, [loadCoreData, loadSelectedThread]);
 
+  const saveServerTarget = useCallback(async () => {
+    try {
+      setError("");
+      const normalizedBaseUrl = setServerBaseUrl(serverBaseUrlDraft);
+      setServerBaseUrlState(normalizedBaseUrl);
+      setServerBaseUrlDraft(normalizedBaseUrl);
+      setHasSavedServerTarget(true);
+      agentCacheRef.current = null;
+      providerCatalogCacheRef.current.clear();
+      await refreshAll();
+    } catch (e) {
+      setError(toErrorMessage(e));
+    }
+  }, [refreshAll, serverBaseUrlDraft]);
+
+  const useDefaultServerTarget = useCallback(async () => {
+    try {
+      setError("");
+      clearServerBaseUrl();
+      const defaultBaseUrl = getDefaultServerBaseUrl();
+      setServerBaseUrlState(defaultBaseUrl);
+      setServerBaseUrlDraft(defaultBaseUrl);
+      setHasSavedServerTarget(false);
+      agentCacheRef.current = null;
+      providerCatalogCacheRef.current.clear();
+      await refreshAll();
+    } catch (e) {
+      setError(toErrorMessage(e));
+    }
+  }, [refreshAll]);
+
   useEffect(() => {
     selectedThreadIdRef.current = selectedThreadId;
   }, [selectedThreadId]);
@@ -2558,7 +2614,7 @@ export function App(): React.JSX.Element {
         return;
       }
 
-      source = new EventSource("/api/unified/events");
+      source = new EventSource(unifiedEventsUrl);
       source.onopen = () => {
         reconnectDelayMs = 1000;
         if (hasOpenedConnection) {
@@ -2680,7 +2736,7 @@ export function App(): React.JSX.Element {
       window.removeEventListener("pageshow", onPageShow);
       closeEvents();
     };
-  }, []);
+  }, [unifiedEventsUrl]);
 
   useEffect(() => {
     if (!activeRequest) {
@@ -3830,7 +3886,11 @@ export function App(): React.JSX.Element {
         <div className="relative z-10 flex items-center justify-between gap-2">
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted/40 transition-colors cursor-default min-w-0">
+              <button
+                type="button"
+                onClick={() => setIsSettingsModalOpen(true)}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted/40 transition-colors cursor-pointer min-w-0 text-left"
+              >
                 <span
                   className={`h-2 w-2 rounded-full shrink-0 ${
                     allSystemsReady
@@ -3841,7 +3901,7 @@ export function App(): React.JSX.Element {
                   }`}
                 />
                 <span className="font-mono truncate">{commitLabel}</span>
-              </div>
+              </button>
             </TooltipTrigger>
             <TooltipContent
               side="top"
@@ -3874,6 +3934,9 @@ export function App(): React.JSX.Element {
                   Error: {health.state.lastError}
                 </div>
               )}
+              <div className="text-muted-foreground">
+                Click to open settings
+              </div>
             </TooltipContent>
           </Tooltip>
           <div className="flex items-center gap-1 shrink-0">
@@ -4650,6 +4713,103 @@ export function App(): React.JSX.Element {
           </div>
         </div>
       </div>
+      <AnimatePresence>
+        {isSettingsModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/55 backdrop-blur-[1px] p-4 md:p-8 flex items-center justify-center"
+            onClick={() => setIsSettingsModalOpen(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.98, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.98, opacity: 0 }}
+              transition={{ duration: 0.16 }}
+              onClick={(event) => event.stopPropagation()}
+              className="w-full max-w-xl rounded-xl border border-border bg-background shadow-2xl overflow-hidden"
+            >
+              <div className="flex items-center justify-between border-b border-border px-4 py-3">
+                <div>
+                  <div className="text-sm font-semibold">Settings</div>
+                  <div className="text-xs text-muted-foreground">
+                    Configure how this frontend connects to your server.
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => setIsSettingsModalOpen(false)}
+                  title="Close settings"
+                >
+                  <X size={14} />
+                </Button>
+              </div>
+
+              <div className="p-4 space-y-3">
+                <div className="space-y-1.5">
+                  <Label className="text-sm font-medium">Server</Label>
+                  <div className="text-xs text-muted-foreground">
+                    Use your Tailscale HTTPS URL.
+                  </div>
+                  <Input
+                    value={serverBaseUrlDraft}
+                    onChange={(e) => setServerBaseUrlDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void saveServerTarget();
+                      }
+                    }}
+                    placeholder="https://your-vpn-server.example.com"
+                    className="h-9 text-sm"
+                  />
+                </div>
+
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      void saveServerTarget();
+                    }}
+                    variant="outline"
+                    className="h-8 text-xs"
+                    disabled={
+                      serverBaseUrlDraft.trim().length === 0 ||
+                      !hasServerBaseUrlDraftChanges
+                    }
+                  >
+                    Save
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      void useDefaultServerTarget();
+                    }}
+                    variant="outline"
+                    className="h-8 text-xs"
+                  >
+                    Use automatic
+                  </Button>
+                </div>
+
+                <div className="text-xs text-muted-foreground break-all">
+                  Active: {serverBaseUrl}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  Mode:{" "}
+                  {hasSavedServerTarget
+                    ? "Saved server target"
+                    : "Automatic server target"}
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </TooltipProvider>
   );
 }

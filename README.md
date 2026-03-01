@@ -20,23 +20,46 @@ This is an independent project and is not affiliated with, endorsed by, or spons
 - Live agent monitoring and interrupts
 - Debug tab with full IPC history
 
-## Install & Run
+## Quick start (recommended)
+
+You can run the Farfield server locally, then use the hosted frontend at [farfield.app](https://farfield.app). This is always updated with the latest features, and saves you the trouble of hosting it yourself. You still need to expose the server securely, however, for remote access. We cover how to do this with Tailscale below, as a simple option.
+
+```bash
+bun install
+bun run server
+```
+
+`bun run server` runs only the backend on `0.0.0.0:4311`.
+
+If you need to pick agent providers:
+
+```bash
+bun run server -- --agents=opencode
+bun run server -- --agents=codex,opencode
+bun run server -- --agents=all
+```
+
+> **Warning:** This exposes the Farfield server on your network. Only use on trusted networks. See below for how to configure Tailscale as a VPN for secure remote access.
+
+## Local development and self-hosted frontend
+
+Use this if you are working on Farfield itself, or if you want to run both frontend and backend locally.
 
 ```bash
 bun install
 bun run dev
 ```
 
-Opens at `http://localhost:4312`. Defaults to Codex.
+Opens local frontend at `http://localhost:4312`.
 
-**Agent options:**
+More local dev options:
 
 ```bash
 bun run dev -- --agents=opencode             # OpenCode only
 bun run dev -- --agents=codex,opencode       # both
 bun run dev -- --agents=all                  # expands to codex,opencode
-bun run dev:remote                           # network-accessible (codex)
-bun run dev:remote -- --agents=opencode      # network-accessible (opencode)
+bun run dev:remote                           # exposes frontend + backend on your network
+bun run dev:remote -- --agents=opencode      # remote mode with OpenCode only
 ```
 
 > **Warning:** `dev:remote` exposes Farfield with no authentication. Only use on trusted networks.
@@ -67,6 +90,70 @@ FARFIELD_API_ORIGIN=http://127.0.0.1:4311 bun run start
 - Node.js 20+
 - Bun 1.2+
 - Codex or OpenCode installed locally
+
+## Detailed setup for hosted frontend access
+
+This is the detailed setup for the recommended model:
+
+- Hosted frontend (`https://farfield.app`)
+- Local Farfield server running on your machine
+- Secure VPN path using Tailscale
+
+You still need to run the server locally so it can talk to your coding agent.
+
+### 1) Start the Farfield server on your machine
+
+```bash
+HOST=0.0.0.0 PORT=4311 bun run --filter @farfield/server dev
+```
+
+Quick local check:
+
+```bash
+curl http://127.0.0.1:4311/api/health
+```
+
+### 2) Put Tailscale HTTPS in front of port 4311
+
+On the same machine:
+
+```bash
+tailscale serve --https=443 http://127.0.0.1:4311
+tailscale serve status
+```
+
+This gives you a URL like:
+
+```text
+https://<machine>.<tailnet>.ts.net
+```
+
+Check it from a device on your tailnet:
+
+```bash
+curl https://<machine>.<tailnet>.ts.net/api/health
+```
+
+### 3) Pair farfield.app to your server
+
+1. Visit farfield.app on your other device
+2. Click the status pill in the lower-left corner (green/red dot + commit hash) to open **Settings**.
+3. In **Server**, enter your Tailscale HTTPS URL, for example:
+
+```text
+https://<machine>.<tailnet>.ts.net
+(note: no port)
+```
+
+4. Click **Save**.
+
+Farfield stores this in browser storage and uses it for API calls and live event stream.
+
+### Notes
+
+- Do not use raw tailnet IPs with `https://` (for example `https://100.x.x.x:4311`) in the browser; this won't work.
+- If you use `tailscale serve --https=443`, do not include `:4311` in the URL you enter in Settings.
+- **Use automatic** in Settings clears the saved server URL and returns to built-in default behavior.
 
 ## Unified Architecture
 

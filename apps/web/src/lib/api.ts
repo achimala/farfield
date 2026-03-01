@@ -26,6 +26,15 @@ import {
 } from "@farfield/unified-surface";
 import { AppServerGetAccountRateLimitsResponseSchema } from "@farfield/protocol";
 import { z } from "zod";
+import {
+  buildServerUrl,
+  clearStoredServerTarget,
+  getDefaultServerBaseUrl as getDefaultStoredServerBaseUrl,
+  parseServerBaseUrl,
+  readStoredServerTarget,
+  resolveServerBaseUrl,
+  saveServerBaseUrl,
+} from "./server-target";
 
 const ApiEnvelopeSchema = z
   .object({
@@ -342,11 +351,40 @@ export class ApiRequestError extends Error {
   }
 }
 
+export function getServerBaseUrl(): string {
+  return resolveServerBaseUrl();
+}
+
+export function getSavedServerBaseUrl(): string | null {
+  const stored = readStoredServerTarget();
+  return stored?.baseUrl ?? null;
+}
+
+export function getDefaultServerBaseUrl(): string {
+  return getDefaultStoredServerBaseUrl();
+}
+
+export function setServerBaseUrl(value: string): string {
+  return saveServerBaseUrl(value).baseUrl;
+}
+
+export function clearServerBaseUrl(): void {
+  clearStoredServerTarget();
+}
+
+export function normalizeServerBaseUrl(value: string): string {
+  return parseServerBaseUrl(value);
+}
+
+export function getUnifiedEventsUrl(baseUrlOverride?: string): string {
+  return buildServerUrl("/api/unified/events", baseUrlOverride);
+}
+
 async function requestJson(
   path: string,
   init?: RequestInit,
 ): Promise<{ response: Response; payload: JsonValue }> {
-  const response = await fetch(path, init);
+  const response = await fetch(buildServerUrl(path), init);
   const payload = JsonValueSchema.parse(await response.json());
   return {
     response,
