@@ -7,8 +7,14 @@ import { z } from "zod";
 
 const FarfieldApiOriginEnvSchema = z.object({
   FARFIELD_API_ORIGIN: z.string().url().optional(),
-  REACT_COMPILER: z.enum(["0", "1", "true", "false"]).optional(),
-  REACT_PROFILING: z.enum(["0", "1", "true", "false"]).optional(),
+  REACT_COMPILER: z
+    .enum(["0", "1", "true", "false"])
+    .transform((value) => value === "1" || value === "true")
+    .optional(),
+  REACT_PROFILING: z
+    .enum(["0", "1", "true", "false"])
+    .transform((value) => value === "1" || value === "true")
+    .optional(),
 });
 const parsedEnv = FarfieldApiOriginEnvSchema.safeParse({
   FARFIELD_API_ORIGIN: process.env["FARFIELD_API_ORIGIN"],
@@ -24,14 +30,8 @@ if (!parsedEnv.success) {
 }
 const apiOrigin =
   parsedEnv.data.FARFIELD_API_ORIGIN ?? "http://127.0.0.1:4311";
-const reactCompilerOverride =
-  parsedEnv.data.REACT_COMPILER === undefined
-    ? null
-    : parsedEnv.data.REACT_COMPILER === "1" ||
-        parsedEnv.data.REACT_COMPILER === "true";
-const reactProfilingEnabled =
-  parsedEnv.data.REACT_PROFILING === "1" ||
-  parsedEnv.data.REACT_PROFILING === "true";
+const reactCompilerOverride = parsedEnv.data.REACT_COMPILER ?? null;
+const reactProfilingEnabled = parsedEnv.data.REACT_PROFILING ?? false;
 
 const resolveAlias: Record<string, string> = {
   "@": path.resolve(__dirname, "./src"),
