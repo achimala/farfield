@@ -787,7 +787,27 @@ describe("codex-protocol schemas", () => {
           }
         }
       })
-    ).toThrowError(/Expected string, received number/);
+    ).toThrowError(/UserInputResponsePayload did not match expected schema/);
+  });
+
+  it("parses command execution approval payload", () => {
+    const parsed = parseUserInputResponsePayload({
+      decision: "accept",
+    });
+
+    expect(parsed).toEqual({
+      decision: "accept",
+    });
+  });
+
+  it("parses legacy review approval payload", () => {
+    const parsed = parseUserInputResponsePayload({
+      decision: "approved_for_session",
+    });
+
+    expect(parsed).toEqual({
+      decision: "approved_for_session",
+    });
   });
 
   it("parses collaboration mode list response", () => {

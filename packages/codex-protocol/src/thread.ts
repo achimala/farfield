@@ -582,7 +582,98 @@ export const UserInputAnswerSchema = z
   })
   .passthrough();
 
-export const UserInputResponsePayloadSchema = ToolRequestUserInputResponseSchema.passthrough();
+const ExecPolicyAmendmentSchema = z.array(z.string());
+
+const NetworkPolicyRuleActionSchema = z.enum(["allow", "deny"]);
+
+const NetworkPolicyAmendmentSchema = z
+  .object({
+    action: NetworkPolicyRuleActionSchema,
+    host: z.string()
+  })
+  .strict();
+
+const CommandExecutionApprovalDecisionSchema = z.union([
+  z.literal("accept"),
+  z.literal("acceptForSession"),
+  z.literal("decline"),
+  z.literal("cancel"),
+  z
+    .object({
+      acceptWithExecpolicyAmendment: z
+        .object({
+          execpolicy_amendment: ExecPolicyAmendmentSchema
+        })
+        .strict()
+    })
+    .strict(),
+  z
+    .object({
+      applyNetworkPolicyAmendment: z
+        .object({
+          network_policy_amendment: NetworkPolicyAmendmentSchema
+        })
+        .strict()
+    })
+    .strict()
+]);
+
+const FileChangeApprovalDecisionSchema = z.enum([
+  "accept",
+  "acceptForSession",
+  "decline",
+  "cancel"
+]);
+
+const ReviewDecisionSchema = z.union([
+  z.literal("approved"),
+  z.literal("approved_for_session"),
+  z.literal("denied"),
+  z.literal("abort"),
+  z
+    .object({
+      approved_execpolicy_amendment: z
+        .object({
+          proposed_execpolicy_amendment: ExecPolicyAmendmentSchema
+        })
+        .strict()
+    })
+    .strict(),
+  z
+    .object({
+      network_policy_amendment: z
+        .object({
+          network_policy_amendment: NetworkPolicyAmendmentSchema
+        })
+        .strict()
+    })
+    .strict()
+]);
+
+const CommandExecutionRequestApprovalResponseSchema = z
+  .object({
+    decision: CommandExecutionApprovalDecisionSchema
+  })
+  .strict();
+
+const FileChangeRequestApprovalResponseSchema = z
+  .object({
+    decision: FileChangeApprovalDecisionSchema
+  })
+  .strict();
+
+const LegacyReviewApprovalResponseSchema = z
+  .object({
+    decision: ReviewDecisionSchema
+  })
+  .strict();
+
+export const UserInputResponsePayloadSchema = z.union([
+  ToolRequestUserInputResponseSchema.passthrough(),
+  CommandExecutionRequestApprovalResponseSchema,
+  FileChangeRequestApprovalResponseSchema,
+  LegacyReviewApprovalResponseSchema
+]);
 
 export type UserInputResponsePayload = z.infer<typeof UserInputResponsePayloadSchema>;
 

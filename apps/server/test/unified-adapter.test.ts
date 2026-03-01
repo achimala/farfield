@@ -382,7 +382,7 @@ describe("unified provider adapters", () => {
     }
   });
 
-  it("maps only user input requests into unified thread requests", async () => {
+  it("maps all thread request methods into unified thread requests", async () => {
     const threadWithMixedRequests: ThreadConversationState = {
       ...SAMPLE_THREAD,
       requests: [
@@ -408,6 +408,39 @@ describe("unified provider adapters", () => {
         },
         {
           id: "request-2",
+          method: "item/plan/requestImplementation",
+          params: {
+            threadId: SAMPLE_THREAD.id,
+            turnId: "turn-1",
+            planContent: "Implement the plan",
+          },
+        },
+        {
+          id: "request-3",
+          method: "item/commandExecution/requestApproval",
+          params: {
+            threadId: SAMPLE_THREAD.id,
+            turnId: "turn-1",
+            itemId: "item-2",
+            command: "rm -rf /tmp/example",
+            cwd: "/tmp/project",
+            reason: "Needs permission",
+            availableDecisions: ["accept", "decline"],
+          },
+        },
+        {
+          id: "request-4",
+          method: "item/fileChange/requestApproval",
+          params: {
+            threadId: SAMPLE_THREAD.id,
+            turnId: "turn-1",
+            itemId: "item-3",
+            reason: "Write file outside workspace",
+            grantRoot: "/tmp",
+          },
+        },
+        {
+          id: "request-5",
           method: "item/tool/call",
           params: {
             arguments: { value: "example" },
@@ -415,6 +448,48 @@ describe("unified provider adapters", () => {
             threadId: SAMPLE_THREAD.id,
             tool: "toolName",
             turnId: "turn-1",
+          },
+        },
+        {
+          id: "request-6",
+          method: "account/chatgptAuthTokens/refresh",
+          params: {
+            reason: "unauthorized",
+            previousAccountId: "account-1",
+          },
+        },
+        {
+          id: "request-7",
+          method: "applyPatchApproval",
+          params: {
+            conversationId: SAMPLE_THREAD.id,
+            callId: "call-2",
+            fileChanges: {
+              "/tmp/project/file.txt": {
+                type: "add",
+                content: "hello",
+              },
+            },
+            reason: "Needs write approval",
+            grantRoot: "/tmp/project",
+          },
+        },
+        {
+          id: "request-8",
+          method: "execCommandApproval",
+          params: {
+            conversationId: SAMPLE_THREAD.id,
+            callId: "call-3",
+            approvalId: "approval-1",
+            command: ["echo", "hello"],
+            cwd: "/tmp/project",
+            reason: "Needs shell approval",
+            parsedCmd: [
+              {
+                type: "unknown",
+                cmd: "echo hello",
+              },
+            ],
           },
         },
       ],
@@ -440,8 +515,59 @@ describe("unified provider adapters", () => {
       return;
     }
 
-    expect(result.thread.requests).toHaveLength(1);
+    expect(result.thread.requests).toHaveLength(8);
     expect(result.thread.requests[0]?.method).toBe("item/tool/requestUserInput");
     expect(result.thread.requests[0]?.params.questions[0]?.id).toBe("question-1");
+    expect(result.thread.requests[1]?.method).toBe(
+      "item/plan/requestImplementation",
+    );
+    expect(result.thread.requests[2]?.method).toBe(
+      "item/commandExecution/requestApproval",
+    );
+    expect(result.thread.requests[3]?.method).toBe(
+      "item/fileChange/requestApproval",
+    );
+    expect(result.thread.requests[4]?.method).toBe("item/tool/call");
+    expect(result.thread.requests[5]?.method).toBe(
+      "account/chatgptAuthTokens/refresh",
+    );
+    expect(result.thread.requests[6]?.method).toBe("applyPatchApproval");
+    expect(result.thread.requests[7]?.method).toBe("execCommandApproval");
+  });
+
+  it("maps waiting state flags from list thread status", async () => {
+    const adapter = createCodexAdapter();
+    adapter.listThreads = async () => ({
+      data: [
+        {
+          ...SAMPLE_THREAD_LIST_ITEM,
+          status: {
+            type: "active",
+            activeFlags: ["waitingOnApproval", "waitingOnUserInput"],
+          },
+        },
+      ],
+      nextCursor: null,
+    });
+
+    const unified = new AgentUnifiedProviderAdapter("codex", adapter);
+    const result = await unified.execute(
+      UnifiedCommandSchema.parse({
+        kind: "listThreads",
+        provider: "codex",
+        limit: 30,
+        archived: false,
+        all: true,
+        maxPages: 10,
+      }),
+    );
+
+    expect(result.kind).toBe("listThreads");
+    if (result.kind !== "listThreads") {
+      return;
+    }
+
+    expect(result.data[0]?.waitingOnApproval).toBe(true);
+    expect(result.data[0]?.waitingOnUserInput).toBe(true);
   });
 });

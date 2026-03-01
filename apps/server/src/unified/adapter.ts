@@ -1,7 +1,6 @@
 import {
   assertNever,
   type ThreadConversationState,
-  type UserInputRequest,
   UserInputRequestSchema,
 } from "@farfield/protocol";
 import {
@@ -22,6 +21,7 @@ import {
   type UnifiedThread,
   type UnifiedThreadSummary,
 } from "@farfield/unified-surface";
+import { z } from "zod";
 import type { AgentAdapter } from "../agents/types.js";
 
 type UnifiedCommandByKind<K extends UnifiedCommandKind> = Extract<
@@ -32,15 +32,6 @@ type UnifiedCommandResultByKind<K extends UnifiedCommandKind> = Extract<
   UnifiedCommandResult,
   { kind: K }
 >;
-
-function parseThreadConversationUserInputRequest(
-  request: ThreadConversationState["requests"][number],
-): UserInputRequest | null {
-  if (request.method !== "item/tool/requestUserInput") {
-    return null;
-  }
-  return UserInputRequestSchema.parse(request);
-}
 
 type UnifiedCommandHandler<K extends UnifiedCommandKind> = (
   command: UnifiedCommandByKind<K>,
@@ -553,12 +544,20 @@ function mapThreadSummary(
     preview: string;
     title?: string | null | undefined;
     isGenerating?: boolean | undefined;
+    waitingOnApproval?: boolean | undefined;
+    waitingOnUserInput?: boolean | undefined;
+    status?: unknown;
     createdAt: number;
     updatedAt: number;
     cwd?: string | undefined;
     source?: string | undefined;
   },
 ): UnifiedThreadSummary {
+  const waitingState = parseThreadWaitingState(thread.status);
+  const waitingOnApproval =
+    thread.waitingOnApproval ?? waitingState?.waitingOnApproval;
+  const waitingOnUserInput =
+    thread.waitingOnUserInput ?? waitingState?.waitingOnUserInput;
   return {
     id: thread.id,
     provider,
@@ -569,8 +568,51 @@ function mapThreadSummary(
       : {}),
     createdAt: normalizeUnixTimestampSeconds(thread.createdAt),
     updatedAt: normalizeUnixTimestampSeconds(thread.updatedAt),
+    ...(waitingOnApproval !== undefined ? { waitingOnApproval } : {}),
+    ...(waitingOnUserInput !== undefined ? { waitingOnUserInput } : {}),
     ...(thread.cwd ? { cwd: thread.cwd } : {}),
     ...(thread.source ? { source: thread.source } : {}),
+  };
+}
+
+const ThreadSummaryActiveFlagSchema = z.enum([
+  "waitingOnApproval",
+  "waitingOnUserInput",
+]);
+
+const ThreadSummaryStatusSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      type: z.literal("active"),
+      activeFlags: z.array(ThreadSummaryActiveFlagSchema),
+    })
+    .passthrough(),
+  z.object({ type: z.literal("idle") }).passthrough(),
+  z.object({ type: z.literal("notLoaded") }).passthrough(),
+  z.object({ type: z.literal("systemError") }).passthrough(),
+]);
+
+function parseThreadWaitingState(
+  status: unknown,
+): {
+  waitingOnApproval: boolean;
+  waitingOnUserInput: boolean;
+} | null {
+  const parsed = ThreadSummaryStatusSchema.safeParse(status);
+  if (!parsed.success) {
+    return null;
+  }
+
+  if (parsed.data.type !== "active") {
+    return {
+      waitingOnApproval: false,
+      waitingOnUserInput: false,
+    };
+  }
+
+  return {
+    waitingOnApproval: parsed.data.activeFlags.includes("waitingOnApproval"),
+    waitingOnUserInput: parsed.data.activeFlags.includes("waitingOnUserInput"),
   };
 }
 
@@ -599,32 +641,7 @@ function mapThread(
         : {}),
       items: turn.items.map(mapTurnItem),
     })),
-    requests: thread.requests
-      .map((request) => parseThreadConversationUserInputRequest(request))
-      .filter((request) => request !== null)
-      .map((request) => ({
-        id: request.id,
-        method: request.method,
-        params: {
-          threadId: request.params.threadId,
-          turnId: request.params.turnId,
-          itemId: request.params.itemId,
-          questions: request.params.questions.map((question) => ({
-            id: question.id,
-            header: question.header,
-            question: question.question,
-            isOther: question.isOther ?? false,
-            isSecret: question.isSecret ?? false,
-            options: (question.options ?? []).map((option) => ({
-              label: option.label,
-              description: option.description,
-            })),
-          })),
-        },
-        ...(typeof request.completed === "boolean"
-          ? { completed: request.completed }
-          : {}),
-      })),
+    requests: thread.requests.map((request) => mapThreadRequest(request)),
     ...(thread.createdAt !== undefined
       ? { createdAt: normalizeUnixTimestampSeconds(thread.createdAt) }
       : {}),
@@ -662,6 +679,197 @@ function mapThread(
     ...(thread.cwd ? { cwd: thread.cwd } : {}),
     ...(thread.source ? { source: thread.source } : {}),
   };
+}
+
+function mapThreadRequest(
+  request: ThreadConversationState["requests"][number],
+): UnifiedThread["requests"][number] {
+  switch (request.method) {
+    case "item/tool/requestUserInput": {
+      const parsed = UserInputRequestSchema.parse(request);
+      return {
+        id: parsed.id,
+        method: parsed.method,
+        params: {
+          threadId: parsed.params.threadId,
+          turnId: parsed.params.turnId,
+          itemId: parsed.params.itemId,
+          questions: parsed.params.questions.map((question) => ({
+            id: question.id,
+            header: question.header,
+            question: question.question,
+            isOther: question.isOther ?? false,
+            isSecret: question.isSecret ?? false,
+            options: (question.options ?? []).map((option) => ({
+              label: option.label,
+              description: option.description,
+            })),
+          })),
+        },
+        ...(typeof parsed.completed === "boolean"
+          ? { completed: parsed.completed }
+          : {}),
+      };
+    }
+
+    case "item/plan/requestImplementation":
+      return {
+        id: request.id,
+        method: request.method,
+        params: {
+          threadId: request.params.threadId,
+          turnId: request.params.turnId,
+          planContent: request.params.planContent,
+        },
+        ...(typeof request.completed === "boolean"
+          ? { completed: request.completed }
+          : {}),
+      };
+
+    case "account/chatgptAuthTokens/refresh":
+      return {
+        id: request.id,
+        method: request.method,
+        params: {
+          reason: request.params.reason,
+          ...(request.params.previousAccountId !== undefined
+            ? { previousAccountId: request.params.previousAccountId }
+            : {}),
+        },
+        ...(typeof request.completed === "boolean"
+          ? { completed: request.completed }
+          : {}),
+      };
+
+    case "applyPatchApproval":
+      return {
+        id: request.id,
+        method: request.method,
+        params: {
+          conversationId: request.params.conversationId,
+          callId: request.params.callId,
+          fileChanges: jsonRecordFromString(
+            JSON.stringify(request.params.fileChanges),
+          ),
+          reason: request.params.reason,
+          grantRoot: request.params.grantRoot,
+        },
+        ...(typeof request.completed === "boolean"
+          ? { completed: request.completed }
+          : {}),
+      };
+
+    case "execCommandApproval":
+      return {
+        id: request.id,
+        method: request.method,
+        params: {
+          conversationId: request.params.conversationId,
+          callId: request.params.callId,
+          approvalId: request.params.approvalId,
+          command: request.params.command,
+          cwd: request.params.cwd,
+          reason: request.params.reason,
+          parsedCmd: jsonArrayFromString(JSON.stringify(request.params.parsedCmd)),
+        },
+        ...(typeof request.completed === "boolean"
+          ? { completed: request.completed }
+          : {}),
+      };
+
+    case "item/commandExecution/requestApproval":
+      return {
+        id: request.id,
+        method: request.method,
+        params: {
+          threadId: request.params.threadId,
+          turnId: request.params.turnId,
+          itemId: request.params.itemId,
+          ...(request.params.approvalId !== undefined
+            ? { approvalId: request.params.approvalId }
+            : {}),
+          ...(request.params.reason !== undefined
+            ? { reason: request.params.reason }
+            : {}),
+          ...(request.params.networkApprovalContext !== undefined
+            ? {
+                networkApprovalContext: request.params.networkApprovalContext,
+              }
+            : {}),
+          ...(request.params.command !== undefined
+            ? { command: request.params.command }
+            : {}),
+          ...(request.params.cwd !== undefined ? { cwd: request.params.cwd } : {}),
+          ...(request.params.commandActions !== undefined
+            ? { commandActions: request.params.commandActions }
+            : {}),
+          ...(request.params.additionalPermissions !== undefined
+            ? {
+                additionalPermissions: request.params.additionalPermissions,
+              }
+            : {}),
+          ...(request.params.proposedExecpolicyAmendment !== undefined
+            ? {
+                proposedExecpolicyAmendment:
+                  request.params.proposedExecpolicyAmendment,
+              }
+            : {}),
+          ...(request.params.proposedNetworkPolicyAmendments !== undefined
+            ? {
+                proposedNetworkPolicyAmendments:
+                  request.params.proposedNetworkPolicyAmendments,
+              }
+            : {}),
+          ...(request.params.availableDecisions !== undefined
+            ? { availableDecisions: request.params.availableDecisions }
+            : {}),
+        },
+        ...(typeof request.completed === "boolean"
+          ? { completed: request.completed }
+          : {}),
+      };
+
+    case "item/fileChange/requestApproval":
+      return {
+        id: request.id,
+        method: request.method,
+        params: {
+          threadId: request.params.threadId,
+          turnId: request.params.turnId,
+          itemId: request.params.itemId,
+          ...(request.params.reason !== undefined
+            ? { reason: request.params.reason }
+            : {}),
+          ...(request.params.grantRoot !== undefined
+            ? { grantRoot: request.params.grantRoot }
+            : {}),
+        },
+        ...(typeof request.completed === "boolean"
+          ? { completed: request.completed }
+          : {}),
+      };
+
+    case "item/tool/call":
+      return {
+        id: request.id,
+        method: request.method,
+        params: {
+          threadId: request.params.threadId,
+          turnId: request.params.turnId,
+          callId: request.params.callId,
+          tool: request.params.tool,
+          arguments: jsonValueFromString(JSON.stringify(request.params.arguments)),
+        },
+        ...(typeof request.completed === "boolean"
+          ? { completed: request.completed }
+          : {}),
+      };
+
+    default:
+      throw new Error(
+        `Unsupported thread request method: ${String(request.method)}`,
+      );
+  }
 }
 
 function normalizeUnixTimestampSeconds(value: number): number {
@@ -954,6 +1162,14 @@ function mapTurnItem(
 
 function jsonValueFromString(serialized: string): JsonValue {
   return JsonValueSchema.parse(JSON.parse(serialized));
+}
+
+function jsonArrayFromString(serialized: string): JsonValue[] {
+  return z.array(JsonValueSchema).parse(JSON.parse(serialized));
+}
+
+function jsonRecordFromString(serialized: string): Record<string, JsonValue> {
+  return z.record(JsonValueSchema).parse(JSON.parse(serialized));
 }
 
 type MissingCommandHandlers = Exclude<

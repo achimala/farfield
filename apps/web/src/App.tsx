@@ -30,6 +30,8 @@ import {
   getHealth,
   getHistoryEntry,
   getLiveState,
+  getPendingApprovalRequests,
+  getPendingThreadRequests,
   getPendingUserInputRequests,
   getStreamEvents,
   readThread,
@@ -50,13 +52,17 @@ import {
 } from "@/lib/api";
 import {
   UnifiedEventSchema,
+  type UnifiedThreadRequestResponse,
   type UnifiedFeatureAvailability,
   type UnifiedFeatureId,
 } from "@farfield/unified-surface";
 import { useTheme } from "@/hooks/useTheme";
 import { ChatTimeline, type ChatTimelineEntry } from "@/components/ChatTimeline";
 import { ChatComposer } from "@/components/ChatComposer";
+import { PendingApprovalCard } from "@/components/PendingApprovalCard";
+import { PendingInformationalRequestCard } from "@/components/PendingInformationalRequestCard";
 import { PendingRequestCard } from "@/components/PendingRequestCard";
+import { SidebarThreadWaitingIndicators } from "@/components/SidebarThreadWaitingIndicators";
 import { StreamEventCard } from "@/components/StreamEventCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -96,6 +102,8 @@ type HistoryResponse = Awaited<ReturnType<typeof listDebugHistory>>;
 type HistoryDetail = Awaited<ReturnType<typeof getHistoryEntry>>;
 type CreatedThread = Awaited<ReturnType<typeof createThread>>["thread"];
 type PendingRequest = ReturnType<typeof getPendingUserInputRequests>[number];
+type PendingApprovalRequest = ReturnType<typeof getPendingApprovalRequests>[number];
+type PendingThreadRequest = ReturnType<typeof getPendingThreadRequests>[number];
 type PendingRequestId = PendingRequest["id"];
 type Thread = SidebarThreadsResponse["rows"][number];
 type ThreadListProviderErrors = SidebarThreadsResponse["errors"];
@@ -225,6 +233,8 @@ function buildThreadSignature(thread: Thread): string {
     String(thread.createdAt ?? 0),
     thread.title ?? "",
     thread.isGenerating ? "1" : "0",
+    thread.waitingOnApproval ? "1" : "0",
+    thread.waitingOnUserInput ? "1" : "0",
     thread.preview,
     thread.provider,
     thread.cwd ?? "",
@@ -270,6 +280,8 @@ function buildOptimisticThreadSummary(
     ...(thread.cwd ? { cwd: thread.cwd } : {}),
     ...(thread.source ? { source: thread.source } : {}),
     isGenerating: false,
+    waitingOnApproval: false,
+    waitingOnUserInput: false,
   };
 }
 
@@ -285,7 +297,11 @@ function mergeIncomingThreads(
     if (
       (thread.title !== undefined || previous?.title === undefined) &&
       (thread.isGenerating !== undefined ||
-        previous?.isGenerating === undefined)
+        previous?.isGenerating === undefined) &&
+      (thread.waitingOnApproval !== undefined ||
+        previous?.waitingOnApproval === undefined) &&
+      (thread.waitingOnUserInput !== undefined ||
+        previous?.waitingOnUserInput === undefined)
     ) {
       return thread;
     }
@@ -298,6 +314,14 @@ function mergeIncomingThreads(
       previous?.isGenerating === undefined
         ? {}
         : { isGenerating: previous.isGenerating }),
+      ...(thread.waitingOnApproval !== undefined ||
+      previous?.waitingOnApproval === undefined
+        ? {}
+        : { waitingOnApproval: previous.waitingOnApproval }),
+      ...(thread.waitingOnUserInput !== undefined ||
+      previous?.waitingOnUserInput === undefined
+        ? {}
+        : { waitingOnUserInput: previous.waitingOnUserInput }),
     };
   });
 
@@ -516,6 +540,56 @@ function buildModeSignature(
   effort: string,
 ): string {
   return `${modeKey}|${modelId}|${effort}`;
+}
+
+function buildApprovalResponse(
+  request: PendingApprovalRequest,
+  action: "approve" | "deny",
+): UnifiedThreadRequestResponse {
+  switch (request.method) {
+    case "item/commandExecution/requestApproval": {
+      const available = request.params.availableDecisions ?? [];
+      if (action === "approve") {
+        const accept =
+          available.find((decision) => decision === "accept") ?? null;
+        if (accept) {
+          return { decision: accept };
+        }
+        const acceptForSession =
+          available.find((decision) => decision === "acceptForSession") ??
+          null;
+        if (acceptForSession) {
+          return { decision: acceptForSession };
+        }
+        return { decision: "accept" };
+      }
+
+      const decline =
+        available.find((decision) => decision === "decline") ?? null;
+      if (decline) {
+        return { decision: decline };
+      }
+      const cancel =
+        available.find((decision) => decision === "cancel") ?? null;
+      if (cancel) {
+        return { decision: cancel };
+      }
+      return { decision: "decline" };
+    }
+
+    case "item/fileChange/requestApproval":
+      return {
+        decision: action === "approve" ? "accept" : "decline",
+      };
+
+    case "applyPatchApproval":
+    case "execCommandApproval":
+      return {
+        decision: action === "approve" ? "approved" : "denied",
+      };
+  }
+
+  throw new Error("Unsupported approval request method");
 }
 
 function normalizeNullableModeValue(value: string | null | undefined): string {
@@ -1072,6 +1146,28 @@ export function App(): React.JSX.Element {
     if (!conversationState) return [] as PendingRequest[];
     return getPendingUserInputRequests(conversationState);
   }, [conversationState]);
+  const pendingThreadRequests = useMemo(() => {
+    if (!conversationState) return [] as PendingThreadRequest[];
+    return getPendingThreadRequests(conversationState);
+  }, [conversationState]);
+  const pendingApprovalRequests = useMemo(() => {
+    if (!conversationState) return [] as PendingApprovalRequest[];
+    return getPendingApprovalRequests(conversationState);
+  }, [conversationState]);
+  const pendingInformationalRequests = useMemo(
+    () =>
+      pendingThreadRequests.filter(
+        (request) =>
+          request.method !== "item/tool/requestUserInput" &&
+          request.method !== "item/commandExecution/requestApproval" &&
+          request.method !== "item/fileChange/requestApproval" &&
+          request.method !== "applyPatchApproval" &&
+          request.method !== "execCommandApproval",
+      ),
+    [pendingThreadRequests],
+  );
+  const activeApprovalRequest = pendingApprovalRequests[0] ?? null;
+  const activeInformationalRequest = pendingInformationalRequests[0] ?? null;
   const liveStateStreamError = useMemo(() => {
     const errorState = liveState?.liveStateError;
     if (!errorState) {
@@ -1088,6 +1184,23 @@ export function App(): React.JSX.Element {
       pendingRequests[0]
     );
   }, [pendingRequests, selectedRequestId]);
+  const selectedThreadWaitingState = useMemo(() => {
+    if (!selectedThreadId) {
+      return null;
+    }
+    if (!conversationState || conversationState.id !== selectedThreadId) {
+      return null;
+    }
+    return {
+      waitingOnApproval: pendingApprovalRequests.length > 0,
+      waitingOnUserInput: pendingRequests.length > 0,
+    };
+  }, [
+    conversationState,
+    pendingApprovalRequests.length,
+    pendingRequests.length,
+    selectedThreadId,
+  ]);
 
   const resolvedSelectedThreadProvider = useMemo((): AgentId | null => {
     if (!selectedThreadId) {
@@ -2771,6 +2884,39 @@ export function App(): React.JSX.Element {
     selectedThreadId,
   ]);
 
+  const resolvePendingApprovalRequest = useCallback(
+    async (action: "approve" | "deny") => {
+      if (!selectedThreadId || !activeApprovalRequest) return;
+      if (!hasResolvedSelectedThreadProvider) {
+        setError("Thread provider is still loading");
+        return;
+      }
+
+      setIsBusy(true);
+      try {
+        setError("");
+        await submitUserInput({
+          provider: activeThreadAgentId,
+          threadId: selectedThreadId,
+          requestId: activeApprovalRequest.id,
+          response: buildApprovalResponse(activeApprovalRequest, action),
+        });
+        await refreshAll();
+      } catch (e) {
+        setError(toErrorMessage(e));
+      } finally {
+        setIsBusy(false);
+      }
+    },
+    [
+      activeApprovalRequest,
+      activeThreadAgentId,
+      hasResolvedSelectedThreadProvider,
+      refreshAll,
+      selectedThreadId,
+    ],
+  );
+
   const runInterrupt = useCallback(async () => {
     if (!selectedThreadId || !canInterruptForActiveAgent) return;
     if (!hasResolvedSelectedThreadProvider) {
@@ -3246,6 +3392,14 @@ export function App(): React.JSX.Element {
                         const threadIsGenerating =
                           Boolean(thread.isGenerating) ||
                           (isSelected && isGenerating);
+                        const waitingOnApproval =
+                          isSelected && selectedThreadWaitingState
+                            ? selectedThreadWaitingState.waitingOnApproval
+                            : Boolean(thread.waitingOnApproval);
+                        const waitingOnUserInput =
+                          isSelected && selectedThreadWaitingState
+                            ? selectedThreadWaitingState.waitingOnUserInput
+                            : Boolean(thread.waitingOnUserInput);
                         return (
                           <Button
                             key={thread.id}
@@ -3277,6 +3431,10 @@ export function App(): React.JSX.Element {
                               </span>
                             </span>
                             <span className="shrink-0 flex items-center gap-1.5">
+                              <SidebarThreadWaitingIndicators
+                                waitingOnApproval={waitingOnApproval}
+                                waitingOnUserInput={waitingOnUserInput}
+                              />
                               {threadIsGenerating && (
                                 <Loader2
                                   size={11}
@@ -3634,6 +3792,21 @@ export function App(): React.JSX.Element {
                           onSkip={() => void skipPendingRequest()}
                           isBusy={isBusy}
                         />
+                      ) : activeApprovalRequest &&
+                        canSubmitUserInputForActiveAgent &&
+                        hasResolvedSelectedThreadProvider ? (
+                        <PendingApprovalCard
+                          request={activeApprovalRequest}
+                          isBusy={isBusy}
+                          onDeny={() => void resolvePendingApprovalRequest("deny")}
+                          onApprove={() =>
+                            void resolvePendingApprovalRequest("approve")
+                          }
+                        />
+                      ) : activeInformationalRequest ? (
+                        <PendingInformationalRequestCard
+                          method={activeInformationalRequest.method}
+                        />
                       ) : (
                         <motion.div
                           key="composer"
@@ -3799,9 +3972,9 @@ export function App(): React.JSX.Element {
                                 />
                               </span>
                             )}
-                            {pendingRequests.length > 0 && (
+                            {pendingThreadRequests.length > 0 && (
                               <span className="shrink-0 text-xs text-amber-500 dark:text-amber-400">
-                                {pendingRequests.length} pending
+                                {pendingThreadRequests.length} pending
                               </span>
                             )}
                           </div>

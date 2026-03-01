@@ -1,9 +1,10 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   UnifiedFeatureAvailability,
   UnifiedFeatureId,
   UnifiedItem,
+  UnifiedThread,
 } from "@farfield/unified-surface";
 import { App } from "../src/App";
 
@@ -243,53 +244,15 @@ type ThreadSummary = {
   preview: string;
   title?: string | null;
   isGenerating?: boolean;
+  waitingOnApproval?: boolean;
+  waitingOnUserInput?: boolean;
   createdAt: number;
   updatedAt: number;
   cwd?: string;
   source?: string;
 };
 
-type UnifiedThreadFixture = {
-  id: string;
-  provider: ProviderId;
-  turns: Array<{
-    id: string;
-    status: string;
-    items: UnifiedItem[];
-  }>;
-  requests: Array<{
-    id: string;
-    method: "item/tool/requestUserInput";
-    params: {
-      threadId: string;
-      turnId: string;
-      itemId: string;
-      questions: Array<{
-        id: string;
-        header: string;
-        question: string;
-        isOther?: boolean;
-        isSecret?: boolean;
-        options: Array<{
-          label: string;
-          description: string;
-        }>;
-      }>;
-    };
-    completed?: boolean;
-  }>;
-  updatedAt: number;
-  latestModel: string;
-  latestReasoningEffort: string | null;
-  latestCollaborationMode: {
-    mode: string;
-    settings: {
-      model: string;
-      reasoningEffort: string | null;
-      developerInstructions: null;
-    };
-  };
-};
+type UnifiedThreadFixture = UnifiedThread;
 
 let featureMatrixFixture: {
   ok: true;
@@ -365,6 +328,7 @@ function buildConversationStateFixture(
   options?: {
     updatedAt?: number;
     includePendingRequest?: boolean;
+    customRequests?: UnifiedThreadFixture["requests"];
     provider?: ProviderId;
     latestReasoningEffort?: string | null;
     collaborationModeReasoningEffort?: string | null;
@@ -387,30 +351,34 @@ function buildConversationStateFixture(
         items: options?.turnItems ?? [],
       },
     ],
-    requests: includePendingRequest
-      ? [
-          {
-            id: "request-1",
-            method: "item/tool/requestUserInput",
-            params: {
-              threadId,
-              turnId: "turn-1",
-              itemId: "item-1",
-              questions: [
-                {
-                  id: "question-1",
-                  header: "Question",
-                  question: "Pick one option",
-                  options: [
-                    { label: "Option A", description: "Use option A" },
-                    { label: "Option B", description: "Use option B" },
-                  ],
-                },
-              ],
+    requests:
+      options?.customRequests ??
+      (includePendingRequest
+        ? [
+            {
+              id: "request-1",
+              method: "item/tool/requestUserInput",
+              params: {
+                threadId,
+                turnId: "turn-1",
+                itemId: "item-1",
+                questions: [
+                  {
+                    id: "question-1",
+                    header: "Question",
+                    question: "Pick one option",
+                    isOther: false,
+                    isSecret: false,
+                    options: [
+                      { label: "Option A", description: "Use option A" },
+                      { label: "Option B", description: "Use option B" },
+                    ],
+                  },
+                ],
+              },
             },
-          },
-        ]
-      : [],
+          ]
+        : []),
     updatedAt,
     latestModel: modelId,
     latestReasoningEffort,
@@ -686,6 +654,123 @@ describe("App", () => {
     render(<App />);
     expect((await screen.findAllByText("Farfield")).length).toBeGreaterThan(0);
     expect(await screen.findByText("No thread selected")).toBeTruthy();
+  });
+
+  it("shows waiting indicators in the sidebar from thread summaries", async () => {
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: "thread-waiting",
+          provider: "codex",
+          preview: "thread preview",
+          createdAt: 1700000000,
+          updatedAt: 1700000000,
+          cwd: "/tmp/project",
+          source: "codex",
+          waitingOnApproval: true,
+          waitingOnUserInput: true,
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    render(<App />);
+
+    expect(await screen.findByTitle("Waiting for approval")).toBeTruthy();
+    expect(await screen.findByTitle("Waiting for user input")).toBeTruthy();
+  });
+
+  it("shows waiting indicators in the sidebar for selected thread live requests", async () => {
+    const threadId = "thread-live-waiting";
+    const approvalRequest: UnifiedThreadFixture["requests"][number] = {
+      id: "approval-live-1",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        threadId,
+        turnId: "turn-1",
+        itemId: "item-approval-live-1",
+        reason: "Need approval",
+      },
+    };
+    const userInputRequest: UnifiedThreadFixture["requests"][number] = {
+      id: "request-user-input-live-1",
+      method: "item/tool/requestUserInput",
+      params: {
+        threadId,
+        turnId: "turn-1",
+        itemId: "item-user-input-live-1",
+        questions: [
+          {
+            id: "question-live-1",
+            header: "Question",
+            question: "Choose",
+            isOther: false,
+            isSecret: false,
+            options: [
+              { label: "A", description: "Pick A" },
+              { label: "B", description: "Pick B" },
+            ],
+          },
+        ],
+      },
+    };
+
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: threadId,
+          provider: "codex",
+          preview: "thread preview",
+          createdAt: 1700000000,
+          updatedAt: 1700000000,
+          cwd: "/tmp/project",
+          source: "codex",
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    readThreadResolver = (targetThreadId: string) => ({
+      ok: true,
+      thread: buildConversationStateFixture(targetThreadId, "gpt-old-codex", {
+        customRequests: [approvalRequest, userInputRequest],
+      }),
+    });
+
+    liveStateResolver = (targetThreadId: string, _provider: ProviderId) => ({
+      kind: "readLiveState",
+      threadId: targetThreadId,
+      ownerClientId: "client-1",
+      conversationState: buildConversationStateFixture(
+        targetThreadId,
+        "gpt-old-codex",
+        {
+          customRequests: [approvalRequest, userInputRequest],
+        },
+      ),
+      liveStateError: null,
+    });
+
+    render(<App />);
+
+    expect(await screen.findByTitle("Waiting for approval")).toBeTruthy();
+    expect(await screen.findByTitle("Waiting for user input")).toBeTruthy();
   });
 
   it("keeps a direct thread route selected when it is readable but not in current thread list page", async () => {
@@ -1124,6 +1209,99 @@ describe("App", () => {
     expect(screen.queryByText("Pick one option")).toBeNull();
     expect(screen.queryByText("Option A")).toBeNull();
     expect(screen.queryByText("Option B")).toBeNull();
+  });
+
+  it("shows approval requests from thread state and submits approve decisions", async () => {
+    const threadId = "thread-with-approval-request";
+    const approvalRequest: UnifiedThreadFixture["requests"][number] = {
+      id: "approval-1",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        threadId,
+        turnId: "turn-1",
+        itemId: "item-approval-1",
+        reason: "Need elevated permission",
+      },
+    };
+
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: threadId,
+          provider: "codex",
+          preview: "thread preview",
+          createdAt: 1700000000,
+          updatedAt: 1700000000,
+          cwd: "/tmp/project",
+          source: "codex",
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    readThreadResolver = (targetThreadId: string) => ({
+      ok: true,
+      thread: buildConversationStateFixture(targetThreadId, "gpt-old-codex", {
+        customRequests: [approvalRequest],
+      }),
+    });
+
+    liveStateResolver = (targetThreadId: string, _provider: ProviderId) => ({
+      kind: "readLiveState",
+      threadId: targetThreadId,
+      ownerClientId: "client-1",
+      conversationState: buildConversationStateFixture(
+        targetThreadId,
+        "gpt-old-codex",
+        {
+          customRequests: [approvalRequest],
+        },
+      ),
+      liveStateError: null,
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Approval Needed")).toBeTruthy();
+    expect(
+      await screen.findByText("item/commandExecution/requestApproval"),
+    ).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Approve" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Deny" })).toBeTruthy();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+
+    type UnifiedCommandPayload = {
+      kind?: string;
+      response?: {
+        decision?: string;
+      };
+    };
+
+    await waitFor(() => {
+      const payloads = vi
+        .mocked(fetch)
+        .mock
+        .calls
+        .filter(([input]) => String(input).includes("/api/unified/command"))
+        .map(([, init]) =>
+          JSON.parse(String(init?.body ?? "{}")) as UnifiedCommandPayload,
+        );
+
+      const submitCommand =
+        payloads.find((payload) => payload.kind === "submitUserInput") ?? null;
+
+      expect(submitCommand).not.toBeNull();
+      expect(submitCommand?.response?.decision).toBe("accept");
+    });
   });
 
   it("uses live turn items when live reduction fails", async () => {

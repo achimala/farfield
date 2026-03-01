@@ -316,13 +316,28 @@ export class CodexAgentAdapter implements AgentAdapter {
       const isGenerating = snapshot
         ? isThreadStateGenerating(snapshot)
         : undefined;
+      const waitingState = snapshot ? deriveThreadWaitingState(snapshot) : null;
+      const waitingFlags = waitingState
+        ? {
+            ...(waitingState.waitingOnApproval
+              ? { waitingOnApproval: true }
+              : {}),
+            ...(waitingState.waitingOnUserInput
+              ? { waitingOnUserInput: true }
+              : {}),
+          }
+        : {};
       if (title === undefined) {
-        if (isGenerating === undefined) {
+        if (
+          isGenerating === undefined &&
+          Object.keys(waitingFlags).length === 0
+        ) {
           return thread;
         }
         return {
           ...thread,
-          isGenerating,
+          ...(isGenerating !== undefined ? { isGenerating } : {}),
+          ...waitingFlags,
         };
       }
 
@@ -330,6 +345,7 @@ export class CodexAgentAdapter implements AgentAdapter {
         ...thread,
         title,
         ...(isGenerating !== undefined ? { isGenerating } : {}),
+        ...waitingFlags,
       };
     });
 
@@ -1174,6 +1190,43 @@ function isThreadStateGenerating(state: ThreadConversationState): boolean {
   }
 
   return false;
+}
+
+function deriveThreadWaitingState(
+  state: ThreadConversationState,
+): {
+  waitingOnApproval: boolean;
+  waitingOnUserInput: boolean;
+} {
+  let waitingOnApproval = false;
+  let waitingOnUserInput = false;
+
+  for (const request of state.requests) {
+    if (request.completed === true) {
+      continue;
+    }
+
+    switch (request.method) {
+      case "item/tool/requestUserInput":
+        waitingOnUserInput = true;
+        break;
+      case "item/commandExecution/requestApproval":
+      case "item/fileChange/requestApproval":
+      case "applyPatchApproval":
+      case "execCommandApproval":
+        waitingOnApproval = true;
+        break;
+      case "item/tool/call":
+      case "account/chatgptAuthTokens/refresh":
+      case "item/plan/requestImplementation":
+        break;
+    }
+  }
+
+  return {
+    waitingOnApproval,
+    waitingOnUserInput,
+  };
 }
 
 function buildSyntheticSnapshotEvent(

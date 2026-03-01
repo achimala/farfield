@@ -1,4 +1,5 @@
 import {
+  UnifiedApprovalThreadRequestSchema,
   JsonValueSchema,
   UnifiedCollaborationModeSchema,
   UnifiedCommandResponseSchema,
@@ -10,14 +11,17 @@ import {
   UnifiedProviderIdSchema,
   UnifiedThreadSchema,
   UnifiedThreadSummarySchema,
+  UnifiedThreadRequestResponseSchema,
   UnifiedUserInputRequestIdSchema,
   type JsonValue,
+  type UnifiedApprovalThreadRequest,
   type UnifiedCommand,
   type UnifiedCommandResult,
   type UnifiedFeatureAvailability,
   type UnifiedFeatureId,
   type UnifiedProviderId,
   type UnifiedThread,
+  type UnifiedThreadRequestResponse,
   type UnifiedUserInputRequest,
 } from "@farfield/unified-surface";
 import { z } from "zod";
@@ -145,18 +149,6 @@ const CreateThreadResponseSchema = z
   .object({
     threadId: z.string(),
     thread: UnifiedThreadSchema,
-  })
-  .strict();
-
-const UserInputResponsePayloadSchema = z
-  .object({
-    answers: z.record(
-      z
-        .object({
-          answers: z.array(z.string()),
-        })
-        .strict(),
-    ),
   })
   .strict();
 
@@ -835,9 +827,9 @@ export async function submitUserInput(input: {
   threadId: string;
   ownerClientId?: string;
   requestId: z.infer<typeof UnifiedUserInputRequestIdSchema>;
-  response: z.infer<typeof UserInputResponsePayloadSchema>;
+  response: UnifiedThreadRequestResponse;
 }): Promise<void> {
-  UserInputResponsePayloadSchema.parse(input.response);
+  UnifiedThreadRequestResponseSchema.parse(input.response);
 
   const result = await runUnifiedCommand({
     kind: "submitUserInput",
@@ -938,7 +930,35 @@ export function getPendingUserInputRequests(
   }
 
   return conversationState.requests.filter(
+    (request): request is UnifiedUserInputRequest =>
+      request.method === "item/tool/requestUserInput" &&
+      request.completed !== true,
+  );
+}
+
+export function getPendingThreadRequests(
+  conversationState: UnifiedThread | null,
+): UnifiedThread["requests"] {
+  if (!conversationState) {
+    return [];
+  }
+
+  return conversationState.requests.filter(
     (request) => request.completed !== true,
+  );
+}
+
+export function getPendingApprovalRequests(
+  conversationState: UnifiedThread | null,
+): UnifiedApprovalThreadRequest[] {
+  if (!conversationState) {
+    return [];
+  }
+
+  return conversationState.requests.filter(
+    (request): request is UnifiedApprovalThreadRequest =>
+      UnifiedApprovalThreadRequestSchema.safeParse(request).success &&
+      request.completed !== true,
   );
 }
 

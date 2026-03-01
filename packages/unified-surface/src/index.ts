@@ -134,6 +134,173 @@ export const UnifiedUserInputQuestionSchema = z
   .strict();
 export type UnifiedUserInputQuestion = z.infer<typeof UnifiedUserInputQuestionSchema>;
 
+const UnifiedUserInputAnswerSchema = z
+  .object({
+    answers: z.array(z.string())
+  })
+  .strict();
+
+export const UnifiedUserInputResponseSchema = z
+  .object({
+    answers: z.record(UnifiedUserInputAnswerSchema)
+  })
+  .strict();
+export type UnifiedUserInputResponse = z.infer<typeof UnifiedUserInputResponseSchema>;
+
+const UnifiedNetworkApprovalProtocolSchema = z.enum([
+  "http",
+  "https",
+  "socks5Tcp",
+  "socks5Udp"
+]);
+
+const UnifiedNetworkApprovalContextSchema = z
+  .object({
+    host: z.string(),
+    protocol: UnifiedNetworkApprovalProtocolSchema
+  })
+  .strict();
+
+const UnifiedNetworkPolicyRuleActionSchema = z.enum(["allow", "deny"]);
+
+const UnifiedNetworkPolicyAmendmentSchema = z
+  .object({
+    action: UnifiedNetworkPolicyRuleActionSchema,
+    host: z.string()
+  })
+  .strict();
+
+const UnifiedAdditionalFileSystemPermissionsSchema = z
+  .object({
+    read: z.union([z.array(z.string()), z.null()]),
+    write: z.union([z.array(z.string()), z.null()])
+  })
+  .strict();
+
+const UnifiedAdditionalMacOsPermissionsSchema = z
+  .object({
+    accessibility: z.union([z.boolean(), z.null()]).optional(),
+    automations: z.union([z.boolean(), z.array(z.string()), z.null()]).optional(),
+    calendar: z.union([z.boolean(), z.null()]).optional(),
+    preferences: z.union([z.boolean(), z.string(), z.null()]).optional()
+  })
+  .strict();
+
+const UnifiedAdditionalPermissionProfileSchema = z
+  .object({
+    network: z.union([z.boolean(), z.null()]),
+    fileSystem: z.union([UnifiedAdditionalFileSystemPermissionsSchema, z.null()]),
+    macos: z.union([UnifiedAdditionalMacOsPermissionsSchema, z.null()])
+  })
+  .strict();
+
+const UnifiedRequestedCommandActionSchema = z
+  .object({
+    type: NonEmptyStringSchema,
+    command: z.string().optional(),
+    name: z.string().optional(),
+    path: NullableStringSchema.optional(),
+    query: NullableStringSchema.optional()
+  })
+  .strict();
+
+const UnifiedCommandExecutionApprovalDecisionSchema = z.union([
+  z.literal("accept"),
+  z.literal("acceptForSession"),
+  z.literal("decline"),
+  z.literal("cancel"),
+  z
+    .object({
+      acceptWithExecpolicyAmendment: z
+        .object({
+          execpolicy_amendment: z.array(z.string())
+        })
+        .strict()
+    })
+    .strict(),
+  z
+    .object({
+      applyNetworkPolicyAmendment: z
+        .object({
+          network_policy_amendment: UnifiedNetworkPolicyAmendmentSchema
+        })
+        .strict()
+    })
+    .strict()
+]);
+export type UnifiedCommandExecutionApprovalDecision = z.infer<
+  typeof UnifiedCommandExecutionApprovalDecisionSchema
+>;
+
+const UnifiedFileChangeApprovalDecisionSchema = z.enum([
+  "accept",
+  "acceptForSession",
+  "decline",
+  "cancel"
+]);
+export type UnifiedFileChangeApprovalDecision = z.infer<typeof UnifiedFileChangeApprovalDecisionSchema>;
+
+const UnifiedLegacyReviewDecisionSchema = z.union([
+  z.literal("approved"),
+  z.literal("approved_for_session"),
+  z.literal("denied"),
+  z.literal("abort"),
+  z
+    .object({
+      approved_execpolicy_amendment: z
+        .object({
+          proposed_execpolicy_amendment: z.array(z.string())
+        })
+        .strict()
+    })
+    .strict(),
+  z
+    .object({
+      network_policy_amendment: z
+        .object({
+          network_policy_amendment: UnifiedNetworkPolicyAmendmentSchema
+        })
+        .strict()
+    })
+    .strict()
+]);
+export type UnifiedLegacyReviewDecision = z.infer<typeof UnifiedLegacyReviewDecisionSchema>;
+
+export const UnifiedCommandExecutionApprovalResponseSchema = z
+  .object({
+    decision: UnifiedCommandExecutionApprovalDecisionSchema
+  })
+  .strict();
+export type UnifiedCommandExecutionApprovalResponse = z.infer<
+  typeof UnifiedCommandExecutionApprovalResponseSchema
+>;
+
+export const UnifiedFileChangeApprovalResponseSchema = z
+  .object({
+    decision: UnifiedFileChangeApprovalDecisionSchema
+  })
+  .strict();
+export type UnifiedFileChangeApprovalResponse = z.infer<
+  typeof UnifiedFileChangeApprovalResponseSchema
+>;
+
+export const UnifiedLegacyReviewApprovalResponseSchema = z
+  .object({
+    decision: UnifiedLegacyReviewDecisionSchema
+  })
+  .strict();
+export type UnifiedLegacyReviewApprovalResponse = z.infer<
+  typeof UnifiedLegacyReviewApprovalResponseSchema
+>;
+
+export const UnifiedThreadRequestResponseSchema = z.union([
+  UnifiedUserInputResponseSchema,
+  UnifiedCommandExecutionApprovalResponseSchema,
+  UnifiedFileChangeApprovalResponseSchema,
+  UnifiedLegacyReviewApprovalResponseSchema
+]);
+export type UnifiedThreadRequestResponse = z.infer<typeof UnifiedThreadRequestResponseSchema>;
+
 export const UnifiedUserInputRequestSchema = z
   .object({
     id: UnifiedUserInputRequestIdSchema,
@@ -150,6 +317,175 @@ export const UnifiedUserInputRequestSchema = z
   })
   .strict();
 export type UnifiedUserInputRequest = z.infer<typeof UnifiedUserInputRequestSchema>;
+
+export const UnifiedCommandExecutionApprovalRequestSchema = z
+  .object({
+    id: UnifiedUserInputRequestIdSchema,
+    method: z.literal("item/commandExecution/requestApproval"),
+    params: z
+      .object({
+        threadId: NonEmptyStringSchema,
+        turnId: NonEmptyStringSchema,
+        itemId: NonEmptyStringSchema,
+        approvalId: z.union([z.string(), z.null()]).optional(),
+        reason: NullableStringSchema.optional(),
+        networkApprovalContext: z
+          .union([UnifiedNetworkApprovalContextSchema, z.null()])
+          .optional(),
+        command: NullableStringSchema.optional(),
+        cwd: NullableStringSchema.optional(),
+        commandActions: z
+          .union([z.array(UnifiedRequestedCommandActionSchema), z.null()])
+          .optional(),
+        additionalPermissions: z
+          .union([UnifiedAdditionalPermissionProfileSchema, z.null()])
+          .optional(),
+        proposedExecpolicyAmendment: z.union([z.array(z.string()), z.null()]).optional(),
+        proposedNetworkPolicyAmendments: z
+          .union([z.array(UnifiedNetworkPolicyAmendmentSchema), z.null()])
+          .optional(),
+        availableDecisions: z
+          .union([z.array(UnifiedCommandExecutionApprovalDecisionSchema), z.null()])
+          .optional()
+      })
+      .strict(),
+    completed: z.boolean().optional()
+  })
+  .strict();
+export type UnifiedCommandExecutionApprovalRequest = z.infer<
+  typeof UnifiedCommandExecutionApprovalRequestSchema
+>;
+
+export const UnifiedFileChangeApprovalRequestSchema = z
+  .object({
+    id: UnifiedUserInputRequestIdSchema,
+    method: z.literal("item/fileChange/requestApproval"),
+    params: z
+      .object({
+        threadId: NonEmptyStringSchema,
+        turnId: NonEmptyStringSchema,
+        itemId: NonEmptyStringSchema,
+        reason: NullableStringSchema.optional(),
+        grantRoot: NullableStringSchema.optional()
+      })
+      .strict(),
+    completed: z.boolean().optional()
+  })
+  .strict();
+export type UnifiedFileChangeApprovalRequest = z.infer<
+  typeof UnifiedFileChangeApprovalRequestSchema
+>;
+
+export const UnifiedPlanImplementationRequestSchema = z
+  .object({
+    id: UnifiedUserInputRequestIdSchema,
+    method: z.literal("item/plan/requestImplementation"),
+    params: z
+      .object({
+        threadId: NonEmptyStringSchema,
+        turnId: NonEmptyStringSchema,
+        planContent: z.string()
+      })
+      .strict(),
+    completed: z.boolean().optional()
+  })
+  .strict();
+export type UnifiedPlanImplementationRequest = z.infer<typeof UnifiedPlanImplementationRequestSchema>;
+
+export const UnifiedDynamicToolCallRequestSchema = z
+  .object({
+    id: UnifiedUserInputRequestIdSchema,
+    method: z.literal("item/tool/call"),
+    params: z
+      .object({
+        threadId: NonEmptyStringSchema,
+        turnId: NonEmptyStringSchema,
+        callId: NonEmptyStringSchema,
+        tool: NonEmptyStringSchema,
+        arguments: JsonValueSchema
+      })
+      .strict(),
+    completed: z.boolean().optional()
+  })
+  .strict();
+export type UnifiedDynamicToolCallRequest = z.infer<typeof UnifiedDynamicToolCallRequestSchema>;
+
+export const UnifiedChatgptAuthTokensRefreshRequestSchema = z
+  .object({
+    id: UnifiedUserInputRequestIdSchema,
+    method: z.literal("account/chatgptAuthTokens/refresh"),
+    params: z
+      .object({
+        reason: z.literal("unauthorized"),
+        previousAccountId: z.union([z.string(), z.null()]).optional()
+      })
+      .strict(),
+    completed: z.boolean().optional()
+  })
+  .strict();
+export type UnifiedChatgptAuthTokensRefreshRequest = z.infer<
+  typeof UnifiedChatgptAuthTokensRefreshRequestSchema
+>;
+
+export const UnifiedApplyPatchApprovalRequestSchema = z
+  .object({
+    id: UnifiedUserInputRequestIdSchema,
+    method: z.literal("applyPatchApproval"),
+    params: z
+      .object({
+        conversationId: NonEmptyStringSchema,
+        callId: NonEmptyStringSchema,
+        fileChanges: z.record(JsonValueSchema),
+        reason: NullableStringSchema,
+        grantRoot: NullableStringSchema
+      })
+      .strict(),
+    completed: z.boolean().optional()
+  })
+  .strict();
+export type UnifiedApplyPatchApprovalRequest = z.infer<typeof UnifiedApplyPatchApprovalRequestSchema>;
+
+export const UnifiedExecCommandApprovalRequestSchema = z
+  .object({
+    id: UnifiedUserInputRequestIdSchema,
+    method: z.literal("execCommandApproval"),
+    params: z
+      .object({
+        conversationId: NonEmptyStringSchema,
+        callId: NonEmptyStringSchema,
+        approvalId: z.union([z.string(), z.null()]),
+        command: z.array(z.string()),
+        cwd: z.string(),
+        reason: NullableStringSchema,
+        parsedCmd: z.array(JsonValueSchema)
+      })
+      .strict(),
+    completed: z.boolean().optional()
+  })
+  .strict();
+export type UnifiedExecCommandApprovalRequest = z.infer<
+  typeof UnifiedExecCommandApprovalRequestSchema
+>;
+
+export const UnifiedApprovalThreadRequestSchema = z.union([
+  UnifiedCommandExecutionApprovalRequestSchema,
+  UnifiedFileChangeApprovalRequestSchema,
+  UnifiedApplyPatchApprovalRequestSchema,
+  UnifiedExecCommandApprovalRequestSchema
+]);
+export type UnifiedApprovalThreadRequest = z.infer<typeof UnifiedApprovalThreadRequestSchema>;
+
+export const UnifiedThreadRequestSchema = z.union([
+  UnifiedUserInputRequestSchema,
+  UnifiedPlanImplementationRequestSchema,
+  UnifiedCommandExecutionApprovalRequestSchema,
+  UnifiedFileChangeApprovalRequestSchema,
+  UnifiedDynamicToolCallRequestSchema,
+  UnifiedChatgptAuthTokensRefreshRequestSchema,
+  UnifiedApplyPatchApprovalRequestSchema,
+  UnifiedExecCommandApprovalRequestSchema
+]);
+export type UnifiedThreadRequest = z.infer<typeof UnifiedThreadRequestSchema>;
 
 const UnifiedUserMessageItemSchema = z
   .object({
@@ -496,7 +832,7 @@ export const UnifiedThreadSchema = z
     id: NonEmptyStringSchema,
     provider: UnifiedProviderIdSchema,
     turns: z.array(UnifiedTurnSchema),
-    requests: z.array(UnifiedUserInputRequestSchema),
+    requests: z.array(UnifiedThreadRequestSchema),
     createdAt: NonNegativeIntSchema.optional(),
     updatedAt: NonNegativeIntSchema.optional(),
     title: NullableStringSchema.optional(),
@@ -516,6 +852,8 @@ export const UnifiedThreadSummarySchema = z
     preview: z.string(),
     title: NullableStringSchema.optional(),
     isGenerating: z.boolean().optional(),
+    waitingOnApproval: z.boolean().optional(),
+    waitingOnUserInput: z.boolean().optional(),
     createdAt: NonNegativeIntSchema,
     updatedAt: NonNegativeIntSchema,
     cwd: z.string().optional(),
@@ -623,17 +961,7 @@ const UnifiedCommandSubmitUserInputSchema = z
     threadId: NonEmptyStringSchema,
     ownerClientId: z.string().optional(),
     requestId: UnifiedUserInputRequestIdSchema,
-    response: z
-      .object({
-        answers: z.record(
-          z
-            .object({
-              answers: z.array(z.string())
-            })
-            .strict()
-        )
-      })
-      .strict()
+    response: UnifiedThreadRequestResponseSchema
   })
   .strict();
 
@@ -871,7 +1199,7 @@ const UnifiedEventUserInputRequestedSchema = z
   .object({
     kind: z.literal("userInputRequested"),
     threadId: NonEmptyStringSchema,
-    request: UnifiedUserInputRequestSchema
+    request: UnifiedThreadRequestSchema
   })
   .strict();
 
