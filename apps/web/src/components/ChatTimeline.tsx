@@ -126,7 +126,7 @@ export const ChatTimeline = memo(function ChatTimeline({
             animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, y: 8 }}
             transition={{ duration: 0.18 }}
-            className="absolute left-1/2 -translate-x-1/2 bottom-[7.25rem] md:bottom-[7.75rem] z-20"
+            className="absolute left-1/2 -translate-x-1/2 bottom-[calc(env(safe-area-inset-bottom)+7.25rem)] md:bottom-[7.75rem] z-20"
           >
             <Button
               type="button"

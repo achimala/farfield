@@ -3967,42 +3967,88 @@ export function App(): React.JSX.Element {
                   return null;
                 }
                 return (
-                  <div className="hidden sm:flex items-center gap-1.5 mr-1.5">
-                    {windows.map((windowEntry) => {
-                      const colorClass =
-                        windowEntry.usedPct > 85
-                          ? "text-danger"
-                          : windowEntry.usedPct > 60
-                            ? "text-amber-500 dark:text-amber-400"
-                            : "text-muted-foreground/60";
-                      return (
-                        <Tooltip key={windowEntry.label}>
-                          <TooltipTrigger asChild>
-                            <span
-                              className={`inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-muted/50 ${colorClass}`}
-                            >
-                              <Zap size={9} />
-                              {windowEntry.usedPct}%
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <div className="text-xs space-y-0.5">
-                              <div className="font-medium">{windowEntry.label}</div>
-                              <div>{windowEntry.usedPct}% used</div>
-                              {windowEntry.resetAt && (
-                                <div className="text-muted-foreground">
-                                  Resets{" "}
-                                  {new Date(
-                                    windowEntry.resetAt * 1000,
-                                  ).toLocaleTimeString()}
+                  <>
+                    <div className="sm:hidden flex items-center gap-1 mr-1">
+                      {windows.slice(0, 2).map((windowEntry) => {
+                        const colorClass =
+                          windowEntry.usedPct > 85
+                            ? "text-danger"
+                            : windowEntry.usedPct > 60
+                              ? "text-amber-500 dark:text-amber-400"
+                              : "text-muted-foreground/70";
+                        const compactLabel = windowEntry.label.startsWith("W")
+                          ? "W"
+                          : "S";
+                        return (
+                          <Tooltip key={`mobile-${windowEntry.label}`}>
+                            <TooltipTrigger asChild>
+                              <span
+                                className={`inline-flex items-center gap-0.5 text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-muted/50 max-w-[3.75rem] ${colorClass}`}
+                              >
+                                <Zap size={8} />
+                                {compactLabel}
+                                {windowEntry.usedPct}%
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <div className="text-xs space-y-0.5">
+                                <div className="font-medium">
+                                  {windowEntry.label}
                                 </div>
-                              )}
-                            </div>
-                          </TooltipContent>
-                        </Tooltip>
-                      );
-                    })}
-                  </div>
+                                <div>{windowEntry.usedPct}% used</div>
+                                {windowEntry.resetAt && (
+                                  <div className="text-muted-foreground">
+                                    Resets{" "}
+                                    {new Date(
+                                      windowEntry.resetAt * 1000,
+                                    ).toLocaleTimeString()}
+                                  </div>
+                                )}
+                              </div>
+                            </TooltipContent>
+                          </Tooltip>
+                        );
+                      })}
+                    </div>
+                    <div className="hidden sm:flex items-center gap-1.5 mr-1.5">
+                      {windows.map((windowEntry) => {
+                        const colorClass =
+                          windowEntry.usedPct > 85
+                            ? "text-danger"
+                            : windowEntry.usedPct > 60
+                              ? "text-amber-500 dark:text-amber-400"
+                              : "text-muted-foreground/60";
+                        return (
+                          <Tooltip key={windowEntry.label}>
+                            <TooltipTrigger asChild>
+                              <span
+                                className={`inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-muted/50 ${colorClass}`}
+                              >
+                                <Zap size={9} />
+                                {windowEntry.usedPct}%
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <div className="text-xs space-y-0.5">
+                                <div className="font-medium">
+                                  {windowEntry.label}
+                                </div>
+                                <div>{windowEntry.usedPct}% used</div>
+                                {windowEntry.resetAt && (
+                                  <div className="text-muted-foreground">
+                                    Resets{" "}
+                                    {new Date(
+                                      windowEntry.resetAt * 1000,
+                                    ).toLocaleTimeString()}
+                                  </div>
+                                )}
+                              </div>
+                            </TooltipContent>
+                          </Tooltip>
+                        );
+                      })}
+                    </div>
+                  </>
                 );
               })()}
               {showUsageBadges && sessionTokenUsage && (() => {
@@ -4033,40 +4079,76 @@ export function App(): React.JSX.Element {
                     : String(sessionTotalTokens);
 
                 return (
-                  <div className="hidden sm:flex items-center gap-1.5 mr-1.5">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span
-                          className={`inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-muted/50 ${colorClass}`}
-                        >
-                          <Activity size={9} />
-                          Chat{" "}
-                          {windowLabel
-                            ? `${contextLabel}/${windowLabel}`
-                            : contextLabel}
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <div className="text-xs space-y-0.5">
-                          <div className="font-medium">Current chat</div>
-                          <div>{contextLabel} tokens in current context</div>
-                          {windowLabel && (
+                  <>
+                    <div className="sm:hidden flex items-center mr-1">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span
+                            className={`inline-flex items-center gap-0.5 text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-muted/50 max-w-[5.5rem] truncate ${colorClass}`}
+                          >
+                            <Activity size={8} />
+                            C
+                            {windowLabel
+                              ? `${contextLabel}/${windowLabel}`
+                              : contextLabel}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <div className="text-xs space-y-0.5">
+                            <div className="font-medium">Current chat</div>
+                            <div>{contextLabel} tokens in current context</div>
+                            {windowLabel && (
+                              <div className="text-muted-foreground">
+                                {windowLabel} token context window
+                              </div>
+                            )}
+                            {usedPct !== null && (
+                              <div className="text-muted-foreground">
+                                {usedPct}% of context used
+                              </div>
+                            )}
                             <div className="text-muted-foreground">
-                              {windowLabel} token context window
+                              Session total: {sessionTotalLabel} tokens
                             </div>
-                          )}
-                          {usedPct !== null && (
-                            <div className="text-muted-foreground">
-                              {usedPct}% of context used
-                            </div>
-                          )}
-                          <div className="text-muted-foreground">
-                            Session total: {sessionTotalLabel} tokens
                           </div>
-                        </div>
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                    <div className="hidden sm:flex items-center gap-1.5 mr-1.5">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span
+                            className={`inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-muted/50 ${colorClass}`}
+                          >
+                            <Activity size={9} />
+                            Chat{" "}
+                            {windowLabel
+                              ? `${contextLabel}/${windowLabel}`
+                              : contextLabel}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <div className="text-xs space-y-0.5">
+                            <div className="font-medium">Current chat</div>
+                            <div>{contextLabel} tokens in current context</div>
+                            {windowLabel && (
+                              <div className="text-muted-foreground">
+                                {windowLabel} token context window
+                              </div>
+                            )}
+                            {usedPct !== null && (
+                              <div className="text-muted-foreground">
+                                {usedPct}% of context used
+                              </div>
+                            )}
+                            <div className="text-muted-foreground">
+                              Session total: {sessionTotalLabel} tokens
+                            </div>
+                          </div>
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </>
                 );
               })()}
               <IconBtn
@@ -4186,7 +4268,7 @@ export function App(): React.JSX.Element {
                 />
 
                 {/* Input area */}
-                <div className="relative z-10 -mt-6 px-4 pt-6 pb-0 md:pb-6 shrink-0">
+                <div className="relative z-10 -mt-6 px-4 pt-6 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] md:pb-6 shrink-0">
                   <div
                     aria-hidden="true"
                     className="pointer-events-none absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-transparent via-background/85 to-background"
