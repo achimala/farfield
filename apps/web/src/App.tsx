@@ -1195,51 +1195,76 @@ export function App(): React.JSX.Element {
       : availableAgentIds.length > 0 &&
         canCreateThreadForSelectedAgent &&
         canSendMessageForActiveAgent;
-  const flatConversationItems = useMemo(() => {
-    const flattened: FlatConversationItem[] = [];
-    let previousRenderedTurnIndex = -1;
+  const conversationWindow = useMemo(() => {
+    type IndexedConversationItem = {
+      key: string;
+      item: ConversationTurnItem;
+      turnIndex: number;
+      turnIsInProgress: boolean;
+    };
 
-    turns.forEach((turn, turnIndex) => {
+    const newestFirst: IndexedConversationItem[] = [];
+    let hasHidden = false;
+
+    outer: for (let turnIndex = turns.length - 1; turnIndex >= 0; turnIndex -= 1) {
+      const turn = turns[turnIndex];
+      if (!turn) {
+        continue;
+      }
       const items = turn.items ?? [];
       const isLastTurn = turnIndex === turns.length - 1;
       const turnInProgress = isLastTurn && isGenerating;
 
-      items.forEach((item, itemIndexInTurn) => {
-        if (!shouldRenderConversationItem(item)) {
-          return;
+      for (
+        let itemIndexInTurn = items.length - 1;
+        itemIndexInTurn >= 0;
+        itemIndexInTurn -= 1
+      ) {
+        const item = items[itemIndexInTurn];
+        if (!item || !shouldRenderConversationItem(item)) {
+          continue;
         }
-        const isFirstRenderedItem = flattened.length === 0;
-        const startsNewTurn = previousRenderedTurnIndex !== turnIndex;
-        const spacingTop = isFirstRenderedItem ? 0 : startsNewTurn ? 16 : 10;
-        flattened.push({
+        if (newestFirst.length >= visibleChatItemLimit) {
+          hasHidden = true;
+          break outer;
+        }
+        newestFirst.push({
           key: item.id ?? `${turnIndex}-${itemIndexInTurn}`,
           item,
-          isLast: false,
+          turnIndex,
           turnIsInProgress: turnInProgress,
-          previousItemType: items[itemIndexInTurn - 1]?.type,
-          nextItemType: items[itemIndexInTurn + 1]?.type,
-          spacingTop,
         });
-        previousRenderedTurnIndex = turnIndex;
-      });
-    });
-
-    if (flattened.length > 0) {
-      flattened[flattened.length - 1]!.isLast = true;
+      }
     }
 
-    return flattened;
-  }, [isGenerating, turns]);
-  const conversationItemCount = flatConversationItems.length;
-  const firstVisibleChatItemIndex = Math.max(
-    0,
-    conversationItemCount - visibleChatItemLimit,
-  );
-  const hasHiddenChatItems = firstVisibleChatItemIndex > 0;
-  const visibleConversationItems = useMemo(
-    () => flatConversationItems.slice(firstVisibleChatItemIndex),
-    [flatConversationItems, firstVisibleChatItemIndex],
-      );
+    const chronological = newestFirst.reverse();
+    const visibleItems: FlatConversationItem[] = chronological.map(
+      (entry, index) => {
+        const previousEntry = chronological[index - 1];
+        const nextEntry = chronological[index + 1];
+        const startsNewTurn = previousEntry?.turnIndex !== entry.turnIndex;
+        const spacingTop = index === 0 ? 0 : startsNewTurn ? 16 : 10;
+
+        return {
+          key: entry.key,
+          item: entry.item,
+          isLast: index === chronological.length - 1,
+          turnIsInProgress: entry.turnIsInProgress,
+          previousItemType: previousEntry?.item.type,
+          nextItemType: nextEntry?.item.type,
+          spacingTop,
+        };
+      },
+    );
+
+    return {
+      hasHidden,
+      visibleItems,
+    };
+  }, [isGenerating, turns, visibleChatItemLimit]);
+  const hasHiddenChatItems = conversationWindow.hasHidden;
+  const visibleConversationItems = conversationWindow.visibleItems;
+  const visibleConversationItemCount = visibleConversationItems.length;
   const commitLabel = health?.state.gitCommit ?? "unknown";
   const scrollChatToBottom = useCallback(() => {
     const scroller = scrollRef.current;
@@ -1258,6 +1283,18 @@ export function App(): React.JSX.Element {
     setMobileSidebarDragOffset(null);
     mobileSidebarSwipeRef.current = null;
   }, []);
+  const handleSelectReferencedThread = useCallback(
+    (threadId: string) => {
+      const nextPath = buildPathFromUiState(threadId, "chat");
+      if (window.location.pathname !== nextPath) {
+        window.history.pushState(null, "", nextPath);
+      }
+      setSelectedThreadId(threadId);
+      setActiveTab("chat");
+      closeMobileSidebar();
+    },
+    [closeMobileSidebar],
+  );
   const mobileSidebarRendered = mobileSidebarOpen || mobileSidebarDragOffset !== null;
   const mobileSidebarOffsetX =
     mobileSidebarDragOffset ?? (mobileSidebarOpen ? 0 : -MOBILE_SIDEBAR_WIDTH_PX);
@@ -2385,7 +2422,7 @@ export function App(): React.JSX.Element {
       return;
     }
     scrollChatToBottom();
-  }, [activeTab, conversationItemCount, scrollChatToBottom]);
+  }, [activeTab, visibleConversationItemCount, scrollChatToBottom]);
 
   // Keep bottom pinned when expanded/collapsed blocks change chat height.
   useEffect(() => {
@@ -3429,15 +3466,12 @@ export function App(): React.JSX.Element {
                   turnsLength={turns.length}
                   hasAnyAgent={availableAgentIds.length > 0}
                   hasHiddenChatItems={hasHiddenChatItems}
-                  firstVisibleChatItemIndex={firstVisibleChatItemIndex}
                   visibleConversationItems={visibleConversationItems}
                   isChatAtBottom={isChatAtBottom}
+                  onSelectThread={handleSelectReferencedThread}
                   onShowOlder={() => {
-                    setVisibleChatItemLimit((limit) =>
-                      Math.min(
-                        conversationItemCount,
-                        limit + VISIBLE_CHAT_ITEMS_STEP,
-                      ),
+                    setVisibleChatItemLimit(
+                      (limit) => limit + VISIBLE_CHAT_ITEMS_STEP,
                     );
                   }}
                   onScrollToBottom={() => {

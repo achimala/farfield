@@ -406,6 +406,15 @@ const UnifiedModelChangedItemSchema = z
   })
   .strict();
 
+const UnifiedForkedFromConversationItemSchema = z
+  .object({
+    id: NonEmptyStringSchema,
+    type: z.literal("forkedFromConversation"),
+    sourceConversationId: NonEmptyStringSchema,
+    sourceConversationTitle: NullableStringSchema.optional()
+  })
+  .strict();
+
 export const UnifiedItemSchema = z.discriminatedUnion("type", [
   UnifiedUserMessageItemSchema,
   UnifiedSteeringUserMessageItemSchema,
@@ -425,7 +434,8 @@ export const UnifiedItemSchema = z.discriminatedUnion("type", [
   UnifiedImageViewItemSchema,
   UnifiedEnteredReviewModeItemSchema,
   UnifiedExitedReviewModeItemSchema,
-  UnifiedModelChangedItemSchema
+  UnifiedModelChangedItemSchema,
+  UnifiedForkedFromConversationItemSchema
 ]);
 
 export type UnifiedItem = z.infer<typeof UnifiedItemSchema>;
@@ -450,7 +460,8 @@ export const UNIFIED_ITEM_KINDS = [
   "imageView",
   "enteredReviewMode",
   "exitedReviewMode",
-  "modelChanged"
+  "modelChanged",
+  "forkedFromConversation"
 ] as const satisfies ReadonlyArray<UnifiedItemKind>;
 
 export const UnifiedTurnSchema = z
@@ -952,7 +963,8 @@ const ITEM_KIND_COVERAGE: Record<UnifiedItemKind, true> = {
   imageView: true,
   enteredReviewMode: true,
   exitedReviewMode: true,
-  modelChanged: true
+  modelChanged: true,
+  forkedFromConversation: true
 };
 
 const FEATURE_ID_COVERAGE: Record<UnifiedFeatureId, true> = {

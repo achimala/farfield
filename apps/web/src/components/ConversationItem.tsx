@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { GitBranch } from "lucide-react";
 import type { UnifiedItem, UnifiedItemKind } from "@farfield/unified-surface";
 import { ReasoningBlock } from "./ReasoningBlock";
 import { CommandBlock } from "./CommandBlock";
@@ -14,6 +15,7 @@ interface Props {
   item: UnifiedItem;
   isLast: boolean;
   turnIsInProgress: boolean;
+  onSelectThread: (threadId: string) => void;
   previousItemType?: UnifiedItem["type"] | undefined;
   nextItemType?: UnifiedItem["type"] | undefined;
 }
@@ -24,6 +26,7 @@ const TOOL_BLOCK_TYPES: readonly UnifiedItem["type"][] = [
   "webSearch",
   "mcpToolCall",
   "collabAgentToolCall",
+  "forkedFromConversation",
 ];
 
 function isToolBlockType(type: UnifiedItem["type"] | undefined): boolean {
@@ -52,6 +55,7 @@ function readTextContent(content: UserMessageLikeItem["content"]): string {
 interface RendererContext {
   isActive: boolean;
   toolSpacing: string;
+  onSelectThread: (threadId: string) => void;
 }
 
 type ItemRendererMap = {
@@ -314,6 +318,29 @@ const ITEM_RENDERERS = {
       Model changed
     </div>
   ),
+
+  forkedFromConversation: ({ item, onSelectThread, toolSpacing }) => (
+    <div
+      className={`${toolSpacing} rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground`}
+    >
+      <div className="text-[10px] text-muted-foreground font-mono mb-1 uppercase tracking-wider">
+        Forked from
+      </div>
+      <div className="flex items-center gap-1.5">
+        <GitBranch size={13} className="text-muted-foreground/80 shrink-0" />
+        <a
+          href={`/threads/${encodeURIComponent(item.sourceConversationId)}`}
+          className="font-medium text-foreground hover:underline truncate"
+          onClick={(event) => {
+            event.preventDefault();
+            onSelectThread(item.sourceConversationId);
+          }}
+        >
+          {item.sourceConversationTitle?.trim() || "Untitled thread"}
+        </a>
+      </div>
+    </div>
+  ),
 } satisfies ItemRendererMap;
 
 function assertNever(value: never): never {
@@ -363,6 +390,8 @@ function renderItem(
       return ITEM_RENDERERS.exitedReviewMode({ item, ...context });
     case "modelChanged":
       return ITEM_RENDERERS.modelChanged({ item, ...context });
+    case "forkedFromConversation":
+      return ITEM_RENDERERS.forkedFromConversation({ item, ...context });
     default:
       return assertNever(item);
   }
@@ -372,6 +401,7 @@ function ConversationItemComponent({
   item,
   isLast,
   turnIsInProgress,
+  onSelectThread,
   previousItemType,
   nextItemType,
 }: Props) {
@@ -381,6 +411,7 @@ function ConversationItemComponent({
   return renderItem(item, {
     isActive,
     toolSpacing,
+    onSelectThread,
   });
 }
 
@@ -389,6 +420,7 @@ function areConversationItemPropsEqual(prev: Props, next: Props): boolean {
     prev.item === next.item &&
     prev.isLast === next.isLast &&
     prev.turnIsInProgress === next.turnIsInProgress &&
+    prev.onSelectThread === next.onSelectThread &&
     prev.previousItemType === next.previousItemType &&
     prev.nextItemType === next.nextItemType
   );

@@ -385,27 +385,40 @@ export class CodexAgentAdapter implements AgentAdapter {
     input: AgentReadThreadInput,
   ): Promise<AgentReadThreadResult> {
     this.ensureCodexAvailable();
-    if (input.includeTurns) {
-      await this.ensureThreadLoaded(input.threadId);
-    }
     const readThreadWithOption = async (includeTurns: boolean) => {
       return this.runAppServerCall(() =>
         this.appClient.readThread(input.threadId, includeTurns),
       );
     };
 
-    let result = await readThreadWithOption(input.includeTurns).catch(
-      async (error) => {
-        const typedError = error instanceof Error ? error : null;
+    let result: Awaited<ReturnType<typeof readThreadWithOption>>;
+    try {
+      result = await readThreadWithOption(input.includeTurns);
+    } catch (error) {
+      const typedError = error instanceof Error ? error : null;
+      const shouldHandleNotMaterialized =
+        input.includeTurns &&
+        isThreadNotMaterializedIncludeTurnsAppServerRpcError(typedError);
+      if (!shouldHandleNotMaterialized) {
+        throw error;
+      }
+
+      try {
+        await this.resumeThread(input.threadId);
+        result = await readThreadWithOption(true);
+      } catch (resumeRetryError) {
+        const typedResumeRetryError =
+          resumeRetryError instanceof Error ? resumeRetryError : null;
         const shouldRetryWithoutTurns =
-          input.includeTurns &&
-          isThreadNotMaterializedIncludeTurnsAppServerRpcError(typedError);
+          isThreadNotMaterializedIncludeTurnsAppServerRpcError(
+            typedResumeRetryError,
+          );
         if (!shouldRetryWithoutTurns) {
-          throw error;
+          throw resumeRetryError;
         }
-        return readThreadWithOption(false);
-      },
-    );
+        result = await readThreadWithOption(false);
+      }
+    }
     const parsedThread = parseThreadConversationState(result.thread);
     const existingSnapshot = this.streamSnapshotByThreadId.get(input.threadId);
     const shouldStoreSnapshot =
@@ -619,8 +632,7 @@ export class CodexAgentAdapter implements AgentAdapter {
     const canUseSyntheticSnapshot =
       !reductionWindow.hasSnapshot &&
       snapshotState !== null &&
-      (snapshotOrigin === "stream" ||
-        snapshotOrigin === "readThreadWithTurns");
+      snapshotOrigin === "stream";
     const hasReliableReductionBase =
       reductionWindow.hasSnapshot || canUseSyntheticSnapshot;
 

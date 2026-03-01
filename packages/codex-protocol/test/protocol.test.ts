@@ -722,6 +722,28 @@ describe("codex-protocol schemas", () => {
     expect(parsed.turns[0]?.items[0]?.type).toBe("modelChanged");
   });
 
+  it("parses thread conversation state with forkedFromConversation item", () => {
+    const parsed = parseThreadConversationState({
+      id: "thread-123",
+      turns: [
+        {
+          status: "completed",
+          items: [
+            {
+              id: "item-forked",
+              type: "forkedFromConversation",
+              sourceConversationId: "thread-456",
+              sourceConversationTitle: "Refactor plan"
+            }
+          ]
+        }
+      ],
+      requests: []
+    });
+
+    expect(parsed.turns[0]?.items[0]?.type).toBe("forkedFromConversation");
+  });
+
   it("parses generic ipc request frames", () => {
     const parsed = parseIpcFrame({
       type: "request",

@@ -267,6 +267,15 @@ export const ModelChangedItemSchema = z
   })
   .passthrough();
 
+export const ForkedFromConversationItemSchema = z
+  .object({
+    type: z.literal("forkedFromConversation"),
+    id: NonEmptyStringSchema,
+    sourceConversationId: NonEmptyStringSchema,
+    sourceConversationTitle: NullableStringSchema.optional()
+  })
+  .passthrough();
+
 export const McpToolCallStatusSchema = z.enum(["inProgress", "completed", "failed"]);
 
 export const McpToolCallResultSchema = z
@@ -378,7 +387,8 @@ export const TurnItemSchema = z.discriminatedUnion("type", [
   ImageViewItemSchema,
   EnteredReviewModeItemSchema,
   ExitedReviewModeItemSchema,
-  ModelChangedItemSchema
+  ModelChangedItemSchema,
+  ForkedFromConversationItemSchema
 ]);
 
 export const UserInputRequestIdSchema = GeneratedRequestIdSchema;

@@ -937,6 +937,16 @@ function mapTurnItem(
         ...(item.toModel !== undefined ? { toModel: item.toModel } : {}),
       };
 
+    case "forkedFromConversation":
+      return {
+        id: item.id,
+        type: "forkedFromConversation",
+        sourceConversationId: item.sourceConversationId,
+        ...(item.sourceConversationTitle !== undefined
+          ? { sourceConversationTitle: item.sourceConversationTitle }
+          : {}),
+      };
+
     default:
       return assertNever(item);
   }

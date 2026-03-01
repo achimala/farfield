@@ -20,9 +20,9 @@ interface ChatTimelineProps {
   turnsLength: number;
   hasAnyAgent: boolean;
   hasHiddenChatItems: boolean;
-  firstVisibleChatItemIndex: number;
   visibleConversationItems: ChatTimelineEntry[];
   isChatAtBottom: boolean;
+  onSelectThread: (threadId: string) => void;
   onShowOlder: () => void;
   onScrollToBottom: () => void;
   scrollRef: React.RefObject<HTMLDivElement | null>;
@@ -34,9 +34,9 @@ export const ChatTimeline = memo(function ChatTimeline({
   turnsLength,
   hasAnyAgent,
   hasHiddenChatItems,
-  firstVisibleChatItemIndex,
   visibleConversationItems,
   isChatAtBottom,
+  onSelectThread,
   onShowOlder,
   onScrollToBottom,
   scrollRef,
@@ -87,7 +87,7 @@ export const ChatTimeline = memo(function ChatTimeline({
                       className="rounded-full"
                       onClick={onShowOlder}
                     >
-                      Show older messages ({firstVisibleChatItemIndex})
+                      Show older messages
                     </Button>
                   </div>
                 )}
@@ -107,6 +107,7 @@ export const ChatTimeline = memo(function ChatTimeline({
                       item={entry.item}
                       isLast={entry.isLast}
                       turnIsInProgress={entry.turnIsInProgress}
+                      onSelectThread={onSelectThread}
                       previousItemType={entry.previousItemType}
                       nextItemType={entry.nextItemType}
                     />
