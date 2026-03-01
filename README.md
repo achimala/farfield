@@ -64,6 +64,27 @@ bun run dev:remote -- --agents=opencode      # remote mode with OpenCode only
 
 > **Warning:** `dev:remote` exposes Farfield with no authentication. Only use on trusted networks.
 
+## Production Mode (No Extra Proxy)
+
+Build once and run in production mode with two commands:
+
+```bash
+bun run build
+bun run start
+```
+
+Open `http://127.0.0.1:4312`.
+
+By default, this is local-only:
+- backend on `127.0.0.1:4311`
+- frontend preview on `127.0.0.1:4312`
+
+If you need a custom backend origin for API proxying:
+
+```bash
+FARFIELD_API_ORIGIN=http://127.0.0.1:4311 bun run start
+```
+
 ## Requirements
 
 - Node.js 20+

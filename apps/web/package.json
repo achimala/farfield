@@ -7,6 +7,7 @@
     "dev": "vite",
     "dev:remote": "vite --host 0.0.0.0 --port 4312",
     "build": "vite build",
+    "start": "vite preview --host 127.0.0.1 --port 4312 --strictPort",
     "preview": "vite preview",
     "test": "vitest run --passWithNoTests",
     "lint": "tsc -p tsconfig.json --noEmit",
@@ -34,7 +35,7 @@
     "react-syntax-highlighter": "^16.1.0",
     "remark-gfm": "^4.0.1",
     "tailwind-merge": "^2.5.5",
-    "workbox-window": "^7.3.0",
+    "workbox-window": "^7.4.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
