@@ -1137,6 +1137,13 @@ function mapTurnItem(
         review: item.review,
       };
 
+    case "remoteTaskCreated":
+      return {
+        id: item.id,
+        type: "remoteTaskCreated",
+        taskId: item.taskId,
+      };
+
     case "modelChanged":
       return {
         id: item.id,

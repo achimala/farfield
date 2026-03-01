@@ -11,12 +11,16 @@ import {
 } from "@farfield/api";
 import {
   ProtocolValidationError,
+  parseCommandExecutionRequestApprovalResponse,
+  parseFileChangeRequestApprovalResponse,
+  parseToolRequestUserInputResponsePayload,
   parseThreadConversationState,
   parseThreadStreamStateChangedBroadcast,
   parseUserInputResponsePayload,
   type IpcFrame,
   type IpcRequestFrame,
   type IpcResponseFrame,
+  type ThreadConversationRequest,
   type ThreadConversationState,
   type ThreadStreamStateChangedBroadcast,
   type UserInputRequestId,
@@ -593,21 +597,121 @@ export class CodexAgentAdapter implements AgentAdapter {
     input: AgentSubmitUserInputInput,
   ): Promise<{ ownerClientId: string; requestId: UserInputRequestId }> {
     this.ensureCodexAvailable();
-    this.ensureIpcReady();
+    const parsedResponse = parseUserInputResponsePayload(input.response);
+    const ownerClientIdForResult = (() => {
+      const mapped = this.threadOwnerById.get(input.threadId);
+      if (mapped && mapped.trim().length > 0) {
+        return mapped.trim();
+      }
+      if (input.ownerClientId && input.ownerClientId.trim().length > 0) {
+        return input.ownerClientId.trim();
+      }
+      if (this.lastKnownOwnerClientId && this.lastKnownOwnerClientId.trim()) {
+        return this.lastKnownOwnerClientId.trim();
+      }
+      return "app-server";
+    })();
 
+    const threadForRouting = await this.runThreadOperationWithResumeRetry(
+      input.threadId,
+      () => this.appClient.readThread(input.threadId, false),
+    );
+    const parsedRoutingThread = parseThreadConversationState(threadForRouting.thread);
+    const routingPendingRequest = findPendingRequestWithId(
+      parsedRoutingThread,
+      input.requestId,
+    );
+
+    if (routingPendingRequest) {
+      await this.runAppServerCall(() =>
+        this.appClient.submitUserInput(input.requestId, parsedResponse),
+      );
+
+      const refreshedThread = await this.runThreadOperationWithResumeRetry(
+        input.threadId,
+        () => this.appClient.readThread(input.threadId, true),
+      );
+      const parsedThread = parseThreadConversationState(refreshedThread.thread);
+      this.streamSnapshotByThreadId.set(input.threadId, parsedThread);
+      this.streamSnapshotOriginByThreadId.set(input.threadId, "readThreadWithTurns");
+      this.setThreadTitle(input.threadId, parsedThread.title);
+
+      const currentEvents = this.streamEventsByThreadId.get(input.threadId) ?? [];
+      currentEvents.push(
+        buildSyntheticSnapshotEvent(input.threadId, ownerClientIdForResult, parsedThread),
+      );
+      if (currentEvents.length > 400) {
+        currentEvents.splice(0, currentEvents.length - 400);
+      }
+      this.streamEventsByThreadId.set(input.threadId, currentEvents);
+
+      return {
+        ownerClientId: ownerClientIdForResult,
+        requestId: input.requestId,
+      };
+    }
+
+    this.ensureIpcReady();
     const ownerClientId = resolveOwnerClientId(
       this.threadOwnerById,
       input.threadId,
       input.ownerClientId,
       this.lastKnownOwnerClientId ?? undefined,
     );
+    this.threadOwnerById.set(input.threadId, ownerClientId);
 
-    await this.service.submitUserInput({
-      threadId: input.threadId,
-      ownerClientId,
-      requestId: input.requestId,
-      response: parseUserInputResponsePayload(input.response),
-    });
+    const pendingIpcRequest = await this.resolvePendingIpcRequest(
+      input.threadId,
+      input.requestId,
+    );
+    switch (pendingIpcRequest.method) {
+      case "item/commandExecution/requestApproval": {
+        const commandResponse =
+          parseCommandExecutionRequestApprovalResponse(parsedResponse);
+        await this.service.submitCommandApprovalDecision({
+          threadId: input.threadId,
+          ownerClientId,
+          requestId: input.requestId,
+          response: commandResponse,
+        });
+        break;
+      }
+      case "item/fileChange/requestApproval": {
+        const fileResponse = parseFileChangeRequestApprovalResponse(
+          parsedResponse,
+        );
+        await this.service.submitFileApprovalDecision({
+          threadId: input.threadId,
+          ownerClientId,
+          requestId: input.requestId,
+          response: fileResponse,
+        });
+        break;
+      }
+      case "item/tool/requestUserInput": {
+        const toolResponse = parseToolRequestUserInputResponsePayload(
+          parsedResponse,
+        );
+        await this.service.submitUserInput({
+          threadId: input.threadId,
+          ownerClientId,
+          requestId: input.requestId,
+          response: toolResponse,
+        });
+        break;
+      }
+      case "execCommandApproval":
+      case "applyPatchApproval":
+        throw new Error(
+          `Legacy approval request method ${pendingIpcRequest.method} is not supported over desktop IPC for thread ${input.threadId}`,
+        );
+      case "account/chatgptAuthTokens/refresh":
+      case "item/tool/call":
+      case "item/plan/requestImplementation":
+        throw new Error(
+          `Unsupported pending request method ${pendingIpcRequest.method} for submitUserInput on thread ${input.threadId}`,
+        );
+    }
 
     return {
       ownerClientId,
@@ -1045,6 +1149,34 @@ export class CodexAgentAdapter implements AgentAdapter {
     return this.runAppServerCall(operation);
   }
 
+  private async resolvePendingIpcRequest(
+    threadId: string,
+    requestId: UserInputRequestId,
+  ): Promise<ThreadConversationRequest> {
+    const cachedSnapshot = this.streamSnapshotByThreadId.get(threadId);
+    if (cachedSnapshot) {
+      const pending = findPendingRequestWithId(cachedSnapshot, requestId);
+      if (pending) {
+        return pending;
+      }
+    }
+
+    const liveState = await this.readLiveState(threadId);
+    if (liveState.conversationState) {
+      const pending = findPendingRequestWithId(
+        liveState.conversationState,
+        requestId,
+      );
+      if (pending) {
+        return pending;
+      }
+    }
+
+    throw new Error(
+      `Unable to find pending request ${String(requestId)} in live state for thread ${threadId}`,
+    );
+  }
+
   private resolveThreadTitle(
     threadId: string,
     directTitle: string | null | undefined,
@@ -1227,6 +1359,28 @@ function deriveThreadWaitingState(
     waitingOnApproval,
     waitingOnUserInput,
   };
+}
+
+function requestIdsMatch(
+  left: UserInputRequestId,
+  right: UserInputRequestId,
+): boolean {
+  return `${left}` === `${right}`;
+}
+
+function findPendingRequestWithId(
+  state: ThreadConversationState,
+  requestId: UserInputRequestId,
+): ThreadConversationRequest | null {
+  for (const request of state.requests) {
+    if (request.completed === true) {
+      continue;
+    }
+    if (requestIdsMatch(request.id, requestId)) {
+      return request;
+    }
+  }
+  return null;
 }
 
 function buildSyntheticSnapshotEvent(

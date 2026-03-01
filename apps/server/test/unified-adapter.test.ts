@@ -570,4 +570,49 @@ describe("unified provider adapters", () => {
     expect(result.data[0]?.waitingOnApproval).toBe(true);
     expect(result.data[0]?.waitingOnUserInput).toBe(true);
   });
+
+  it("maps remoteTaskCreated turn items into unified items", async () => {
+    const adapter = createCodexAdapter();
+    adapter.readThread = async () => ({
+      thread: {
+        ...SAMPLE_THREAD,
+        turns: [
+          {
+            id: "turn-1",
+            status: "inProgress",
+            items: [
+              {
+                id: "item-remote-task",
+                type: "remoteTaskCreated",
+                taskId: "task-123",
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const unified = new AgentUnifiedProviderAdapter("codex", adapter);
+
+    const result = await unified.execute(
+      UnifiedCommandSchema.parse({
+        kind: "readThread",
+        provider: "codex",
+        threadId: SAMPLE_THREAD.id,
+        includeTurns: true,
+      }),
+    );
+
+    expect(result.kind).toBe("readThread");
+    if (result.kind !== "readThread") {
+      return;
+    }
+
+    const remoteTaskItem = result.thread.turns[0]?.items[0];
+    expect(remoteTaskItem?.type).toBe("remoteTaskCreated");
+    expect(
+      remoteTaskItem && remoteTaskItem.type === "remoteTaskCreated"
+        ? remoteTaskItem.taskId
+        : null,
+    ).toBe("task-123");
+  });
 });

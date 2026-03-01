@@ -269,6 +269,45 @@ describe("codex-protocol schemas", () => {
     expect(todoItem?.type).toBe("todo-list");
   });
 
+  it("parses snapshot broadcast when turn includes remoteTaskCreated item", () => {
+    const parsed = parseThreadStreamStateChangedBroadcast({
+      type: "broadcast",
+      method: "thread-stream-state-changed",
+      sourceClientId: "client-123",
+      version: 4,
+      params: {
+        conversationId: "thread-123",
+        type: "thread-stream-state-changed",
+        version: 4,
+        change: {
+          type: "snapshot",
+          conversationState: {
+            id: "thread-123",
+            turns: [
+              {
+                status: "inProgress",
+                items: [
+                  {
+                    id: "remote-task-item-1",
+                    type: "remoteTaskCreated",
+                    taskId: "task-123"
+                  }
+                ]
+              }
+            ],
+            requests: []
+          }
+        }
+      }
+    });
+
+    expect(parsed.params.change.type).toBe("snapshot");
+    const item = parsed.params.change.type === "snapshot"
+      ? parsed.params.change.conversationState.turns[0]?.items[0]
+      : null;
+    expect(item?.type).toBe("remoteTaskCreated");
+  });
+
   it("rejects invalid patch value for remove operation", () => {
     expect(() =>
       parseThreadStreamStateChangedBroadcast({
@@ -720,6 +759,27 @@ describe("codex-protocol schemas", () => {
     });
 
     expect(parsed.turns[0]?.items[0]?.type).toBe("modelChanged");
+  });
+
+  it("parses thread conversation state with remoteTaskCreated item", () => {
+    const parsed = parseThreadConversationState({
+      id: "thread-123",
+      turns: [
+        {
+          status: "completed",
+          items: [
+            {
+              id: "item-remote-task",
+              type: "remoteTaskCreated",
+              taskId: "task-123",
+            }
+          ]
+        }
+      ],
+      requests: []
+    });
+
+    expect(parsed.turns[0]?.items[0]?.type).toBe("remoteTaskCreated");
   });
 
   it("parses thread conversation state with forkedFromConversation item", () => {

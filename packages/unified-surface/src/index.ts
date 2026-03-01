@@ -733,6 +733,14 @@ const UnifiedExitedReviewModeItemSchema = z
   })
   .strict();
 
+const UnifiedRemoteTaskCreatedItemSchema = z
+  .object({
+    id: NonEmptyStringSchema,
+    type: z.literal("remoteTaskCreated"),
+    taskId: NonEmptyStringSchema
+  })
+  .strict();
+
 const UnifiedModelChangedItemSchema = z
   .object({
     id: NonEmptyStringSchema,
@@ -770,6 +778,7 @@ export const UnifiedItemSchema = z.discriminatedUnion("type", [
   UnifiedImageViewItemSchema,
   UnifiedEnteredReviewModeItemSchema,
   UnifiedExitedReviewModeItemSchema,
+  UnifiedRemoteTaskCreatedItemSchema,
   UnifiedModelChangedItemSchema,
   UnifiedForkedFromConversationItemSchema
 ]);
@@ -796,6 +805,7 @@ export const UNIFIED_ITEM_KINDS = [
   "imageView",
   "enteredReviewMode",
   "exitedReviewMode",
+  "remoteTaskCreated",
   "modelChanged",
   "forkedFromConversation"
 ] as const satisfies ReadonlyArray<UnifiedItemKind>;
@@ -1291,6 +1301,7 @@ const ITEM_KIND_COVERAGE: Record<UnifiedItemKind, true> = {
   imageView: true,
   enteredReviewMode: true,
   exitedReviewMode: true,
+  remoteTaskCreated: true,
   modelChanged: true,
   forkedFromConversation: true
 };

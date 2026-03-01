@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
+  JsonValue,
   UnifiedFeatureAvailability,
   UnifiedFeatureId,
   UnifiedItem,
@@ -1211,6 +1212,141 @@ describe("App", () => {
     expect(screen.queryByText("Option B")).toBeNull();
   });
 
+  it("uses live thread requests when live and read timestamps match", async () => {
+    const threadId = "thread-stale-live-request";
+    const approvalRequest: UnifiedThreadFixture["requests"][number] = {
+      id: "approval-stale-live-1",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        threadId,
+        turnId: "turn-1",
+        itemId: "item-approval-stale-live-1",
+        reason: "stale request",
+      },
+    };
+
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: threadId,
+          provider: "codex",
+          preview: "thread preview",
+          waitingOnApproval: false,
+          waitingOnUserInput: false,
+          createdAt: 1700000000,
+          updatedAt: 1700000000,
+          cwd: "/tmp/project",
+          source: "codex",
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    readThreadResolver = (targetThreadId: string) => ({
+      ok: true,
+      thread: buildConversationStateFixture(targetThreadId, "gpt-old-codex", {
+        updatedAt: 1700000000,
+        customRequests: [],
+      }),
+    });
+
+    liveStateResolver = (targetThreadId: string, _provider: ProviderId) => ({
+      kind: "readLiveState",
+      threadId: targetThreadId,
+      ownerClientId: "client-1",
+      conversationState: buildConversationStateFixture(
+        targetThreadId,
+        "gpt-old-codex",
+        {
+          updatedAt: 1700000000,
+          customRequests: [approvalRequest],
+        },
+      ),
+      liveStateError: null,
+    });
+
+    render(<App />);
+
+    expect((await screen.findAllByText("thread preview")).length).toBeGreaterThan(0);
+    expect(await screen.findByText("Approval Needed")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Approve" })).toBeTruthy();
+  });
+
+  it("uses live thread requests when live and read timestamps match and sidebar is waiting", async () => {
+    const threadId = "thread-live-request-while-waiting";
+    const approvalRequest: UnifiedThreadFixture["requests"][number] = {
+      id: "approval-live-while-waiting-1",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        threadId,
+        turnId: "turn-1",
+        itemId: "item-approval-live-while-waiting-1",
+        reason: "needs approval",
+      },
+    };
+
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: threadId,
+          provider: "codex",
+          preview: "thread preview",
+          waitingOnApproval: true,
+          waitingOnUserInput: false,
+          createdAt: 1700000000,
+          updatedAt: 1700000000,
+          cwd: "/tmp/project",
+          source: "codex",
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    readThreadResolver = (targetThreadId: string) => ({
+      ok: true,
+      thread: buildConversationStateFixture(targetThreadId, "gpt-old-codex", {
+        updatedAt: 1700000000,
+        customRequests: [],
+      }),
+    });
+
+    liveStateResolver = (targetThreadId: string, _provider: ProviderId) => ({
+      kind: "readLiveState",
+      threadId: targetThreadId,
+      ownerClientId: "client-1",
+      conversationState: buildConversationStateFixture(
+        targetThreadId,
+        "gpt-old-codex",
+        {
+          updatedAt: 1700000000,
+          customRequests: [approvalRequest],
+        },
+      ),
+      liveStateError: null,
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Approval Needed")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Approve" })).toBeTruthy();
+  });
+
   it("shows approval requests from thread state and submits approve decisions", async () => {
     const threadId = "thread-with-approval-request";
     const approvalRequest: UnifiedThreadFixture["requests"][number] = {
@@ -1281,8 +1417,10 @@ describe("App", () => {
 
     type UnifiedCommandPayload = {
       kind?: string;
+      ownerClientId?: string;
+      requestId?: string | number;
       response?: {
-        decision?: string;
+        decision?: JsonValue;
       };
     };
 
@@ -1297,10 +1435,114 @@ describe("App", () => {
         );
 
       const submitCommand =
-        payloads.find((payload) => payload.kind === "submitUserInput") ?? null;
+        payloads.find(
+          (payload) =>
+            payload.kind === "submitUserInput" &&
+            payload.requestId === "approval-1",
+        ) ?? null;
 
       expect(submitCommand).not.toBeNull();
+      expect(submitCommand?.ownerClientId).toBe("client-1");
       expect(submitCommand?.response?.decision).toBe("accept");
+    });
+  });
+
+  it("submits structured approval decisions from available decisions", async () => {
+    const threadId = "thread-with-structured-approval";
+    const approvalDecision = {
+      acceptWithExecpolicyAmendment: {
+        execpolicy_amendment: ["uv run"],
+      },
+    };
+    const approvalRequest: UnifiedThreadFixture["requests"][number] = {
+      id: "approval-structured-1",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        threadId,
+        turnId: "turn-1",
+        itemId: "item-approval-structured-1",
+        reason: "Need policy approval",
+        availableDecisions: [approvalDecision, "decline", "cancel"],
+      },
+    };
+
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: threadId,
+          provider: "codex",
+          preview: "thread preview",
+          createdAt: 1700000000,
+          updatedAt: 1700000000,
+          cwd: "/tmp/project",
+          source: "codex",
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    readThreadResolver = (targetThreadId: string) => ({
+      ok: true,
+      thread: buildConversationStateFixture(targetThreadId, "gpt-old-codex", {
+        customRequests: [approvalRequest],
+      }),
+    });
+
+    liveStateResolver = (targetThreadId: string, _provider: ProviderId) => ({
+      kind: "readLiveState",
+      threadId: targetThreadId,
+      ownerClientId: "client-1",
+      conversationState: buildConversationStateFixture(
+        targetThreadId,
+        "gpt-old-codex",
+        {
+          customRequests: [approvalRequest],
+        },
+      ),
+      liveStateError: null,
+    });
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+
+    type UnifiedCommandPayload = {
+      kind?: string;
+      ownerClientId?: string;
+      requestId?: string | number;
+      response?: {
+        decision?: JsonValue;
+      };
+    };
+
+    await waitFor(() => {
+      const payloads = vi
+        .mocked(fetch)
+        .mock
+        .calls
+        .filter(([input]) => String(input).includes("/api/unified/command"))
+        .map(([, init]) =>
+          JSON.parse(String(init?.body ?? "{}")) as UnifiedCommandPayload,
+        );
+
+      const submitCommand =
+        payloads.find(
+          (payload) =>
+            payload.kind === "submitUserInput" &&
+            payload.requestId === "approval-structured-1",
+        ) ?? null;
+
+      expect(submitCommand).not.toBeNull();
+      expect(submitCommand?.ownerClientId).toBe("client-1");
+      expect(submitCommand?.response?.decision).toEqual(approvalDecision);
     });
   });
 
@@ -1442,7 +1684,7 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("bun run lint")).toBeTruthy();
+    expect((await screen.findAllByText("bun run lint")).length).toBeGreaterThan(0);
     expect(screen.queryByText("read-canonical-item")).toBeNull();
   });
 
