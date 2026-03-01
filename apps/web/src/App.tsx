@@ -636,6 +636,14 @@ function isPlanModeOption(mode: {
   );
 }
 
+function buildModeSignature(
+  modeKey: string,
+  modelId: string,
+  effort: string,
+): string {
+  return `${modeKey}|${modelId}|${effort}`;
+}
+
 function getConversationStateUpdatedAt(
   state: NonNullable<ReadThreadResponse["thread"]> | null | undefined,
 ): number {
@@ -643,14 +651,6 @@ function getConversationStateUpdatedAt(
     return Number.NEGATIVE_INFINITY;
   }
   return state.updatedAt;
-}
-
-function buildModeSignature(
-  modeKey: string,
-  modelId: string,
-  effort: string,
-): string {
-  return `${modeKey}|${modelId}|${effort}`;
 }
 
 function buildApprovalResponse(
@@ -1329,23 +1329,10 @@ export function App(): React.JSX.Element {
   const requestSourceState = useMemo(() => {
     const liveConversationState = liveState?.conversationState ?? null;
     const readConversationState = readThreadState?.thread ?? null;
-    if (!liveConversationState) {
-      return readConversationState;
-    }
-    if (!readConversationState) {
+    if (liveConversationState) {
       return liveConversationState;
     }
-
-    const liveUpdatedAt = getConversationStateUpdatedAt(liveConversationState);
-    const readUpdatedAt = getConversationStateUpdatedAt(readConversationState);
-    if (liveUpdatedAt > readUpdatedAt) {
-      return liveConversationState;
-    }
-    if (readUpdatedAt > liveUpdatedAt) {
-      return readConversationState;
-    }
-
-    return liveConversationState;
+    return readConversationState;
   }, [liveState?.conversationState, readThreadState?.thread]);
 
   const pendingRequests = useMemo(() => {

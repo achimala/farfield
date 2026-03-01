@@ -774,6 +774,72 @@ describe("App", () => {
     expect(await screen.findByTitle("Waiting for user input")).toBeTruthy();
   });
 
+  it("prefers live-state requests when read thread is newer but has no pending requests", async () => {
+    const threadId = "thread-live-approval-preferred";
+    const approvalRequest: UnifiedThreadFixture["requests"][number] = {
+      id: "approval-live-priority-1",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        threadId,
+        turnId: "turn-1",
+        itemId: "item-approval-live-priority-1",
+        reason: "Need approval from live state",
+      },
+    };
+
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: threadId,
+          provider: "codex",
+          preview: "thread preview",
+          createdAt: 1700000000,
+          updatedAt: 1700000002,
+          cwd: "/tmp/project",
+          source: "codex",
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    readThreadResolver = (targetThreadId: string) => ({
+      ok: true,
+      thread: buildConversationStateFixture(targetThreadId, "gpt-old-codex", {
+        updatedAt: 1700000002,
+        customRequests: [],
+      }),
+    });
+
+    liveStateResolver = (targetThreadId: string, _provider: ProviderId) => ({
+      kind: "readLiveState",
+      threadId: targetThreadId,
+      ownerClientId: "client-1",
+      conversationState: buildConversationStateFixture(
+        targetThreadId,
+        "gpt-old-codex",
+        {
+          updatedAt: 1700000001,
+          customRequests: [approvalRequest],
+        },
+      ),
+      liveStateError: null,
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Approval Needed")).toBeTruthy();
+    expect(await screen.findByText("Need approval from live state")).toBeTruthy();
+    expect(await screen.findByTitle("Waiting for approval")).toBeTruthy();
+  });
+
   it("keeps a direct thread route selected when it is readable but not in current thread list page", async () => {
     const threadId = "thread-direct-route";
     window.history.replaceState(null, "", `/threads/${threadId}`);
