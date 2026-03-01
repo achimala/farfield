@@ -158,6 +158,12 @@ interface AppViewSnapshot {
   activeTab: "chat" | "debug";
 }
 
+interface MobileSidebarSwipeGesture {
+  mode: "open" | "close";
+  startX: number;
+  startY: number;
+}
+
 /* ── Helpers ────────────────────────────────────────────────── */
 function formatDate(value: number | string | null | undefined): string {
   if (typeof value === "number")
@@ -386,6 +392,9 @@ const AGENT_CACHE_TTL_MS = 30_000;
 const PROVIDER_CATALOG_CACHE_TTL_MS = 20_000;
 const CORE_REFRESH_INTERVAL_MS = 5_000;
 const SELECTED_THREAD_REFRESH_INTERVAL_MS = 3_000;
+const MOBILE_SIDEBAR_WIDTH_PX = 256;
+const MOBILE_SWIPE_EDGE_PX = 24;
+const MOBILE_SIDEBAR_TOGGLE_THRESHOLD_PX = 88;
 const AGENT_FAVICON_BY_ID: Record<AgentId, string> = {
   codex: "https://openai.com/favicon.ico",
   opencode: "https://opencode.ai/favicon.ico",
@@ -422,6 +431,10 @@ function compareEffortOptions(left: string, right: string): number {
 
 function sortEffortOptions(options: string[]): string[] {
   return [...options].sort(compareEffortOptions);
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
 function AgentFavicon({
@@ -828,6 +841,9 @@ export function App(): React.JSX.Element {
     initialSnapshot?.activeTab ?? initialUiState.tab,
   );
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [mobileSidebarDragOffset, setMobileSidebarDragOffset] = useState<
+    number | null
+  >(null);
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true);
   const [isChatAtBottom, setIsChatAtBottom] = useState(true);
   const [visibleChatItemLimit, setVisibleChatItemLimit] = useState(
@@ -853,6 +869,7 @@ export function App(): React.JSX.Element {
   });
   const coreRefreshIntervalRef = useRef<number | null>(null);
   const selectedThreadRefreshIntervalRef = useRef<number | null>(null);
+  const mobileSidebarSwipeRef = useRef<MobileSidebarSwipeGesture | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const chatContentRef = useRef<HTMLDivElement>(null);
   const isChatAtBottomRef = useRef(true);
@@ -1242,6 +1259,24 @@ export function App(): React.JSX.Element {
     }
     scroller.scrollTop = scroller.scrollHeight;
   }, []);
+  const closeMobileSidebar = useCallback(() => {
+    setMobileSidebarOpen(false);
+    setMobileSidebarDragOffset(null);
+    mobileSidebarSwipeRef.current = null;
+  }, []);
+  const openMobileSidebar = useCallback(() => {
+    setMobileSidebarOpen(true);
+    setMobileSidebarDragOffset(null);
+    mobileSidebarSwipeRef.current = null;
+  }, []);
+  const mobileSidebarRendered = mobileSidebarOpen || mobileSidebarDragOffset !== null;
+  const mobileSidebarOffsetX =
+    mobileSidebarDragOffset ?? (mobileSidebarOpen ? 0 : -MOBILE_SIDEBAR_WIDTH_PX);
+  const mobileSidebarOpenRatio = clampNumber(
+    (mobileSidebarOffsetX + MOBILE_SIDEBAR_WIDTH_PX) / MOBILE_SIDEBAR_WIDTH_PX,
+    0,
+    1,
+  );
   const codexConfigured = agentsById.codex?.enabled === true;
   const openCodeConnected = agentsById.opencode?.connected === true;
   const allSystemsReady = codexConfigured
@@ -2586,7 +2621,7 @@ export function App(): React.JSX.Element {
         threadProviderByIdRef.current.set(created.threadId, targetAgentId);
         setSelectedThreadId(created.threadId);
         selectedThreadIdRef.current = created.threadId;
-        setMobileSidebarOpen(false);
+        closeMobileSidebar();
         await refreshAll();
       } catch (e) {
         setError(toErrorMessage(e));
@@ -2594,7 +2629,7 @@ export function App(): React.JSX.Element {
         setIsBusy(false);
       }
     },
-    [agentsById, refreshAll, selectedAgentId],
+    [agentsById, closeMobileSidebar, refreshAll, selectedAgentId],
   );
 
   const createThreadForSingleAgent = useCallback(
@@ -2608,6 +2643,128 @@ export function App(): React.JSX.Element {
     },
     [availableAgentIds, createNewThread],
   );
+
+  const beginOpenSidebarSwipe = useCallback(
+    (event: React.TouchEvent<HTMLDivElement>) => {
+      if (mobileSidebarOpen) {
+        return;
+      }
+      const touch = event.touches[0];
+      if (!touch) {
+        return;
+      }
+      mobileSidebarSwipeRef.current = {
+        mode: "open",
+        startX: touch.clientX,
+        startY: touch.clientY,
+      };
+      setMobileSidebarDragOffset(-MOBILE_SIDEBAR_WIDTH_PX);
+    },
+    [mobileSidebarOpen],
+  );
+
+  const updateOpenSidebarSwipe = useCallback(
+    (event: React.TouchEvent<HTMLDivElement>) => {
+      const gesture = mobileSidebarSwipeRef.current;
+      if (!gesture || gesture.mode !== "open") {
+        return;
+      }
+      const touch = event.touches[0];
+      if (!touch) {
+        return;
+      }
+
+      const deltaX = touch.clientX - gesture.startX;
+      const deltaY = Math.abs(touch.clientY - gesture.startY);
+      if (deltaY > Math.abs(deltaX) && deltaY > 12) {
+        mobileSidebarSwipeRef.current = null;
+        setMobileSidebarDragOffset(null);
+        return;
+      }
+      if (deltaX <= 0) {
+        setMobileSidebarDragOffset(-MOBILE_SIDEBAR_WIDTH_PX);
+        return;
+      }
+
+      event.preventDefault();
+      const revealPx = clampNumber(deltaX, 0, MOBILE_SIDEBAR_WIDTH_PX);
+      setMobileSidebarDragOffset(revealPx - MOBILE_SIDEBAR_WIDTH_PX);
+    },
+    [],
+  );
+
+  const endOpenSidebarSwipe = useCallback(() => {
+    const gesture = mobileSidebarSwipeRef.current;
+    if (!gesture || gesture.mode !== "open") {
+      return;
+    }
+    const revealPx =
+      MOBILE_SIDEBAR_WIDTH_PX +
+      (mobileSidebarDragOffset ?? -MOBILE_SIDEBAR_WIDTH_PX);
+    const shouldOpen = revealPx >= MOBILE_SIDEBAR_TOGGLE_THRESHOLD_PX;
+    mobileSidebarSwipeRef.current = null;
+    setMobileSidebarDragOffset(null);
+    if (shouldOpen) {
+      setMobileSidebarOpen(true);
+    }
+  }, [mobileSidebarDragOffset]);
+
+  const beginCloseSidebarSwipe = useCallback(
+    (event: React.TouchEvent<HTMLElement>) => {
+      if (!mobileSidebarOpen) {
+        return;
+      }
+      const touch = event.touches[0];
+      if (!touch) {
+        return;
+      }
+      mobileSidebarSwipeRef.current = {
+        mode: "close",
+        startX: touch.clientX,
+        startY: touch.clientY,
+      };
+      setMobileSidebarDragOffset(0);
+    },
+    [mobileSidebarOpen],
+  );
+
+  const updateCloseSidebarSwipe = useCallback(
+    (event: React.TouchEvent<HTMLElement>) => {
+      const gesture = mobileSidebarSwipeRef.current;
+      if (!gesture || gesture.mode !== "close") {
+        return;
+      }
+      const touch = event.touches[0];
+      if (!touch) {
+        return;
+      }
+
+      const deltaX = gesture.startX - touch.clientX;
+      const deltaY = Math.abs(touch.clientY - gesture.startY);
+      if (deltaY > Math.abs(deltaX) && deltaY > 12) {
+        mobileSidebarSwipeRef.current = null;
+        setMobileSidebarDragOffset(null);
+        return;
+      }
+
+      event.preventDefault();
+      const hidePx = clampNumber(deltaX, 0, MOBILE_SIDEBAR_WIDTH_PX);
+      setMobileSidebarDragOffset(-hidePx);
+    },
+    [],
+  );
+
+  const endCloseSidebarSwipe = useCallback(() => {
+    const gesture = mobileSidebarSwipeRef.current;
+    if (!gesture || gesture.mode !== "close") {
+      return;
+    }
+    const hiddenPx = -(mobileSidebarDragOffset ?? 0);
+    const shouldClose = hiddenPx >= MOBILE_SIDEBAR_TOGGLE_THRESHOLD_PX;
+    mobileSidebarSwipeRef.current = null;
+    setMobileSidebarDragOffset(null);
+    setMobileSidebarOpen(!shouldClose);
+  }, [mobileSidebarDragOffset]);
 
   const renderSidebarContent = (
     viewport: "desktop" | "mobile",
@@ -2631,7 +2788,7 @@ export function App(): React.JSX.Element {
             )}
             {viewport === "mobile" && (
               <IconBtn
-                onClick={() => setMobileSidebarOpen(false)}
+                onClick={closeMobileSidebar}
                 title="Close sidebar"
               >
                 <X size={14} />
@@ -2858,7 +3015,7 @@ export function App(): React.JSX.Element {
                             type="button"
                             onClick={() => {
                               setSelectedThreadId(thread.id);
-                              setMobileSidebarOpen(false);
+                              closeMobileSidebar();
                             }}
                             variant="ghost"
                             className={`w-full min-w-0 h-auto flex items-center justify-between gap-2 rounded-xl px-2.5 py-1.5 text-left text-[13px] tracking-tight font-normal transition-colors ${
@@ -2984,17 +3141,25 @@ export function App(): React.JSX.Element {
   /* ── Render ─────────────────────────────────────────────── */
   return (
     <TooltipProvider delayDuration={120}>
-      <div className="app-shell flex bg-background text-foreground font-sans">
+      <div className="app-shell flex bg-background text-foreground font-sans overscroll-x-none">
+        <div
+          className="md:hidden fixed left-0 top-0 bottom-0 z-30"
+          style={{ width: `${MOBILE_SWIPE_EDGE_PX}px`, touchAction: "pan-y" }}
+          onTouchStart={beginOpenSidebarSwipe}
+          onTouchMove={updateOpenSidebarSwipe}
+          onTouchEnd={endOpenSidebarSwipe}
+          onTouchCancel={endOpenSidebarSwipe}
+        />
         {/* Mobile sidebar backdrop */}
         <AnimatePresence>
-          {mobileSidebarOpen && (
+          {mobileSidebarRendered && (
             <motion.div
               initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
+              animate={{ opacity: mobileSidebarOpenRatio }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.15 }}
               className="md:hidden fixed inset-0 bg-black/50 z-40"
-              onClick={() => setMobileSidebarOpen(false)}
+              onClick={closeMobileSidebar}
             />
           )}
         </AnimatePresence>
@@ -3022,19 +3187,22 @@ export function App(): React.JSX.Element {
 
         {/* Mobile sidebar */}
         <AnimatePresence initial={false}>
-          {mobileSidebarOpen && (
+          {mobileSidebarRendered && (
             <motion.aside
               key="mobile-sidebar"
-              initial={{ x: -280 }}
-              animate={{ x: 0 }}
-              exit={{ x: -280 }}
+              initial={{ x: -MOBILE_SIDEBAR_WIDTH_PX }}
+              animate={{ x: mobileSidebarOffsetX }}
+              exit={{ x: -MOBILE_SIDEBAR_WIDTH_PX }}
               transition={{
-                type: "spring",
-                stiffness: 380,
-                damping: 36,
-                mass: 0.7,
+                duration: mobileSidebarDragOffset !== null ? 0 : 0.2,
+                ease: mobileSidebarDragOffset !== null ? "linear" : "easeOut",
               }}
               className="md:hidden fixed left-0 top-[env(safe-area-inset-top)] bottom-[env(safe-area-inset-bottom)] z-50 w-64 flex flex-col border-r border-sidebar-border bg-sidebar/82 supports-[backdrop-filter]:bg-sidebar/68 backdrop-blur-xl shadow-xl"
+              style={{ touchAction: "pan-y" }}
+              onTouchStart={beginCloseSidebarSwipe}
+              onTouchMove={updateCloseSidebarSwipe}
+              onTouchEnd={endCloseSidebarSwipe}
+              onTouchCancel={endCloseSidebarSwipe}
             >
               {renderSidebarContent("mobile")}
             </motion.aside>
@@ -3058,7 +3226,7 @@ export function App(): React.JSX.Element {
             <div className="flex items-center gap-2 min-w-0">
               <div className="md:hidden">
                 <IconBtn
-                  onClick={() => setMobileSidebarOpen(true)}
+                  onClick={openMobileSidebar}
                   title="Threads"
                 >
                   <Menu size={15} />
