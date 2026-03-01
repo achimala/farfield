@@ -3976,21 +3976,22 @@ export function App(): React.JSX.Element {
                             : windowEntry.usedPct > 60
                               ? "text-amber-500 dark:text-amber-400"
                               : "text-muted-foreground/70";
-                        const compactLabel = windowEntry.label.startsWith("W")
-                          ? "W"
-                          : "S";
                         return (
-                          <Tooltip key={`mobile-${windowEntry.label}`}>
-                            <TooltipTrigger asChild>
-                              <span
+                          <DropdownMenu key={`mobile-${windowEntry.label}`}>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                type="button"
                                 className={`inline-flex items-center gap-0.5 text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-muted/50 max-w-[3.75rem] ${colorClass}`}
                               >
                                 <Zap size={8} />
-                                {compactLabel}
                                 {windowEntry.usedPct}%
-                              </span>
-                            </TooltipTrigger>
-                            <TooltipContent>
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent
+                              side="bottom"
+                              align="end"
+                              className="w-44 p-2"
+                            >
                               <div className="text-xs space-y-0.5">
                                 <div className="font-medium">
                                   {windowEntry.label}
@@ -4005,8 +4006,8 @@ export function App(): React.JSX.Element {
                                   </div>
                                 )}
                               </div>
-                            </TooltipContent>
-                          </Tooltip>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         );
                       })}
                     </div>
@@ -4081,19 +4082,23 @@ export function App(): React.JSX.Element {
                 return (
                   <>
                     <div className="sm:hidden flex items-center mr-1">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
                             className={`inline-flex items-center gap-0.5 text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-muted/50 max-w-[5.5rem] truncate ${colorClass}`}
                           >
                             <Activity size={8} />
-                            C
                             {windowLabel
                               ? `${contextLabel}/${windowLabel}`
                               : contextLabel}
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent>
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent
+                          side="bottom"
+                          align="end"
+                          className="w-52 p-2"
+                        >
                           <div className="text-xs space-y-0.5">
                             <div className="font-medium">Current chat</div>
                             <div>{contextLabel} tokens in current context</div>
@@ -4111,8 +4116,8 @@ export function App(): React.JSX.Element {
                               Session total: {sessionTotalLabel} tokens
                             </div>
                           </div>
-                        </TooltipContent>
-                      </Tooltip>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                     <div className="hidden sm:flex items-center gap-1.5 mr-1.5">
                       <Tooltip>
