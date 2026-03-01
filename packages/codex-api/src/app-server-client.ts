@@ -5,6 +5,8 @@ import {
   AppServerListModelsResponseSchema,
   type AppServerListThreadsResponse,
   AppServerListThreadsResponseSchema,
+  type AppServerGetAccountRateLimitsResponse,
+  AppServerGetAccountRateLimitsResponseSchema,
   type AppServerReadThreadResponse,
   AppServerReadThreadResponseSchema,
   type AppServerStartThreadResponse,
@@ -207,6 +209,15 @@ export class AppServerClient {
       AppServerCollaborationModeListResponseSchema,
       result,
       "AppServerCollaborationModeListResponse"
+    );
+  }
+
+  public async readAccountRateLimits(): Promise<AppServerGetAccountRateLimitsResponse> {
+    const result = await this.transport.request("account/rateLimits/read", {});
+    return parseWithSchema(
+      AppServerGetAccountRateLimitsResponseSchema,
+      result,
+      "AppServerGetAccountRateLimitsResponse"
     );
   }
 

@@ -16,9 +16,11 @@ import {
   Folder,
   FolderOpen,
   Github,
+  GripVertical,
   Loader2,
   Menu,
   Moon,
+  Palette,
   PanelLeft,
   Plus,
   Sun,
@@ -27,6 +29,7 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 import {
   createThread,
+  getAccountRateLimits,
   getHealth,
   getHistoryEntry,
   getLiveState,
@@ -50,6 +53,16 @@ import {
   submitUserInput,
   type AgentId,
 } from "@/lib/api";
+import {
+  groupColors,
+  readCollapseMap,
+  readProjectColors,
+  readSidebarOrder,
+  type GroupColor,
+  writeCollapseMap,
+  writeProjectColors,
+  writeSidebarOrder,
+} from "@/lib/sidebar-prefs";
 import {
   UnifiedEventSchema,
   type UnifiedThreadRequestResponse,
@@ -118,6 +131,41 @@ interface RefreshFlags {
   refreshCore: boolean;
   refreshHistory: boolean;
   refreshSelectedThread: boolean;
+}
+
+const TokenUsageSnakeCaseSchema = z
+  .object({
+    total_token_usage: z.object({ total_tokens: z.number() }).passthrough(),
+    last_token_usage: z.object({ total_tokens: z.number() }).passthrough(),
+    model_context_window: z.number().nullable(),
+  })
+  .passthrough();
+
+const TokenUsageCamelCaseSchema = z
+  .object({
+    total: z.object({ totalTokens: z.number() }).passthrough(),
+    last: z.object({ totalTokens: z.number() }).passthrough(),
+    modelContextWindow: z.number().nullable(),
+  })
+  .passthrough();
+
+const StreamTokenUsageUpdatedEventSchema = z
+  .object({
+    type: z.literal("broadcast"),
+    method: z.literal("thread/tokenUsage/updated"),
+    params: z
+      .object({
+        threadId: z.string(),
+        tokenUsage: z.union([TokenUsageSnakeCaseSchema, TokenUsageCamelCaseSchema]),
+      })
+      .passthrough(),
+  })
+  .passthrough();
+
+interface NormalizedTokenUsage {
+  contextTokens: number;
+  sessionTotalTokens: number;
+  contextWindow: number | null;
 }
 
 interface LoadSelectedThreadOptions {
@@ -243,6 +291,52 @@ function normalizeUnixTimestampSeconds(value: number): number {
     return Math.floor(value / 1000);
   }
   return Math.floor(value);
+}
+
+function parseTokenUsageInfo(
+  raw: string | number | boolean | object | null | undefined,
+): NormalizedTokenUsage | null {
+  const snake = TokenUsageSnakeCaseSchema.safeParse(raw);
+  if (snake.success) {
+    return {
+      contextTokens: snake.data.last_token_usage.total_tokens,
+      sessionTotalTokens: snake.data.total_token_usage.total_tokens,
+      contextWindow: snake.data.model_context_window,
+    };
+  }
+
+  const camel = TokenUsageCamelCaseSchema.safeParse(raw);
+  if (camel.success) {
+    return {
+      contextTokens: camel.data.last.totalTokens,
+      sessionTotalTokens: camel.data.total.totalTokens,
+      contextWindow: camel.data.modelContextWindow,
+    };
+  }
+
+  return null;
+}
+
+function getLatestTokenUsageFromStreamEvents(
+  events: StreamEventsResponse["events"],
+  threadId: string | null,
+): NormalizedTokenUsage | null {
+  if (!threadId) {
+    return null;
+  }
+
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const parsed = StreamTokenUsageUpdatedEventSchema.safeParse(events[index]);
+    if (!parsed.success) {
+      continue;
+    }
+    if (parsed.data.params.threadId !== threadId) {
+      continue;
+    }
+    return parseTokenUsageInfo(parsed.data.params.tokenUsage);
+  }
+
+  return null;
 }
 
 function buildThreadSignature(thread: Thread): string {
@@ -456,8 +550,6 @@ const VISIBLE_CHAT_ITEMS_STEP = 80;
 const APP_DEFAULT_VALUE = "__app_default__";
 const ASSUMED_APP_DEFAULT_MODEL = "gpt-5.3-codex";
 const ASSUMED_APP_DEFAULT_EFFORT = "medium";
-const SIDEBAR_COLLAPSED_GROUPS_STORAGE_KEY =
-  "farfield.sidebar.collapsed-groups.v1";
 const AGENT_CACHE_TTL_MS = 30_000;
 const PROVIDER_CATALOG_CACHE_TTL_MS = 20_000;
 const CORE_REFRESH_INTERVAL_MS = 5_000;
@@ -762,47 +854,49 @@ function basenameFromPath(value: string): string {
   return parts[parts.length - 1] ?? normalized;
 }
 
-function readSidebarCollapsedGroupsFromStorage(): Record<string, boolean> {
-  if (typeof window === "undefined") {
-    return {};
-  }
-  try {
-    const storage = window.localStorage as Partial<Storage> | undefined;
-    if (!storage || typeof storage.getItem !== "function") {
-      return {};
+function normalizeManualGroupOrder(
+  manualOrder: readonly string[],
+  autoSortedKeys: readonly string[],
+): string[] {
+  const availableKeys = new Set(autoSortedKeys);
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const key of manualOrder) {
+    if (!availableKeys.has(key) || seen.has(key)) {
+      continue;
     }
-    const raw = storage.getItem(SIDEBAR_COLLAPSED_GROUPS_STORAGE_KEY);
-    if (!raw) {
-      return {};
-    }
-    return z.record(z.boolean()).parse(JSON.parse(raw));
-  } catch (error) {
-    console.error(
-      "Failed to parse sidebar collapsed groups from local storage",
-      error,
-    );
-    return {};
+    seen.add(key);
+    normalized.push(key);
   }
+
+  for (const key of autoSortedKeys) {
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    normalized.push(key);
+  }
+
+  return normalized;
 }
 
-function writeSidebarCollapsedGroupsToStorage(
-  value: Record<string, boolean>,
-): void {
-  if (typeof window === "undefined") {
-    return;
+function formatResetTimestamp(resetAtSeconds: number | null): string | null {
+  if (resetAtSeconds == null) {
+    return null;
   }
-  try {
-    const storage = window.localStorage as Partial<Storage> | undefined;
-    if (!storage || typeof storage.setItem !== "function") {
-      return;
-    }
-    storage.setItem(
-      SIDEBAR_COLLAPSED_GROUPS_STORAGE_KEY,
-      JSON.stringify(value),
-    );
-  } catch (error) {
-    console.error("Failed to persist sidebar collapsed groups", error);
+  const date = new Date(resetAtSeconds * 1000);
+  if (Number.isNaN(date.getTime())) {
+    return null;
   }
+  return date.toLocaleString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 }
 
 function parseUiStateFromPath(pathname: string): {
@@ -882,6 +976,55 @@ function IconBtn({
       <TooltipTrigger asChild>{buttonNode}</TooltipTrigger>
       <TooltipContent>{title}</TooltipContent>
     </Tooltip>
+  );
+}
+
+function UsageRing({
+  percent,
+  size = 14,
+  strokeWidth = 2,
+  className,
+}: {
+  percent: number | null;
+  size?: number;
+  strokeWidth?: number;
+  className?: string;
+}): React.JSX.Element {
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const normalizedPercent = clampNumber(percent ?? 0, 0, 100);
+  const dashOffset = circumference * (1 - normalizedPercent / 100);
+
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox={`0 0 ${size} ${size}`}
+      className={className}
+      aria-hidden="true"
+    >
+      <circle
+        cx={size / 2}
+        cy={size / 2}
+        r={radius}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        className="text-border/80"
+      />
+      <circle
+        cx={size / 2}
+        cy={size / 2}
+        r={radius}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeDasharray={circumference}
+        strokeDashoffset={dashOffset}
+        transform={`rotate(-90 ${size / 2} ${size / 2})`}
+      />
+    </svg>
   );
 }
 
@@ -970,7 +1113,18 @@ export function App(): React.JSX.Element {
   const [isModeSyncing, setIsModeSyncing] = useState(false);
   const [sidebarCollapsedGroups, setSidebarCollapsedGroups] = useState<
     Record<string, boolean>
-  >(() => readSidebarCollapsedGroupsFromStorage());
+  >(() => readCollapseMap());
+  const [sidebarOrder, setSidebarOrder] = useState<string[]>(() =>
+    readSidebarOrder(),
+  );
+  const [projectColors, setProjectColors] = useState<Record<string, GroupColor>>(
+    () => readProjectColors(),
+  );
+  const [rateLimits, setRateLimits] = useState<
+    Awaited<ReturnType<typeof getAccountRateLimits>> | null
+  >(null);
+  const [dragOverGroupKey, setDragOverGroupKey] = useState<string | null>(null);
+  const [draggedGroupKey, setDraggedGroupKey] = useState<string | null>(null);
 
   /* Refs */
   const selectedThreadIdRef = useRef<string | null>(null);
@@ -1085,6 +1239,7 @@ export function App(): React.JSX.Element {
       latestUpdatedAt: number;
       preferredAgentId: AgentId | null;
       threads: Thread[];
+      userColor: string | null;
     };
     const groups = new Map<string, Group>();
 
@@ -1098,6 +1253,7 @@ export function App(): React.JSX.Element {
       const label = projectPath ? basenameFromPath(projectPath) : "Unknown";
       const updatedAt = threadRecencyTimestamp(thread);
       const threadAgentId = thread.provider;
+      const projectColor = projectColors[key] ?? null;
 
       const existing = groups.get(key);
       if (existing) {
@@ -1116,6 +1272,7 @@ export function App(): React.JSX.Element {
           latestUpdatedAt: updatedAt,
           preferredAgentId: threadAgentId,
           threads: [thread],
+          userColor: projectColor,
         });
       }
     }
@@ -1137,6 +1294,7 @@ export function App(): React.JSX.Element {
           latestUpdatedAt: 0,
           preferredAgentId: descriptor.id,
           threads: [],
+          userColor: projectColors[key] ?? null,
         });
       }
     }
@@ -1145,10 +1303,21 @@ export function App(): React.JSX.Element {
       group.threads.sort(compareThreadsByRecency);
     }
 
-    return Array.from(groups.values()).sort(
-      (left, right) => right.latestUpdatedAt - left.latestUpdatedAt,
+    const allGroups = Array.from(groups.values());
+    const autoSortedKeys = allGroups
+      .slice()
+      .sort((left, right) => right.latestUpdatedAt - left.latestUpdatedAt)
+      .map((group) => group.key);
+    const normalizedOrder = normalizeManualGroupOrder(sidebarOrder, autoSortedKeys);
+    const orderIndex = new Map(normalizedOrder.map((key, index) => [key, index]));
+    allGroups.sort(
+      (left, right) =>
+        (orderIndex.get(left.key) ?? Number.MAX_SAFE_INTEGER) -
+        (orderIndex.get(right.key) ?? Number.MAX_SAFE_INTEGER),
     );
-  }, [agentDescriptors, threads]);
+
+    return allGroups;
+  }, [agentDescriptors, projectColors, sidebarOrder, threads]);
   const conversationState = useMemo(() => {
     const liveConversationState = liveState?.conversationState ?? null;
     const readConversationState = readThreadState?.thread ?? null;
@@ -1309,6 +1478,17 @@ export function App(): React.JSX.Element {
     selectedAgentDescriptor,
     "createThread",
   );
+  const showUsageBadges = activeThreadAgentId === "codex";
+  const sessionTokenUsage = useMemo(() => {
+    const fromConversationState = parseTokenUsageInfo(
+      conversationState?.latestTokenUsageInfo,
+    );
+    if (fromConversationState) {
+      return fromConversationState;
+    }
+
+    return getLatestTokenUsageFromStreamEvents(streamEvents, selectedThreadId);
+  }, [conversationState?.latestTokenUsageInfo, selectedThreadId, streamEvents]);
 
   const planModeOption = useMemo(
     () => modes.find((mode) => isPlanModeOption(mode)) ?? null,
@@ -1549,6 +1729,7 @@ export function App(): React.JSX.Element {
       : Promise.resolve(cachedAgents.value);
 
     const healthPromise = getHealth();
+    const rateLimitsPromise = getAccountRateLimits().catch(() => null);
     const sidebarPromise = listSidebarThreads({
       limit: 80,
       archived: false,
@@ -1606,12 +1787,13 @@ export function App(): React.JSX.Element {
       return sortedThreads;
     });
 
-    const [healthResult, agentsResult, traceResult, historyResult] =
+    const [healthResult, agentsResult, traceResult, historyResult, rateLimitsResult] =
       await Promise.allSettled([
         healthPromise,
         agentsPromise,
         tracePromise,
         historyPromise,
+        rateLimitsPromise,
       ]);
 
     if (healthResult.status === "rejected") {
@@ -1626,11 +1808,15 @@ export function App(): React.JSX.Element {
     if (historyResult.status === "rejected") {
       console.error("Failed to load debug history", historyResult.reason);
     }
+    if (rateLimitsResult.status === "rejected") {
+      console.error("Failed to load account rate limits", rateLimitsResult.reason);
+    }
 
     const nh = healthResult.status === "fulfilled" ? healthResult.value : null;
     const nag = agentsResult.status === "fulfilled" ? agentsResult.value : null;
     const ntr = traceResult.status === "fulfilled" ? traceResult.value : null;
     const nhist = historyResult.status === "fulfilled" ? historyResult.value : null;
+    const nrl = rateLimitsResult.status === "fulfilled" ? rateLimitsResult.value : null;
 
     const nextAgents = nag?.agents ?? agentDescriptors;
     const nextDefaultAgentId = nag?.defaultAgentId ?? selectedAgentId;
@@ -1734,6 +1920,9 @@ export function App(): React.JSX.Element {
         }
         return nhist.history;
       });
+    }
+    if (nrl) {
+      setRateLimits(nrl);
     }
     if (nag) {
       setAgentDescriptors((prev) => {
@@ -1928,9 +2117,10 @@ export function App(): React.JSX.Element {
         shouldReadTurns = true;
       }
       const shouldLoadStreamEvents =
-        includeStreamEvents &&
         canReadStreamEvents &&
-        activeTabRef.current === "debug";
+        (activeTabRef.current === "debug" ||
+          (threadAgentId === "codex" && selectedThreadIdRef.current === threadId)) &&
+        (includeStreamEvents || threadAgentId === "codex");
       const shouldUpdateSelectedThread =
         selectedThreadIdRef.current === threadId;
       const existingCachedState =
@@ -2636,8 +2826,16 @@ export function App(): React.JSX.Element {
   ]);
 
   useEffect(() => {
-    writeSidebarCollapsedGroupsToStorage(sidebarCollapsedGroups);
+    writeCollapseMap(sidebarCollapsedGroups);
   }, [sidebarCollapsedGroups]);
+
+  useEffect(() => {
+    writeSidebarOrder(sidebarOrder);
+  }, [sidebarOrder]);
+
+  useEffect(() => {
+    writeProjectColors(projectColors);
+  }, [projectColors]);
 
   useEffect(() => {
     isChatAtBottomRef.current = isChatAtBottom;
@@ -3320,15 +3518,76 @@ export function App(): React.JSX.Element {
               const hasSelectedThread = group.threads.some(
                 (thread) => thread.id === selectedThreadId,
               );
+              const hasExplicitState = group.key in sidebarCollapsedGroups;
               const isCollapsed = hasSelectedThread
                 ? false
-                : Boolean(sidebarCollapsedGroups[group.key]);
+                : hasExplicitState
+                  ? Boolean(sidebarCollapsedGroups[group.key])
+                  : true;
               const nextAgentId = group.preferredAgentId ?? selectedAgentId;
               const nextAgentLabel =
                 agentsById[nextAgentId]?.label ?? nextAgentId;
+              const colorAccent = group.userColor;
               return (
-                <div key={group.key} className="space-y-1">
-                  <div className="flex items-center gap-1">
+                <div
+                  key={group.key}
+                  className={`space-y-1 ${dragOverGroupKey === group.key ? "ring-1 ring-primary/40 rounded-lg" : ""}`}
+                  draggable
+                  onDragStart={(event) => {
+                    setDraggedGroupKey(group.key);
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData("text/plain", group.key);
+                  }}
+                  onDragEnd={() => {
+                    setDraggedGroupKey(null);
+                    setDragOverGroupKey(null);
+                  }}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "move";
+                    if (draggedGroupKey && draggedGroupKey !== group.key) {
+                      setDragOverGroupKey(group.key);
+                    }
+                  }}
+                  onDragLeave={() => setDragOverGroupKey(null)}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    setDragOverGroupKey(null);
+                    const sourceKey = draggedGroupKey;
+                    if (!sourceKey || sourceKey === group.key) {
+                      return;
+                    }
+                    setSidebarOrder((previous) => {
+                      const keys = normalizeManualGroupOrder(
+                        previous,
+                        groupedThreads.map((entry) => entry.key),
+                      );
+                      const sourceIndex = keys.indexOf(sourceKey);
+                      const targetIndex = keys.indexOf(group.key);
+                      if (sourceIndex === -1) {
+                        keys.push(sourceKey);
+                      }
+                      if (targetIndex === -1) {
+                        keys.push(group.key);
+                      }
+                      const normalizedSourceIndex = keys.indexOf(sourceKey);
+                      keys.splice(normalizedSourceIndex, 1);
+                      const normalizedTargetIndex = keys.indexOf(group.key);
+                      keys.splice(normalizedTargetIndex, 0, sourceKey);
+                      return keys;
+                    });
+                  }}
+                >
+                  <div className="flex items-center gap-0.5">
+                    <span className="shrink-0 cursor-grab text-muted-foreground/30 hover:text-muted-foreground/60">
+                      <GripVertical size={11} />
+                    </span>
+                    {colorAccent && (
+                      <span
+                        className="shrink-0 w-1.5 h-4 rounded-full"
+                        style={{ backgroundColor: colorAccent }}
+                      />
+                    )}
                     <Button
                       type="button"
                       onClick={() =>
@@ -3338,7 +3597,7 @@ export function App(): React.JSX.Element {
                         }))
                       }
                       variant="ghost"
-                      className="h-6 flex-1 justify-start gap-2 rounded-lg px-2 py-1 text-left text-[13px] tracking-tight font-normal text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                      className="h-6 flex-1 justify-start gap-1.5 rounded-lg px-1.5 py-1 text-left text-[13px] tracking-tight font-normal text-muted-foreground hover:bg-muted/60 hover:text-foreground"
                     >
                       {isCollapsed ? (
                         <Folder size={13} className="shrink-0" />
@@ -3347,6 +3606,56 @@ export function App(): React.JSX.Element {
                       )}
                       <span className="min-w-0 truncate">{group.label}</span>
                     </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 rounded-lg text-muted-foreground/40 hover:text-foreground hover:bg-muted"
+                        >
+                          <Palette size={11} />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent
+                        align="end"
+                        sideOffset={6}
+                        className="w-48"
+                      >
+                        <div className="px-2 py-1.5 text-[11px] text-muted-foreground font-medium">
+                          Project color
+                        </div>
+                        <div className="flex gap-1 px-2 pb-1.5">
+                          {groupColors.map((color) => (
+                            <button
+                              key={color}
+                              type="button"
+                              onClick={() => {
+                                setProjectColors((prev) => ({
+                                  ...prev,
+                                  [group.key]: color as GroupColor,
+                                }));
+                              }}
+                              className="w-5 h-5 rounded-full ring-1 ring-border/40 hover:ring-2 hover:ring-foreground/50 transition-all"
+                              style={{ backgroundColor: color }}
+                            />
+                          ))}
+                        </div>
+                        {colorAccent && (
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              setProjectColors((prev) => {
+                                const next = { ...prev };
+                                delete next[group.key];
+                                return next;
+                              });
+                            }}
+                          >
+                            Remove color
+                          </DropdownMenuItem>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                     {availableAgentIds.length <= 1 ? (
                       <IconBtn
                         onClick={() => {
@@ -3438,7 +3747,7 @@ export function App(): React.JSX.Element {
                     )}
                   </div>
                   {!isCollapsed && (
-                    <div className="space-y-1 pl-4 pt-0.5">
+                    <div className="space-y-1 pl-5 pt-0.5">
                       {group.threads.length === 0 && (
                         <div className="px-2.5 py-1 text-[11px] text-muted-foreground/70">
                           No threads yet
@@ -3475,6 +3784,12 @@ export function App(): React.JSX.Element {
                             }`}
                           >
                             <span className="min-w-0 flex-1 flex items-center gap-1.5 truncate leading-5">
+                              {colorAccent && (
+                                <span
+                                  className="shrink-0 w-1 h-3.5 rounded-full"
+                                  style={{ backgroundColor: colorAccent }}
+                                />
+                              )}
                               {showProviderIcons && (
                                 <span className="shrink-0 h-4 w-4 rounded-sm bg-muted/30 ring-1 ring-border/60 flex items-center justify-center overflow-hidden">
                                   <AgentFavicon
@@ -3535,10 +3850,10 @@ export function App(): React.JSX.Element {
                       ? "bg-success"
                       : hasAnySystemFailure
                         ? "bg-danger"
-                        : "bg-muted-foreground/40"
+                      : "bg-muted-foreground/40"
                   }`}
                 />
-                <span className="font-mono truncate">commit {commitLabel}</span>
+                <span className="font-mono truncate">{commitLabel}</span>
               </div>
             </TooltipTrigger>
             <TooltipContent
@@ -3546,7 +3861,7 @@ export function App(): React.JSX.Element {
               align="start"
               className="space-y-1 text-xs"
             >
-              <div className="font-mono text-[11px]">commit {commitLabel}</div>
+              <div className="font-mono text-[11px]">{commitLabel}</div>
               {agentDescriptors
                 .filter((descriptor) => descriptor.enabled)
                 .map((descriptor) => (
@@ -3574,21 +3889,40 @@ export function App(): React.JSX.Element {
               )}
             </TooltipContent>
           </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <a
-                href="https://github.com/achimala/farfield"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="h-8 w-8 rounded-lg inline-flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
-              >
-                <Github size={14} />
-              </a>
-            </TooltipTrigger>
-            <TooltipContent side="top" align="end">
-              GitHub
-            </TooltipContent>
-          </Tooltip>
+          <div className="flex items-center gap-1 shrink-0">
+            <IconBtn
+              onClick={() => {
+                setActiveTab((currentTab) =>
+                  currentTab === "debug" ? "chat" : "debug",
+                );
+                if (viewport === "mobile") {
+                  closeMobileSidebar();
+                }
+              }}
+              active={activeTab === "debug"}
+              title="Debug"
+            >
+              <Bug size={14} />
+            </IconBtn>
+            <IconBtn onClick={toggleTheme} title="Toggle theme">
+              {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
+            </IconBtn>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <a
+                  href="https://github.com/achimala/farfield"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="h-8 w-8 rounded-lg inline-flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+                >
+                  <Github size={14} />
+                </a>
+              </TooltipTrigger>
+              <TooltipContent side="top" align="end">
+                GitHub
+              </TooltipContent>
+            </Tooltip>
+          </div>
         </div>
       </div>
     </>
@@ -3717,18 +4051,149 @@ export function App(): React.JSX.Element {
             </div>
 
             <div className="flex items-center gap-0.5 shrink-0">
-              <IconBtn
-                onClick={() =>
-                  setActiveTab(activeTab === "debug" ? "chat" : "debug")
+              {showUsageBadges && rateLimits && (() => {
+                const windows: Array<{
+                  label: string;
+                  usedPct: number;
+                  resetAt: number | null;
+                }> = [];
+                if (rateLimits.rateLimits.primary) {
+                  windows.push({
+                    label: "5h",
+                    usedPct: rateLimits.rateLimits.primary.usedPercent,
+                    resetAt: rateLimits.rateLimits.primary.resetsAt ?? null,
+                  });
                 }
-                active={activeTab === "debug"}
-                title="Debug"
-              >
-                <Bug size={14} />
-              </IconBtn>
-              <IconBtn onClick={toggleTheme} title="Toggle theme">
-                {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
-              </IconBtn>
+                if (rateLimits.rateLimits.secondary) {
+                  windows.push({
+                    label: "Week",
+                    usedPct: rateLimits.rateLimits.secondary.usedPercent,
+                    resetAt: rateLimits.rateLimits.secondary.resetsAt ?? null,
+                  });
+                }
+                if (windows.length === 0) {
+                  return null;
+                }
+                return (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="mr-1 inline-flex h-5 items-center overflow-hidden rounded-full border border-border/70 bg-muted/50">
+                        {windows.slice(0, 2).map((windowEntry, index) => {
+                          const colorClass =
+                            windowEntry.usedPct > 85
+                              ? "text-danger"
+                              : windowEntry.usedPct > 60
+                                ? "text-amber-500 dark:text-amber-400"
+                                : "text-muted-foreground/70";
+                          return (
+                            <span
+                              key={windowEntry.label}
+                              className="inline-flex h-full items-center"
+                            >
+                              {index > 0 && (
+                                <span className="h-full w-px bg-border/60" />
+                              )}
+                              <span
+                                className={`inline-flex h-full items-center gap-1 px-2 text-[10px] font-mono ${colorClass}`}
+                              >
+                                <span>{windowEntry.label}</span>
+                                <span>{windowEntry.usedPct}%</span>
+                              </span>
+                            </span>
+                          );
+                        })}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" align="end">
+                      <div className="space-y-0.5 text-xs">
+                        {windows.map((windowEntry) => {
+                          const resetLabel = formatResetTimestamp(windowEntry.resetAt);
+                          return (
+                            <div key={`quota-tip-${windowEntry.label}`}>
+                              <span className="font-medium">{windowEntry.label}</span>:{" "}
+                              {windowEntry.usedPct}% used
+                              {resetLabel && (
+                                <span className="text-muted-foreground">
+                                  {" "}
+                                  (resets {resetLabel})
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
+                );
+              })()}
+              {showUsageBadges && sessionTokenUsage && (() => {
+                const { contextTokens, sessionTotalTokens, contextWindow } =
+                  sessionTokenUsage;
+                const usedPct =
+                  contextWindow && contextWindow > 0
+                    ? Math.round((contextTokens / contextWindow) * 100)
+                    : null;
+                const colorClass =
+                  usedPct !== null && usedPct > 85
+                    ? "text-danger"
+                    : usedPct !== null && usedPct > 60
+                      ? "text-amber-500 dark:text-amber-400"
+                      : "text-muted-foreground/60";
+                const contextLabel =
+                  contextTokens >= 1000
+                    ? `${(contextTokens / 1000).toFixed(0)}k`
+                    : String(contextTokens);
+                const windowLabel = contextWindow
+                  ? contextWindow >= 1000
+                    ? `${(contextWindow / 1000).toFixed(0)}k`
+                    : String(contextWindow)
+                  : null;
+                const sessionTotalLabel =
+                  sessionTotalTokens >= 1000
+                    ? `${(sessionTotalTokens / 1000).toFixed(0)}k`
+                    : String(sessionTotalTokens);
+
+                return (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span
+                        className={`mr-1 inline-flex h-5 items-center gap-1 rounded-full border border-border/70 bg-muted/50 px-2 text-[10px] font-mono ${colorClass}`}
+                      >
+                        <UsageRing
+                          percent={usedPct}
+                          size={11}
+                          strokeWidth={1.75}
+                          className={colorClass}
+                        />
+                        <span className="hidden sm:inline">
+                          {windowLabel
+                            ? `${contextLabel}/${windowLabel}`
+                            : contextLabel}
+                        </span>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" align="end">
+                      <div className="text-xs space-y-0.5">
+                        <div className="font-medium">Current chat</div>
+                        <div>{contextLabel} tokens in current context</div>
+                        {windowLabel && (
+                          <div className="text-muted-foreground">
+                            {windowLabel} token context window
+                          </div>
+                        )}
+                        {usedPct !== null && (
+                          <div className="text-muted-foreground">
+                            {usedPct}% of context used
+                          </div>
+                        )}
+                        <div className="text-muted-foreground">
+                          Session total: {sessionTotalLabel} tokens
+                        </div>
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
+                );
+              })()}
             </div>
           </header>
 
@@ -3834,7 +4299,7 @@ export function App(): React.JSX.Element {
                 />
 
                 {/* Input area */}
-                <div className="relative z-10 -mt-6 px-4 pt-6 pb-0 md:pb-6 shrink-0">
+                <div className="relative z-10 -mt-6 px-4 pt-6 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] md:pb-6 shrink-0">
                   <div
                     aria-hidden="true"
                     className="pointer-events-none absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-transparent via-background/85 to-background"

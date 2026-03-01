@@ -962,6 +962,27 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    if (req.method === "GET" && pathname === "/api/account/rate-limits") {
+      const adapter = registry.resolveFirstWithCapability("canReadRateLimits");
+      if (!adapter || !adapter.readRateLimits) {
+        jsonResponse(res, 400, {
+          ok: false,
+          error: "No agent supports rate limit reading",
+        });
+        return;
+      }
+
+      try {
+        const result = await adapter.readRateLimits();
+        jsonResponse(res, 200, { ok: true, ...result });
+      } catch (error) {
+        const message = toErrorMessage(error);
+        logger.warn({ error: message }, "rate-limits-read-failed");
+        jsonResponse(res, 500, { ok: false, error: message });
+      }
+      return;
+    }
+
     jsonResponse(res, 404, { ok: false, error: "Not found" });
   } catch (error) {
     runtimeLastError = toErrorMessage(error);

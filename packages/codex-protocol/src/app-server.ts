@@ -12,6 +12,7 @@ import {
   type AppServerServerRequestMethod,
   CollaborationModeListResponseSchema as GeneratedCollaborationModeListResponseSchema,
   ExperimentalServerRequestSchema as GeneratedExperimentalServerRequestSchema,
+  GetAccountRateLimitsResponseSchema as GeneratedGetAccountRateLimitsResponseSchema,
   ModelListResponseSchema as GeneratedModelListResponseSchema,
   StableServerRequestSchema as GeneratedStableServerRequestSchema,
   ThreadListResponseSchema as GeneratedThreadListResponseSchema,
@@ -24,6 +25,8 @@ const AppServerThreadReadResponseBaseSchema = GeneratedThreadReadResponseSchema.
 const AppServerModelListResponseBaseSchema = GeneratedModelListResponseSchema.passthrough();
 const AppServerCollaborationModeListResponseBaseSchema =
   GeneratedCollaborationModeListResponseSchema.passthrough();
+const AppServerGetAccountRateLimitsResponseBaseSchema =
+  GeneratedGetAccountRateLimitsResponseSchema.passthrough();
 const AppServerStartThreadRequestBaseSchema = GeneratedThreadStartParamsSchema.passthrough();
 const AppServerServerRequestBaseSchema = z.union([
   GeneratedStableServerRequestSchema,
@@ -105,6 +108,9 @@ export const AppServerStartThreadResponseSchema = z
 
 export const AppServerServerRequestSchema = AppServerServerRequestBaseSchema;
 
+export const AppServerGetAccountRateLimitsResponseSchema =
+  AppServerGetAccountRateLimitsResponseBaseSchema;
+
 export const AppServerLoadedThreadListResponseSchema = z
   .object({
     data: z.array(z.string().min(1)),
@@ -127,6 +133,9 @@ export type AppServerCollaborationModeListResponse = z.infer<
 >;
 export type AppServerStartThreadResponse = z.infer<typeof AppServerStartThreadResponseSchema>;
 export type AppServerLoadedThreadListResponse = z.infer<typeof AppServerLoadedThreadListResponseSchema>;
+export type AppServerGetAccountRateLimitsResponse = z.infer<
+  typeof AppServerGetAccountRateLimitsResponseSchema
+>;
 export {
   APP_SERVER_CLIENT_REQUEST_METHODS,
   APP_SERVER_CLIENT_NOTIFICATION_METHODS,
@@ -195,4 +204,14 @@ export function parseAppServerStartThreadResponse(
   value: z.input<typeof AppServerStartThreadResponseSchema>
 ): AppServerStartThreadResponse {
   return parseWithSchema(AppServerStartThreadResponseSchema, value, "AppServerStartThreadResponse");
+}
+
+export function parseAppServerGetAccountRateLimitsResponse(
+  value: z.input<typeof AppServerGetAccountRateLimitsResponseSchema>
+): AppServerGetAccountRateLimitsResponse {
+  return parseWithSchema(
+    AppServerGetAccountRateLimitsResponseSchema,
+    value,
+    "AppServerGetAccountRateLimitsResponse"
+  );
 }

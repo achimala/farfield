@@ -849,6 +849,7 @@ export const UnifiedThreadSchema = z
     latestCollaborationMode: z.union([UnifiedLatestCollaborationModeSchema, z.null()]),
     latestModel: NullableStringSchema,
     latestReasoningEffort: NullableStringSchema,
+    latestTokenUsageInfo: z.union([JsonValueSchema, z.null()]).optional(),
     cwd: z.string().optional(),
     source: z.string().optional()
   })

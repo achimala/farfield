@@ -24,6 +24,7 @@ import {
   type UnifiedThreadRequestResponse,
   type UnifiedUserInputRequest,
 } from "@farfield/unified-surface";
+import { AppServerGetAccountRateLimitsResponseSchema } from "@farfield/protocol";
 import { z } from "zod";
 
 const ApiEnvelopeSchema = z
@@ -920,6 +921,27 @@ export async function getHistoryEntry(
     `/api/debug/history/${encodeURIComponent(entryId)}`,
     HistoryDetailSchema,
   );
+}
+
+const AccountRateLimitsEnvelopeSchema = z
+  .object({
+    ok: z.literal(true),
+  })
+  .merge(AppServerGetAccountRateLimitsResponseSchema)
+  .passthrough();
+
+export async function getAccountRateLimits(): Promise<
+  z.infer<typeof AppServerGetAccountRateLimitsResponseSchema>
+> {
+  const payload = await requestEnvelope(
+    "/api/account/rate-limits",
+    AccountRateLimitsEnvelopeSchema,
+  );
+
+  return AppServerGetAccountRateLimitsResponseSchema.parse({
+    rateLimits: payload.rateLimits,
+    rateLimitsByLimitId: payload.rateLimitsByLimitId,
+  });
 }
 
 export function getPendingUserInputRequests(

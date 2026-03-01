@@ -676,6 +676,13 @@ function mapThread(
       : null,
     latestModel: thread.latestModel ?? null,
     latestReasoningEffort: thread.latestReasoningEffort ?? null,
+    ...(thread.latestTokenUsageInfo !== undefined
+      ? {
+          latestTokenUsageInfo: jsonValueFromString(
+            JSON.stringify(thread.latestTokenUsageInfo),
+          ),
+        }
+      : {}),
     ...(thread.cwd ? { cwd: thread.cwd } : {}),
     ...(thread.source ? { source: thread.source } : {}),
   };

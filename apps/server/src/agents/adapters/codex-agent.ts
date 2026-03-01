@@ -82,6 +82,7 @@ export class CodexAgentAdapter implements AgentAdapter {
     canSubmitUserInput: true,
     canReadLiveState: true,
     canReadStreamEvents: true,
+    canReadRateLimits: true,
   };
 
   private readonly appClient: AppServerClient;
@@ -180,6 +181,15 @@ export class CodexAgentAdapter implements AgentAdapter {
         threadId,
       });
 
+      if (frame.type === "broadcast" && threadId) {
+        const current = this.streamEventsByThreadId.get(threadId) ?? [];
+        current.push(frame);
+        if (current.length > 400) {
+          current.splice(0, current.length - 400);
+        }
+        this.streamEventsByThreadId.set(threadId, current);
+      }
+
       if (
         frame.type !== "broadcast" ||
         frame.method !== "thread-stream-state-changed"
@@ -202,13 +212,6 @@ export class CodexAgentAdapter implements AgentAdapter {
       if (sourceClientId) {
         this.threadOwnerById.set(conversationId, sourceClientId);
       }
-
-      const current = this.streamEventsByThreadId.get(conversationId) ?? [];
-      current.push(frame);
-      if (current.length > 400) {
-        current.splice(0, current.length - 400);
-      }
-      this.streamEventsByThreadId.set(conversationId, current);
 
       try {
         const parsedBroadcast = parseThreadStreamStateChangedBroadcast(frame);
@@ -567,6 +570,13 @@ export class CodexAgentAdapter implements AgentAdapter {
   public async listCollaborationModes() {
     this.ensureCodexAvailable();
     return this.runAppServerCall(() => this.appClient.listCollaborationModes());
+  }
+
+  public async readRateLimits(): Promise<
+    import("@farfield/protocol").AppServerGetAccountRateLimitsResponse
+  > {
+    this.ensureCodexAvailable();
+    return this.runAppServerCall(() => this.appClient.readAccountRateLimits());
   }
 
   public async setCollaborationMode(
@@ -1430,24 +1440,7 @@ function trimThreadStreamEventsForReduction(
 }
 
 function extractThreadId(frame: IpcFrame): string | null {
-  if (
-    frame.type === "broadcast" &&
-    frame.method === "thread-stream-state-changed"
-  ) {
-    const params = frame.params;
-    if (!params || typeof params !== "object") {
-      return null;
-    }
-
-    const conversationId = (params as Record<string, string>)["conversationId"];
-    if (typeof conversationId === "string" && conversationId.trim()) {
-      return conversationId.trim();
-    }
-
-    return null;
-  }
-
-  if (frame.type !== "request") {
+  if (frame.type !== "request" && frame.type !== "broadcast") {
     return null;
   }
 

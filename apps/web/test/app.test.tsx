@@ -903,6 +903,7 @@ describe("App", () => {
 
     render(<App />);
 
+    fireEvent.click(await screen.findByRole("button", { name: "project" }));
     expect(await screen.findByText("listed thread")).toBeTruthy();
     await waitFor(() =>
       expect(window.location.pathname).toBe(`/threads/${missingThreadId}`),
@@ -961,6 +962,54 @@ describe("App", () => {
 
     render(<App />);
     expect(await screen.findByRole("button", { name: "site" })).toBeTruthy();
+  });
+
+  it("keeps manual group order over automatic recency sort", async () => {
+    localStorageBacking.set(
+      "farfield.sidebar.order.v1",
+      JSON.stringify(["project:/tmp/proj-b", "project:/tmp/proj-a"]),
+    );
+
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: "thread-a",
+          provider: "codex",
+          preview: "alpha thread",
+          createdAt: 1700000000,
+          updatedAt: 1700000100,
+          cwd: "/tmp/proj-a",
+          source: "codex",
+        },
+        {
+          id: "thread-b",
+          provider: "codex",
+          preview: "beta thread",
+          createdAt: 1700000000,
+          updatedAt: 1700000005,
+          cwd: "/tmp/proj-b",
+          source: "codex",
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    render(<App />);
+
+    const projA = await screen.findByRole("button", { name: "proj-a" });
+    const projB = await screen.findByRole("button", { name: "proj-b" });
+
+    expect(
+      projB.compareDocumentPosition(projA) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("shows thread title when provided", async () => {

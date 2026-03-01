@@ -5,6 +5,7 @@ import type {
   AppServerReadThreadResponse,
   AppServerStartThreadResponse,
   CollaborationMode,
+  AppServerGetAccountRateLimitsResponse,
   IpcFrame,
   UserInputRequestId,
   UserInputResponsePayload,
@@ -19,6 +20,7 @@ export interface AgentCapabilities {
   canSubmitUserInput: boolean;
   canReadLiveState: boolean;
   canReadStreamEvents: boolean;
+  canReadRateLimits: boolean;
 }
 
 export interface AgentListThreadsInput {
@@ -150,4 +152,5 @@ export interface AgentAdapter {
     limit: number,
   ): Promise<AgentThreadStreamEvents>;
   listProjectDirectories?(): Promise<string[]>;
+  readRateLimits?(): Promise<AppServerGetAccountRateLimitsResponse>;
 }

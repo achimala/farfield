@@ -1,10 +1,13 @@
-const EXTENSION_LANGUAGE_MAP: Record<string, string> = {
+const EXTENSION_LANGUAGE_MAP: Readonly<Record<string, string>> = {
+  c: "c",
+  cc: "cpp",
   cjs: "javascript",
   cpp: "cpp",
   cs: "csharp",
   css: "css",
   go: "go",
   h: "c",
+  hpp: "cpp",
   htm: "markup",
   html: "markup",
   java: "java",
