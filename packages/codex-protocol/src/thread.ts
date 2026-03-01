@@ -521,16 +521,6 @@ export type ThreadConversationState = z.infer<typeof ThreadConversationStateSche
 export type ThreadStreamPatch = z.infer<typeof ThreadStreamPatchSchema>;
 export type ThreadStreamStateChangedParams = z.infer<typeof ThreadStreamStateChangedParamsSchema>;
 
-export function maybeParseUserInputRequest(
-  request: ThreadConversationRequest
-): UserInputRequest | null {
-  const result = UserInputRequestSchema.safeParse(request);
-  if (!result.success) {
-    return null;
-  }
-  return result.data;
-}
-
 export function parseThreadConversationState(value: unknown): ThreadConversationState {
   const result = ThreadConversationStateSchema.safeParse(value);
   if (!result.success) {

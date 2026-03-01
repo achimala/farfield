@@ -33,14 +33,13 @@ type UnifiedCommandResultByKind<K extends UnifiedCommandKind> = Extract<
   { kind: K }
 >;
 
-function maybeParseUserInputRequest(
+function parseThreadConversationUserInputRequest(
   request: ThreadConversationState["requests"][number],
 ): UserInputRequest | null {
-  const result = UserInputRequestSchema.safeParse(request);
-  if (!result.success) {
+  if (request.method !== "item/tool/requestUserInput") {
     return null;
   }
-  return result.data;
+  return UserInputRequestSchema.parse(request);
 }
 
 type UnifiedCommandHandler<K extends UnifiedCommandKind> = (
@@ -604,7 +603,7 @@ function mapThread(
       items: turn.items.map(mapTurnItem),
     })),
     requests: thread.requests
-      .map((request) => maybeParseUserInputRequest(request))
+      .map((request) => parseThreadConversationUserInputRequest(request))
       .filter((request) => request !== null)
       .map((request) => ({
         id: request.id,
