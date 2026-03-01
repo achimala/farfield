@@ -4,6 +4,8 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { VitePWA } from "vite-plugin-pwa";
 
+const apiOrigin = process.env["FARFIELD_API_ORIGIN"] ?? "http://127.0.0.1:4311";
+
 export default defineConfig({
   plugins: [
     react(),
@@ -33,8 +35,16 @@ export default defineConfig({
     allowedHosts: true,
     port: 4312,
     proxy: {
-      "/api": "http://127.0.0.1:4311",
-      "/events": "http://127.0.0.1:4311",
+      "/api": apiOrigin,
+      "/events": apiOrigin,
+    },
+  },
+  preview: {
+    host: "127.0.0.1",
+    port: 4312,
+    proxy: {
+      "/api": apiOrigin,
+      "/events": apiOrigin,
     },
   },
   test: {
