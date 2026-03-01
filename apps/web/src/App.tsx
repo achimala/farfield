@@ -3,6 +3,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -1232,8 +1233,15 @@ export function App(): React.JSX.Element {
   const visibleConversationItems = useMemo(
     () => flatConversationItems.slice(firstVisibleChatItemIndex),
     [flatConversationItems, firstVisibleChatItemIndex],
-  );
+      );
   const commitLabel = health?.state.gitCommit ?? "unknown";
+  const scrollChatToBottom = useCallback(() => {
+    const scroller = scrollRef.current;
+    if (!scroller) {
+      return;
+    }
+    scroller.scrollTop = scroller.scrollHeight;
+  }, []);
   const codexConfigured = agentsById.codex?.enabled === true;
   const openCodeConnected = agentsById.opencode?.connected === true;
   const allSystemsReady = codexConfigured
@@ -2268,15 +2276,12 @@ export function App(): React.JSX.Element {
   }, [activeTab, selectedThreadId]);
 
   // Keep chat pinned to bottom only if user is already at the bottom.
-  useEffect(() => {
-    if (
-      activeTab === "chat" &&
-      isChatAtBottomRef.current &&
-      scrollRef.current
-    ) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  useLayoutEffect(() => {
+    if (activeTab !== "chat" || !isChatAtBottomRef.current) {
+      return;
     }
-  }, [activeTab, conversationItemCount]);
+    scrollChatToBottom();
+  }, [activeTab, conversationItemCount, scrollChatToBottom]);
 
   // Keep bottom pinned when expanded/collapsed blocks change chat height.
   useEffect(() => {
@@ -2294,7 +2299,7 @@ export function App(): React.JSX.Element {
         return;
       }
       rafId = window.requestAnimationFrame(() => {
-        scroller.scrollTop = scroller.scrollHeight;
+        scrollChatToBottom();
         rafId = null;
       });
     });
@@ -2305,16 +2310,16 @@ export function App(): React.JSX.Element {
         window.cancelAnimationFrame(rafId);
       }
     };
-  }, [activeTab, selectedThreadId]);
+  }, [activeTab, scrollChatToBottom, selectedThreadId]);
 
   // New thread selection starts at the bottom.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (activeTab !== "chat" || !scrollRef.current) return;
-    scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    scrollChatToBottom();
     isChatAtBottomRef.current = true;
     setIsChatAtBottom(true);
     setVisibleChatItemLimit(INITIAL_VISIBLE_CHAT_ITEMS);
-  }, [activeTab, selectedThreadId]);
+  }, [activeTab, scrollChatToBottom, selectedThreadId]);
 
   /* Actions */
   const submitMessage = useCallback(
@@ -3182,7 +3187,11 @@ export function App(): React.JSX.Element {
                 />
 
                 {/* Conversation */}
-                <div ref={scrollRef} className="flex-1 overflow-y-auto">
+                <div
+                  ref={scrollRef}
+                  className="flex-1 overflow-y-auto"
+                  style={{ overflowAnchor: "none" }}
+                >
                   <AnimatePresence initial={false} mode="wait">
                     <motion.div
                       key={selectedThreadId ?? "__no_thread__"}
@@ -3201,7 +3210,12 @@ export function App(): React.JSX.Element {
                               : "Select a thread from the sidebar"}
                         </div>
                       ) : (
-                        <div ref={chatContentRef} className="space-y-0">
+                        <motion.div
+                          ref={chatContentRef}
+                          className="space-y-0"
+                          layout="position"
+                          style={{ overflowAnchor: "none" }}
+                        >
                           {hasHiddenChatItems && (
                             <div className="flex justify-center pb-3">
                               <Button
@@ -3226,11 +3240,12 @@ export function App(): React.JSX.Element {
                           {visibleConversationItems.map((entry) => (
                             <motion.div
                               key={entry.key}
-                              initial={{ opacity: 0, height: 0 }}
-                              animate={{ opacity: 1, height: "auto" }}
+                              layout="position"
+                              initial={{ opacity: 0, y: 14 }}
+                              animate={{ opacity: 1, y: 0 }}
                               transition={{
-                                duration: 0.35,
-                                ease: [0.16, 1, 0.3, 1],
+                                duration: 0.22,
+                                ease: [0.22, 1, 0.36, 1],
                               }}
                               style={{ paddingTop: `${entry.spacingTop}px` }}
                             >
@@ -3243,7 +3258,7 @@ export function App(): React.JSX.Element {
                               />
                             </motion.div>
                           ))}
-                        </div>
+                        </motion.div>
                       )}
                     </motion.div>
                   </AnimatePresence>
@@ -3261,9 +3276,8 @@ export function App(): React.JSX.Element {
                       <Button
                         type="button"
                         onClick={() => {
-                          if (!scrollRef.current) return;
-                          scrollRef.current.scrollTop =
-                            scrollRef.current.scrollHeight;
+                          scrollChatToBottom();
+                          isChatAtBottomRef.current = true;
                           setIsChatAtBottom(true);
                         }}
                         size="icon"
