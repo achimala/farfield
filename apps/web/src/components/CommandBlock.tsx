@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import type { UnifiedItem } from "@farfield/unified-surface";
 import { Button } from "@/components/ui/button";
+import { summarizeCommandForHeader } from "@/lib/command-action-ui";
 import { CodeSnippet } from "./CodeSnippet";
 
 type CommandItem = Extract<UnifiedItem, { type: "commandExecution" }>;
@@ -25,10 +26,6 @@ const ACTION_ICONS: Record<string, React.ElementType> = {
   readFile: FileSearch,
   writeFile: FileText,
 };
-
-function simplifyCommand(cmd: string): string {
-  return cmd.length > 140 ? cmd.slice(0, 140) + "…" : cmd;
-}
 
 interface CommandBlockProps {
   item: CommandItem;
@@ -50,7 +47,9 @@ function CommandBlockComponent({ item, isActive }: CommandBlockProps) {
   const output =
     typeof item.aggregatedOutput === "string" ? item.aggregatedOutput : "";
   const hasOutput = output.trim().length > 0;
-  const hasActions = (item.commandActions?.length ?? 0) > 0;
+  const headerSegments = summarizeCommandForHeader(item.command, item.commandActions);
+  const displayedHeaderSegments = headerSegments.slice(0, 3);
+  const hiddenHeaderSegmentsCount = Math.max(headerSegments.length - 3, 0);
 
   return (
     <div className="rounded-xl border border-border overflow-hidden text-sm">
@@ -59,13 +58,37 @@ function CommandBlockComponent({ item, isActive }: CommandBlockProps) {
         type="button"
         onClick={() => setExpanded((v) => !v)}
         variant="ghost"
-        className="h-auto w-full justify-start rounded-none bg-muted/40 px-3 py-2 text-left transition-colors hover:bg-muted/70"
+        className="h-auto w-full grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 rounded-none bg-muted/40 px-3 py-2 text-left transition-colors hover:bg-muted/70"
       >
-        <Terminal size={12} className="shrink-0 text-muted-foreground" />
-        <code className="flex-1 font-mono text-xs text-foreground/80 truncate min-w-0">
-          {simplifyCommand(item.command)}
-        </code>
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="min-w-0 overflow-hidden space-y-1">
+          {displayedHeaderSegments.map((segment, index) => {
+            const SegmentIcon = ACTION_ICONS[segment.iconKey] ?? Terminal;
+            return (
+              <div
+                key={`${segment.text}-${String(index)}`}
+                className="min-w-0 flex items-center gap-1.5"
+              >
+                <SegmentIcon
+                  size={8}
+                  className="shrink-0 text-muted-foreground/70"
+                />
+                <code
+                  title={segment.tooltip ?? segment.text}
+                  className="block min-w-0 flex-1 truncate whitespace-nowrap font-mono text-xs text-foreground/80 leading-4"
+                >
+                  {segment.text}
+                </code>
+              </div>
+            );
+          })}
+          {hiddenHeaderSegmentsCount > 0 && (
+            <div className="pl-[14px] text-[10px] leading-4 text-muted-foreground/70">
+              +{hiddenHeaderSegmentsCount} more segment
+              {hiddenHeaderSegmentsCount === 1 ? "" : "s"}
+            </div>
+          )}
+        </div>
+        <div className="shrink-0 flex items-center gap-1.5 self-start">
           {isActive ? (
             <Loader2 size={12} className="animate-spin text-muted-foreground" />
           ) : isCompleted ? (
@@ -99,43 +122,14 @@ function CommandBlockComponent({ item, isActive }: CommandBlockProps) {
             className="overflow-hidden"
           >
             <div className="border-t border-border divide-y divide-border/60">
-              {/* Command actions */}
-              {hasActions && (
-                <div className="px-3 py-2 space-y-1.5">
-                  {item.commandActions!.map((action, i) => {
-                    const Icon = ACTION_ICONS[action.type] ?? Terminal;
-                    const label =
-                      action.name ??
-                      action.command ??
-                      action.path ??
-                      action.type;
-                    return (
-                      <div
-                        key={i}
-                        className="flex items-start gap-2 text-xs text-muted-foreground"
-                      >
-                        <Icon
-                          size={10}
-                          className="mt-0.5 shrink-0 opacity-60"
-                        />
-                        <code className="font-mono break-all leading-4">
-                          {label}
-                        </code>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Output */}
-              {hasOutput && (
-                <div className="px-3 py-2 space-y-2">
-                  <div>
-                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      Command
-                    </div>
-                    <CodeSnippet code={item.command} language="bash" />
+              <div className="px-3 py-2 space-y-2">
+                <div>
+                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Command
                   </div>
+                  <CodeSnippet code={item.command} language="bash" />
+                </div>
+                {hasOutput ? (
                   <div>
                     <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                       Output
@@ -146,14 +140,10 @@ function CommandBlockComponent({ item, isActive }: CommandBlockProps) {
                       className="max-h-56 overflow-y-auto"
                     />
                   </div>
-                </div>
-              )}
-
-              {!hasActions && !hasOutput && (
-                <div className="px-3 py-2 text-xs text-muted-foreground">
-                  No output
-                </div>
-              )}
+                ) : (
+                  <div className="text-xs text-muted-foreground">No output</div>
+                )}
+              </div>
             </div>
           </motion.div>
         )}

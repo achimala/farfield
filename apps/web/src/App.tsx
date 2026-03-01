@@ -569,16 +569,12 @@ function buildApprovalResponse(
     case "item/commandExecution/requestApproval": {
       const available = request.params.availableDecisions ?? [];
       if (action === "approve") {
-        const accept =
-          available.find((decision) => decision === "accept") ?? null;
-        if (accept) {
-          return { decision: accept };
-        }
-        const acceptForSession =
-          available.find((decision) => decision === "acceptForSession") ??
-          null;
-        if (acceptForSession) {
-          return { decision: acceptForSession };
+        const approveDecision =
+          available.find(
+            (decision) => decision !== "decline" && decision !== "cancel",
+          ) ?? null;
+        if (approveDecision !== null) {
+          return { decision: approveDecision };
         }
         return { decision: "accept" };
       }
@@ -1161,19 +1157,40 @@ export function App(): React.JSX.Element {
     }
     return readConversationState;
   }, [liveState?.conversationState, readThreadState?.thread]);
+  const requestSourceState = useMemo(() => {
+    const liveConversationState = liveState?.conversationState ?? null;
+    const readConversationState = readThreadState?.thread ?? null;
+    if (!liveConversationState) {
+      return readConversationState;
+    }
+    if (!readConversationState) {
+      return liveConversationState;
+    }
+
+    const liveUpdatedAt = getConversationStateUpdatedAt(liveConversationState);
+    const readUpdatedAt = getConversationStateUpdatedAt(readConversationState);
+    if (liveUpdatedAt > readUpdatedAt) {
+      return liveConversationState;
+    }
+    if (readUpdatedAt > liveUpdatedAt) {
+      return readConversationState;
+    }
+
+    return readConversationState;
+  }, [liveState?.conversationState, readThreadState?.thread]);
 
   const pendingRequests = useMemo(() => {
-    if (!conversationState) return [] as PendingRequest[];
-    return getPendingUserInputRequests(conversationState);
-  }, [conversationState]);
+    if (!requestSourceState) return [] as PendingRequest[];
+    return getPendingUserInputRequests(requestSourceState);
+  }, [requestSourceState]);
   const pendingThreadRequests = useMemo(() => {
-    if (!conversationState) return [] as PendingThreadRequest[];
-    return getPendingThreadRequests(conversationState);
-  }, [conversationState]);
+    if (!requestSourceState) return [] as PendingThreadRequest[];
+    return getPendingThreadRequests(requestSourceState);
+  }, [requestSourceState]);
   const pendingApprovalRequests = useMemo(() => {
-    if (!conversationState) return [] as PendingApprovalRequest[];
-    return getPendingApprovalRequests(conversationState);
-  }, [conversationState]);
+    if (!requestSourceState) return [] as PendingApprovalRequest[];
+    return getPendingApprovalRequests(requestSourceState);
+  }, [requestSourceState]);
   const pendingInformationalRequests = useMemo(
     () =>
       pendingThreadRequests.filter(
@@ -1208,7 +1225,7 @@ export function App(): React.JSX.Element {
     if (!selectedThreadId) {
       return null;
     }
-    if (!conversationState || conversationState.id !== selectedThreadId) {
+    if (!requestSourceState || requestSourceState.id !== selectedThreadId) {
       return null;
     }
     return {
@@ -1216,7 +1233,7 @@ export function App(): React.JSX.Element {
       waitingOnUserInput: pendingRequests.length > 0,
     };
   }, [
-    conversationState,
+    requestSourceState,
     pendingApprovalRequests.length,
     pendingRequests.length,
     selectedThreadId,
@@ -2809,6 +2826,9 @@ export function App(): React.JSX.Element {
         await setCollaborationMode({
           provider: activeThreadAgentId,
           threadId: selectedThreadId,
+          ...(liveState?.ownerClientId
+            ? { ownerClientId: liveState.ownerClientId }
+            : {}),
           collaborationMode: {
             mode: mode.mode,
             settings: {
@@ -2833,6 +2853,7 @@ export function App(): React.JSX.Element {
       activeThreadAgentId,
       hasResolvedSelectedThreadProvider,
       isModeSyncing,
+      liveState?.ownerClientId,
       loadSelectedThread,
       modes,
       selectedThreadId,
@@ -2858,6 +2879,9 @@ export function App(): React.JSX.Element {
         provider: activeThreadAgentId,
         threadId: selectedThreadId,
         requestId: activeRequest.id,
+        ...(liveState?.ownerClientId
+          ? { ownerClientId: liveState.ownerClientId }
+          : {}),
         response: { answers },
       });
       await refreshAll();
@@ -2871,6 +2895,7 @@ export function App(): React.JSX.Element {
     activeThreadAgentId,
     answerDraft,
     hasResolvedSelectedThreadProvider,
+    liveState?.ownerClientId,
     refreshAll,
     selectedThreadId,
   ]);
@@ -2888,6 +2913,9 @@ export function App(): React.JSX.Element {
         provider: activeThreadAgentId,
         threadId: selectedThreadId,
         requestId: activeRequest.id,
+        ...(liveState?.ownerClientId
+          ? { ownerClientId: liveState.ownerClientId }
+          : {}),
         response: { answers: {} },
       });
       await refreshAll();
@@ -2900,6 +2928,7 @@ export function App(): React.JSX.Element {
     activeRequest,
     activeThreadAgentId,
     hasResolvedSelectedThreadProvider,
+    liveState?.ownerClientId,
     refreshAll,
     selectedThreadId,
   ]);
@@ -2919,6 +2948,9 @@ export function App(): React.JSX.Element {
           provider: activeThreadAgentId,
           threadId: selectedThreadId,
           requestId: activeApprovalRequest.id,
+          ...(liveState?.ownerClientId
+            ? { ownerClientId: liveState.ownerClientId }
+            : {}),
           response: buildApprovalResponse(activeApprovalRequest, action),
         });
         await refreshAll();
@@ -2932,6 +2964,7 @@ export function App(): React.JSX.Element {
       activeApprovalRequest,
       activeThreadAgentId,
       hasResolvedSelectedThreadProvider,
+      liveState?.ownerClientId,
       refreshAll,
       selectedThreadId,
     ],
@@ -2949,6 +2982,9 @@ export function App(): React.JSX.Element {
       await interruptThread({
         provider: activeThreadAgentId,
         threadId: selectedThreadId,
+        ...(liveState?.ownerClientId
+          ? { ownerClientId: liveState.ownerClientId }
+          : {}),
       });
       await refreshAll();
     } catch (e) {
@@ -2960,6 +2996,7 @@ export function App(): React.JSX.Element {
     activeThreadAgentId,
     canInterruptForActiveAgent,
     hasResolvedSelectedThreadProvider,
+    liveState?.ownerClientId,
     refreshAll,
     selectedThreadId,
   ]);

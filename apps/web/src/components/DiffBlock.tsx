@@ -1,7 +1,9 @@
 import React, { memo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ChevronRight, FilePlus, FileMinus, FileEdit } from "lucide-react";
+import { languageFromPath } from "@/lib/code-language";
 import { Button } from "@/components/ui/button";
+import { CodeSnippet } from "./CodeSnippet";
 
 interface FileChange {
   path: string;
@@ -102,6 +104,7 @@ function DiffBlockComponent({ changes }: DiffBlockProps) {
         const fileName = change.path.split("/").pop() ?? change.path;
         const dirPath = change.path.slice(0, change.path.lastIndexOf("/"));
         const lines = change.diff ? parseDiff(change.diff) : [];
+        const previewLanguage = languageFromPath(change.path);
         const added = lines.filter((line) => line.type === "add").length;
         const removed = lines.filter((line) => line.type === "remove").length;
         const { Icon, label, cls } = kindMeta(change.kind.type);
@@ -169,7 +172,16 @@ function DiffBlockComponent({ changes }: DiffBlockProps) {
                           <span
                             className={`flex-1 px-2 py-0.5 whitespace-pre-wrap break-all ${TEXT_STYLES[line.type]}`}
                           >
-                            {line.content}
+                            {line.type === "header" ? (
+                              line.content
+                            ) : (
+                              <CodeSnippet
+                                code={line.content}
+                                language={previewLanguage}
+                                wrapLongLines={false}
+                                inline
+                              />
+                            )}
                           </span>
                         </div>
                       ))
