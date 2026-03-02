@@ -28,6 +28,7 @@ import { AppServerGetAccountRateLimitsResponseSchema } from "@farfield/protocol"
 import { z } from "zod";
 import {
   buildServerUrl,
+  buildServerWebSocketUrl,
   clearStoredServerTarget,
   getDefaultServerBaseUrl as getDefaultStoredServerBaseUrl,
   parseServerBaseUrl,
@@ -377,8 +378,8 @@ export function normalizeServerBaseUrl(value: string): string {
   return parseServerBaseUrl(value);
 }
 
-export function getUnifiedEventsUrl(baseUrlOverride?: string): string {
-  return buildServerUrl("/api/unified/events", baseUrlOverride);
+export function getUnifiedWebSocketUrl(baseUrlOverride?: string): string {
+  return buildServerWebSocketUrl("/api/unified/ws", baseUrlOverride);
 }
 
 async function requestJson(

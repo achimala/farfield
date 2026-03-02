@@ -15,7 +15,7 @@ import {
   type OpenCodePartType
 } from "../src/generated/OpenCodeManifest.js";
 import {
-  mapOpenCodeEventToSsePayload,
+  extractOpenCodeEventRelatedSessionId,
   messagesToTurns,
   partToTurnItem,
   sessionToConversationState,
@@ -457,32 +457,30 @@ describe("partToTurnItem", () => {
   });
 });
 
-describe("mapOpenCodeEventToSsePayload", () => {
-  it("maps every SDK event type", () => {
+describe("extractOpenCodeEventRelatedSessionId", () => {
+  it("supports every SDK event type", () => {
     for (const eventType of OPENCODE_EVENT_TYPES) {
-      const payload = mapOpenCodeEventToSsePayload(makeEvent(eventType), "sess-1");
-      expect(payload.type).toBe("opencode-event");
-      expect(payload.eventType).toBe(eventType);
-      expect(payload.sessionId).toBe("sess-1");
+      const relatedSessionId = extractOpenCodeEventRelatedSessionId(makeEvent(eventType));
+      if (relatedSessionId !== null) {
+        expect(typeof relatedSessionId).toBe("string");
+      } else {
+        expect(relatedSessionId).toBeNull();
+      }
     }
   });
 
-  it("marks non-matching session events as not relevant", () => {
-    const payload = mapOpenCodeEventToSsePayload(
-      {
-        type: "message.updated",
-        properties: {
-          info: {
-            ...makeUserMessage("msg-1"),
-            sessionID: "sess-other"
-          }
+  it("extracts non-matching session ids", () => {
+    const relatedSessionId = extractOpenCodeEventRelatedSessionId({
+      type: "message.updated",
+      properties: {
+        info: {
+          ...makeUserMessage("msg-1"),
+          sessionID: "sess-other"
         }
-      },
-      "sess-1"
-    );
+      }
+    });
 
-    expect(payload.relatedSessionId).toBe("sess-other");
-    expect(payload.relevantToSession).toBe(false);
+    expect(relatedSessionId).toBe("sess-other");
   });
 });
 

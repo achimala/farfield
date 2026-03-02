@@ -1,9 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
+  extractOpenCodeEventRelatedSessionId,
+  type OpenCodeEventType,
   OpenCodeConnection,
   OpenCodeMonitorService,
 } from "@farfield/opencode-api";
+import type { Event as OpenCodeSdkEvent } from "@opencode-ai/sdk";
 import {
   AppServerCollaborationModeListResponseSchema,
   AppServerListModelsResponseSchema,
@@ -27,6 +30,17 @@ export interface OpenCodeAgentOptions {
   url?: string;
   port?: number;
 }
+
+export type OpenCodeAgentEvent =
+  | {
+      kind: "event";
+      eventType: OpenCodeEventType;
+      relatedThreadId: string | null;
+    }
+  | {
+      kind: "streamError";
+      message: string;
+    };
 
 export class OpenCodeAgentAdapter implements AgentAdapter {
   public readonly id = "opencode";
@@ -52,6 +66,12 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
       reasoningEffort: string | null;
     }
   >();
+  private readonly eventListeners = new Set<
+    (event: OpenCodeAgentEvent) => void
+  >();
+  private eventStreamAbortController: AbortController | null = null;
+  private eventStreamTask: Promise<void> | null = null;
+  private stopping = false;
 
   public constructor(options: OpenCodeAgentOptions = {}) {
     this.connection = new OpenCodeConnection({
@@ -73,11 +93,32 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
     return this.connection.isConnected();
   }
 
+  public onEvent(listener: (event: OpenCodeAgentEvent) => void): () => void {
+    this.eventListeners.add(listener);
+    return () => {
+      this.eventListeners.delete(listener);
+    };
+  }
+
   public async start(): Promise<void> {
+    this.stopping = false;
     await this.connection.start();
+    this.startEventStream();
   }
 
   public async stop(): Promise<void> {
+    this.stopping = true;
+    if (this.eventStreamAbortController) {
+      this.eventStreamAbortController.abort();
+      this.eventStreamAbortController = null;
+    }
+    if (this.eventStreamTask) {
+      try {
+        await this.eventStreamTask;
+      } finally {
+        this.eventStreamTask = null;
+      }
+    }
     await this.connection.stop();
   }
 
@@ -315,6 +356,62 @@ export class OpenCodeAgentAdapter implements AgentAdapter {
     }
   }
 
+  private startEventStream(): void {
+    if (this.eventStreamTask) {
+      return;
+    }
+    const abortController = new AbortController();
+    this.eventStreamAbortController = abortController;
+    this.eventStreamTask = this.consumeEventStream(abortController);
+  }
+
+  private async consumeEventStream(
+    abortController: AbortController,
+  ): Promise<void> {
+    while (!this.stopping && this.connection.isConnected()) {
+      try {
+        const client = this.connection.getClient();
+        const result = await client.event.subscribe({
+          signal: abortController.signal,
+        });
+
+        for await (const event of result.stream) {
+          if (abortController.signal.aborted || this.stopping) {
+            return;
+          }
+
+          const parsedEvent = event as OpenCodeSdkEvent;
+          this.emitEvent({
+            kind: "event",
+            eventType: parsedEvent.type,
+            relatedThreadId: extractOpenCodeEventRelatedSessionId(parsedEvent),
+          });
+        }
+      } catch (error) {
+        if (abortController.signal.aborted || this.stopping) {
+          return;
+        }
+        const message =
+          error instanceof Error ? error.message : String(error);
+        this.emitEvent({
+          kind: "streamError",
+          message,
+        });
+      }
+
+      if (abortController.signal.aborted || this.stopping) {
+        return;
+      }
+      await sleep(1_000);
+    }
+  }
+
+  private emitEvent(event: OpenCodeAgentEvent): void {
+    for (const listener of this.eventListeners) {
+      listener(event);
+    }
+  }
+
   private resolveThreadDirectory(threadId: string): string | undefined {
     const directory = this.threadDirectoryById.get(threadId);
     if (!directory) {
@@ -339,6 +436,12 @@ function normalizeDirectoryInput(directory: string): string {
     throw new Error(`Path is not a directory: ${resolved}`);
   }
   return resolved;
+}
+
+function sleep(delayMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, delayMs);
+  });
 }
 
 function parseModelSelection(

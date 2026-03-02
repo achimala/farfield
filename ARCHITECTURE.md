@@ -14,7 +14,7 @@ Farfield now routes both providers through one strict unified surface.
 - `GET /api/unified/features`
 - `GET /api/unified/threads`
 - `GET /api/unified/thread/:id`
-- `GET /api/unified/events` (SSE)
+- Socket.IO WebSocket endpoint at `/api/unified/ws` for realtime snapshots and deltas
 
 ## Strict Checks
 

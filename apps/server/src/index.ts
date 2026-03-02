@@ -5,11 +5,27 @@ import fs from "node:fs";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import type { IpcFrame } from "@farfield/protocol";
+import {
+  getCodexServerNotificationMethodMapping,
+  getCodexServerRequestMethodMapping,
+} from "@farfield/api";
+import type {
+  AppServerGetAccountRateLimitsResponse,
+  AppServerServerNotificationMethod,
+  AppServerServerRequestMethod,
+  IpcFrame,
+} from "@farfield/protocol";
+import { Server as SocketServer } from "socket.io";
+import { z } from "zod";
 import {
   UnifiedCommandSchema,
-  type UnifiedEvent,
+  UnifiedRealtimeCoreStateSchema,
+  UnifiedRealtimeThreadStateSchema,
+  type JsonValue,
+  type UnifiedFeatureAvailability,
+  type UnifiedFeatureId,
   type UnifiedProviderId,
+  type UnifiedThreadSummary,
 } from "@farfield/unified-surface";
 import {
   parseBody,
@@ -31,6 +47,7 @@ import {
   buildUnifiedFeatureMatrix,
   createUnifiedProviderAdapters,
 } from "./unified/adapter.js";
+import { RealtimeCoordinator } from "./realtime/coordinator.js";
 
 const HOST = process.env["HOST"] ?? "127.0.0.1";
 const PORT = Number(process.env["PORT"] ?? 4311);
@@ -42,13 +59,25 @@ const SIDEBAR_PREVIEW_MAX_CHARS = 180;
 const TRACE_DIR = path.resolve(process.cwd(), "traces");
 const DEFAULT_WORKSPACE = path.resolve(process.cwd());
 
+const IpcParamsConversationIdSchema = z
+  .object({
+    conversationId: z.string().min(1),
+  })
+  .passthrough();
+
+const IpcParamsThreadIdSchema = z
+  .object({
+    threadId: z.string().min(1),
+  })
+  .passthrough();
+
 interface HistoryEntry {
   id: string;
   at: string;
   source: "ipc" | "app" | "system";
   direction: "in" | "out" | "system";
   payload: unknown;
-  meta: Record<string, unknown>;
+  meta: Record<string, JsonValue>;
 }
 
 interface DebugHistoryListEntry {
@@ -71,6 +100,20 @@ interface TraceSummary {
 interface ActiveTrace {
   summary: TraceSummary;
   stream: fs.WriteStream;
+}
+
+interface RuntimeStateSnapshot {
+  appExecutable: string;
+  socketPath: string;
+  gitCommit: string | null;
+  appReady: boolean;
+  ipcConnected: boolean;
+  ipcInitialized: boolean;
+  codexAvailable: boolean;
+  lastError: string | null;
+  historyCount: number;
+  threadOwnerCount: number;
+  activeTrace: TraceSummary | null;
 }
 
 function resolveCodexExecutablePath(): string {
@@ -156,10 +199,6 @@ function jsonResponse(
   res.end(encoded);
 }
 
-function eventResponse(res: ServerResponse, body: unknown): void {
-  res.write(`data: ${JSON.stringify(body)}\n\n`);
-}
-
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
 
@@ -239,9 +278,7 @@ const gitCommit = resolveGitCommitHash();
 
 const history: HistoryEntry[] = [];
 const historyById = new Map<string, unknown>();
-const unifiedSseClients = new Set<ServerResponse>();
 const activeSockets = new Set<Socket>();
-const SSE_KEEPALIVE_INTERVAL_MS = 15_000;
 const threadIndex = new ThreadIndex();
 
 let activeTrace: ActiveTrace | null = null;
@@ -261,7 +298,7 @@ function pushHistory(
   source: HistoryEntry["source"],
   direction: HistoryEntry["direction"],
   payload: unknown,
-  meta: Record<string, unknown> = {},
+  meta: Record<string, JsonValue> = {},
 ): HistoryEntry {
   const entry: HistoryEntry = {
     id: randomUUID(),
@@ -283,12 +320,14 @@ function pushHistory(
   }
 
   recordTraceEvent({ type: "history", ...entry });
+  queueDebugDelta?.();
+  queueCoreDelta?.();
   return entry;
 }
 
 function pushSystem(
   message: string,
-  details: Record<string, unknown> = {},
+  details: Record<string, JsonValue> = {},
 ): void {
   logger.info({ message, ...details }, "system-event");
   pushHistory("system", "system", { message, details });
@@ -297,6 +336,11 @@ function pushSystem(
 let codexAdapter: CodexAgentAdapter | null = null;
 let openCodeAdapter: OpenCodeAgentAdapter | null = null;
 const adapters: AgentAdapter[] = [];
+let queueCoreDelta: (() => void) | null = null;
+let queueDebugDelta: (() => void) | null = null;
+let queueThreadDelta: ((threadId: string) => void) | null = null;
+let broadcastSyncError: ((message: string, code?: string) => void) | null =
+  null;
 
 for (const agentId of configuredAgentIds) {
   if (agentId === "codex") {
@@ -307,7 +351,7 @@ for (const agentId of configuredAgentIds) {
       userAgent: USER_AGENT,
       reconnectDelayMs: IPC_RECONNECT_DELAY_MS,
       onStateChange: () => {
-        broadcastRuntimeState();
+        queueCoreDelta?.();
       },
     });
 
@@ -316,6 +360,14 @@ for (const agentId of configuredAgentIds) {
         method: event.method,
         threadId: event.threadId,
       });
+      queueDebugDelta?.();
+      queueCoreDelta?.();
+      if (event.threadId) {
+        queueThreadDelta?.(event.threadId);
+      }
+      if (event.direction === "in") {
+        classifyCodexFrameForRealtime(event.frame);
+      }
     });
 
     adapters.push(codexAdapter);
@@ -324,6 +376,19 @@ for (const agentId of configuredAgentIds) {
 
   if (agentId === "opencode") {
     openCodeAdapter = new OpenCodeAgentAdapter();
+    openCodeAdapter.onEvent((event) => {
+      if (event.kind === "streamError") {
+        broadcastSyncError?.(event.message, "opencodeStreamError");
+        queueCoreDelta?.();
+        return;
+      }
+
+      queueCoreDelta?.();
+      queueDebugDelta?.();
+      if (event.relatedThreadId) {
+        queueThreadDelta?.(event.relatedThreadId);
+      }
+    });
     adapters.push(openCodeAdapter);
   }
 }
@@ -334,7 +399,7 @@ const unifiedAdapters = createUnifiedProviderAdapters({
   opencode: openCodeAdapter,
 });
 
-function getRuntimeStateSnapshot(): Record<string, unknown> {
+function getRuntimeStateSnapshot(): RuntimeStateSnapshot {
   const codexRuntimeState = codexAdapter?.getRuntimeState();
 
   return {
@@ -360,57 +425,399 @@ function listUnifiedProviders(): UnifiedProviderId[] {
   return configuredUnifiedProviders;
 }
 
-function buildUnifiedProviderStateEvents(): UnifiedEvent[] {
-  return listUnifiedProviders().map((provider) => {
-    const adapter = resolveUnifiedAdapter(provider);
-    const connected = adapter
-      ? (registry.getAdapter(provider)?.isConnected() ?? false)
-      : false;
-    const enabled = adapter
-      ? (registry.getAdapter(provider)?.isEnabled() ?? false)
-      : false;
+interface ProviderErrorPayload {
+  code: string;
+  message: string;
+  details?: Record<string, string>;
+}
 
-    return {
-      kind: "providerStateChanged",
-      provider,
-      enabled,
-      connected,
-      lastError:
-        provider === "codex"
-          ? (runtimeLastError ??
-            codexAdapter?.getRuntimeState().lastError ??
-            null)
-          : (runtimeLastError ?? null),
-    };
+interface UnifiedListThreadsResponse {
+  data: UnifiedThreadSummary[];
+  cursors: Record<UnifiedProviderId, string | null>;
+  errors: Record<UnifiedProviderId, ProviderErrorPayload | null>;
+}
+
+interface UnifiedSidebarResponse {
+  rows: UnifiedThreadSummary[];
+  errors: Record<UnifiedProviderId, ProviderErrorPayload | null>;
+}
+
+function isFeatureAvailable(feature: UnifiedFeatureAvailability): boolean {
+  return feature.status === "available";
+}
+
+function buildAgentCapabilities(
+  features: Record<UnifiedFeatureId, UnifiedFeatureAvailability>,
+): {
+  canListModels: boolean;
+  canListCollaborationModes: boolean;
+  canSetCollaborationMode: boolean;
+  canSubmitUserInput: boolean;
+  canReadLiveState: boolean;
+  canReadStreamEvents: boolean;
+  canListProjectDirectories: boolean;
+} {
+  return {
+    canListModels: isFeatureAvailable(features.listModels),
+    canListCollaborationModes: isFeatureAvailable(
+      features.listCollaborationModes,
+    ),
+    canSetCollaborationMode: isFeatureAvailable(features.setCollaborationMode),
+    canSubmitUserInput: isFeatureAvailable(features.submitUserInput),
+    canReadLiveState: isFeatureAvailable(features.readLiveState),
+    canReadStreamEvents: isFeatureAvailable(features.readStreamEvents),
+    canListProjectDirectories: isFeatureAvailable(features.listProjectDirectories),
+  };
+}
+
+async function listUnifiedThreads(
+  input: {
+    limit: number;
+    archived: boolean;
+    all: boolean;
+    maxPages: number;
+    cursor: string | null;
+  },
+): Promise<UnifiedListThreadsResponse> {
+  const data: UnifiedThreadSummary[] = [];
+  const cursors: Record<UnifiedProviderId, string | null> = {
+    codex: null,
+    opencode: null,
+  };
+  const errors: Record<UnifiedProviderId, ProviderErrorPayload | null> = {
+    codex: null,
+    opencode: null,
+  };
+
+  await Promise.all(
+    listUnifiedProviders().map(async (provider) => {
+      const adapter = resolveUnifiedAdapter(provider);
+      if (!adapter) {
+        errors[provider] = {
+          code: "providerDisabled",
+          message: `Provider ${provider} is not available`,
+        };
+        return;
+      }
+
+      try {
+        const result = await adapter.execute({
+          kind: "listThreads",
+          provider,
+          limit: input.limit,
+          archived: input.archived,
+          all: input.all,
+          maxPages: input.maxPages,
+          cursor: input.cursor,
+        });
+
+        cursors[provider] = result.nextCursor ?? null;
+        for (const thread of result.data) {
+          threadIndex.register(thread.id, thread.provider);
+          data.push(thread);
+        }
+      } catch (error) {
+        const message = toErrorMessage(error);
+        errors[provider] = {
+          code: "listThreadsFailed",
+          message,
+          details: {
+            provider,
+          },
+        };
+        logger.warn(
+          {
+            provider,
+            error: message,
+          },
+          "unified-list-threads-failed",
+        );
+      }
+    }),
+  );
+
+  return {
+    data,
+    cursors,
+    errors,
+  };
+}
+
+async function listUnifiedSidebarThreads(
+  input: {
+    limit: number;
+    archived: boolean;
+    all: boolean;
+    maxPages: number;
+    cursor: string | null;
+  },
+): Promise<UnifiedSidebarResponse> {
+  const result = await listUnifiedThreads(input);
+  return {
+    rows: result.data.map((thread) => ({
+      ...thread,
+      preview: compactSidebarPreview(thread.preview),
+    })),
+    errors: result.errors,
+  };
+}
+
+async function buildRealtimeCoreState() {
+  const [sidebar, rateLimits, features] = await Promise.all([
+    listUnifiedSidebarThreads({
+      limit: 80,
+      archived: false,
+      all: false,
+      maxPages: 1,
+      cursor: null,
+    }),
+    readRateLimitsSafe(),
+    Promise.resolve(
+      buildUnifiedFeatureMatrix({
+        codex: codexAdapter,
+        opencode: openCodeAdapter,
+      }),
+    ),
+  ]);
+
+  const agents = await Promise.all(
+    listUnifiedProviders().map(async (provider) => {
+      const providerFeatures = features[provider];
+      const enabled = registry.getAdapter(provider)?.isEnabled() ?? false;
+      const connected = registry.getAdapter(provider)?.isConnected() ?? false;
+      const adapter = resolveUnifiedAdapter(provider);
+      let projectDirectories: string[] = [];
+
+      if (
+        adapter &&
+        isFeatureAvailable(providerFeatures.listProjectDirectories)
+      ) {
+        try {
+          const result = await adapter.execute({
+            kind: "listProjectDirectories",
+            provider,
+          });
+          projectDirectories = result.directories;
+        } catch {
+          projectDirectories = [];
+        }
+      }
+
+      return {
+        id: provider,
+        label: provider === "codex" ? "Codex" : "OpenCode",
+        enabled,
+        connected,
+        features: providerFeatures,
+        capabilities: buildAgentCapabilities(providerFeatures),
+        projectDirectories,
+      };
+    }),
+  );
+
+  const defaultAgentId = agents.find((agent) => agent.enabled)?.id ?? "codex";
+  const traceStatus = {
+    active: activeTrace?.summary ?? null,
+    recent: recentTraces,
+  };
+  const historyList = history.slice(-120).map(toDebugHistoryListEntry);
+  const runtimeState = getRuntimeStateSnapshot();
+
+  return UnifiedRealtimeCoreStateSchema.parse({
+    health: {
+      appReady: runtimeState.appReady,
+      ipcConnected: runtimeState.ipcConnected,
+      ipcInitialized: runtimeState.ipcInitialized,
+      gitCommit: runtimeState.gitCommit,
+      lastError: runtimeState.lastError,
+      historyCount: runtimeState.historyCount,
+      threadOwnerCount: runtimeState.threadOwnerCount,
+    },
+    agents: {
+      agents,
+      defaultAgentId,
+    },
+    sidebar,
+    rateLimits,
+    traceStatus,
+    history: historyList,
   });
 }
 
-function broadcastUnifiedEvent(event: UnifiedEvent): void {
-  for (const client of unifiedSseClients) {
-    eventResponse(client, event);
+async function buildRealtimeThreadState(input: {
+  threadId: string;
+  includeStreamEvents: boolean;
+}) {
+  const knownProviders = threadIndex.providers(input.threadId);
+  const provider = threadIndex.resolve(input.threadId);
+
+  if (!provider) {
+    if (knownProviders.length > 1) {
+      return null;
+    }
+    return null;
+  }
+
+  const adapter = resolveUnifiedAdapter(provider);
+  if (!adapter) {
+    return null;
+  }
+
+  let readResult: Awaited<ReturnType<typeof adapter.execute>>;
+  try {
+    readResult = await adapter.execute({
+      kind: "readThread",
+      provider,
+      threadId: input.threadId,
+      includeTurns: true,
+    });
+  } catch {
+    return null;
+  }
+
+  if (readResult.kind !== "readThread") {
+    return null;
+  }
+
+  threadIndex.register(readResult.thread.id, readResult.thread.provider);
+
+  const liveResult = adapter.getFeatureAvailability().readLiveState.status === "available"
+    ? await adapter.execute({
+        kind: "readLiveState",
+        provider,
+        threadId: input.threadId,
+      })
+    : {
+        kind: "readLiveState" as const,
+        threadId: input.threadId,
+        ownerClientId: null,
+        conversationState: null,
+        liveStateError: null,
+      };
+  if (liveResult.kind !== "readLiveState") {
+    return null;
+  }
+
+  const streamResult =
+    input.includeStreamEvents &&
+    adapter.getFeatureAvailability().readStreamEvents.status === "available"
+      ? await adapter.execute({
+          kind: "readStreamEvents",
+          provider,
+          threadId: input.threadId,
+          limit: 80,
+        })
+      : {
+          kind: "readStreamEvents" as const,
+          threadId: input.threadId,
+          ownerClientId: null,
+          events: [],
+        };
+  if (streamResult.kind !== "readStreamEvents") {
+    return null;
+  }
+
+  return UnifiedRealtimeThreadStateSchema.parse({
+    threadId: input.threadId,
+    readThread: readResult.thread,
+    liveState: {
+      ownerClientId: liveResult.ownerClientId,
+      conversationState: liveResult.conversationState,
+      liveStateError: liveResult.liveStateError ?? null,
+    },
+    streamEvents: streamResult.events,
+  });
+}
+
+async function buildRealtimeDebugState() {
+  return {
+    traceStatus: {
+      active: activeTrace?.summary ?? null,
+      recent: recentTraces,
+    },
+    history: history.slice(-120).map(toDebugHistoryListEntry),
+  };
+}
+
+async function readRateLimitsSafe():
+  Promise<AppServerGetAccountRateLimitsResponse | null> {
+  const adapter = registry.resolveFirstWithCapability("canReadRateLimits");
+  if (!adapter || !adapter.readRateLimits) {
+    return null;
+  }
+  try {
+    return await adapter.readRateLimits();
+  } catch {
+    return null;
   }
 }
 
-function writeSseKeepalive(): void {
-  for (const client of unifiedSseClients) {
+function classifyCodexFrameForRealtime(frame: IpcFrame): void {
+  if (frame.type === "request") {
     try {
-      client.write(": keepalive\n\n");
+      const mapping = getCodexServerRequestMethodMapping(
+        frame.method as AppServerServerRequestMethod,
+      );
+      if (mapping.status === "exposed") {
+        queueCoreDelta?.();
+        if (mapping.eventKind === "error") {
+          broadcastSyncError?.(
+            `Codex request event reported error for method ${frame.method}`,
+            "codexEventError",
+          );
+        }
+        const threadId = extractThreadIdFromIpcFrame(frame);
+        if (threadId) {
+          queueThreadDelta?.(threadId);
+        }
+      }
+      return;
     } catch {
-      unifiedSseClients.delete(client);
+      return;
+    }
+  }
+
+  if (frame.type === "broadcast") {
+    try {
+      const mapping = getCodexServerNotificationMethodMapping(
+        frame.method as AppServerServerNotificationMethod,
+      );
+      if (mapping.status === "exposed") {
+        queueCoreDelta?.();
+        if (mapping.eventKind === "error") {
+          broadcastSyncError?.(
+            `Codex notification reported error for method ${frame.method}`,
+            "codexEventError",
+          );
+        }
+        const threadId = extractThreadIdFromIpcFrame(frame);
+        if (threadId) {
+          queueThreadDelta?.(threadId);
+        }
+      }
+    } catch {
+      return;
     }
   }
 }
 
-function broadcastRuntimeState(): void {
-  for (const event of buildUnifiedProviderStateEvents()) {
-    broadcastUnifiedEvent(event);
+function extractThreadIdFromIpcFrame(frame: IpcFrame): string | null {
+  if (frame.type !== "request" && frame.type !== "broadcast") {
+    return null;
   }
-}
 
-const sseKeepaliveTimer = setInterval(() => {
-  writeSseKeepalive();
-}, SSE_KEEPALIVE_INTERVAL_MS);
-sseKeepaliveTimer.unref();
+  const conversationId = IpcParamsConversationIdSchema.safeParse(frame.params);
+  if (conversationId.success) {
+    return conversationId.data.conversationId;
+  }
+
+  const threadId = IpcParamsThreadIdSchema.safeParse(frame.params);
+  if (threadId.success) {
+    return threadId.data.threadId;
+  }
+
+  return null;
+}
 
 function printStartupBanner(): void {
   const supportsColor =
@@ -508,27 +915,6 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (req.method === "GET" && pathname === "/api/unified/events") {
-      res.writeHead(200, {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-        "X-Accel-Buffering": "no",
-        "Access-Control-Allow-Origin": "*",
-      });
-      res.write("retry: 1000\n\n");
-
-      unifiedSseClients.add(res);
-      for (const event of buildUnifiedProviderStateEvents()) {
-        eventResponse(res, event);
-      }
-
-      req.on("close", () => {
-        unifiedSseClients.delete(res);
-      });
-      return;
-    }
-
     if (req.method === "GET" && pathname === "/api/unified/features") {
       const features = buildUnifiedFeatureMatrix({
         codex: codexAdapter,
@@ -568,12 +954,8 @@ const server = http.createServer(async (req, res) => {
 
         if (result.kind === "readThread" || result.kind === "createThread") {
           threadIndex.register(result.thread.id, result.thread.provider);
-          broadcastUnifiedEvent({
-            kind: "threadUpdated",
-            threadId: result.thread.id,
-            provider: result.thread.provider,
-            thread: result.thread,
-          });
+          queueThreadDelta?.(result.thread.id);
+          queueCoreDelta?.();
         }
 
         jsonResponse(res, 200, {
@@ -598,11 +980,8 @@ const server = http.createServer(async (req, res) => {
         }
 
         const message = toErrorMessage(error);
-        broadcastUnifiedEvent({
-          kind: "error",
-          message,
-          code: "internalError",
-        });
+        broadcastSyncError?.(message, "internalError");
+        queueCoreDelta?.();
         jsonResponse(res, 500, {
           ok: false,
           error: {
@@ -620,86 +999,18 @@ const server = http.createServer(async (req, res) => {
       const all = parseBoolean(url.searchParams.get("all"), false);
       const maxPages = parseInteger(url.searchParams.get("maxPages"), 20);
       const cursor = url.searchParams.get("cursor") ?? null;
-
-      const data: Array<{
-        id: string;
-        provider: UnifiedProviderId;
-        preview: string;
-        title?: string | null | undefined;
-        isGenerating?: boolean | undefined;
-        createdAt: number;
-        updatedAt: number;
-        cwd?: string | undefined;
-        source?: string | undefined;
-      }> = [];
-      const cursors: Record<UnifiedProviderId, string | null> = {
-        codex: null,
-        opencode: null,
-      };
-      const errors: Record<
-        UnifiedProviderId,
-        {
-          code: string;
-          message: string;
-          details?: Record<string, string>;
-        } | null
-      > = {
-        codex: null,
-        opencode: null,
-      };
-
-      await Promise.all(
-        listUnifiedProviders().map(async (provider) => {
-          const adapter = resolveUnifiedAdapter(provider);
-          if (!adapter) {
-            errors[provider] = {
-              code: "providerDisabled",
-              message: `Provider ${provider} is not available`,
-            };
-            return;
-          }
-
-          try {
-            const result = await adapter.execute({
-              kind: "listThreads",
-              provider,
-              limit,
-              archived,
-              all,
-              maxPages,
-              cursor,
-            });
-
-            cursors[provider] = result.nextCursor ?? null;
-            for (const thread of result.data) {
-              threadIndex.register(thread.id, thread.provider);
-              data.push(thread);
-            }
-          } catch (error) {
-            const message = toErrorMessage(error);
-            errors[provider] = {
-              code: "listThreadsFailed",
-              message,
-              details: {
-                provider,
-              },
-            };
-            logger.warn(
-              {
-                provider,
-                error: message,
-              },
-              "unified-list-threads-failed",
-            );
-          }
-        }),
-      );
-
+      const result = await listUnifiedThreads({
+        limit,
+        archived,
+        all,
+        maxPages,
+        cursor,
+      });
       jsonResponse(res, 200, {
         ok: true,
-        data,
-        cursors,
-        errors,
+        data: result.data,
+        cursors: result.cursors,
+        errors: result.errors,
       });
       return;
     }
@@ -710,83 +1021,17 @@ const server = http.createServer(async (req, res) => {
       const all = parseBoolean(url.searchParams.get("all"), false);
       const maxPages = parseInteger(url.searchParams.get("maxPages"), 20);
       const cursor = url.searchParams.get("cursor") ?? null;
-
-      const rows: Array<{
-        id: string;
-        provider: UnifiedProviderId;
-        preview: string;
-        title?: string | null | undefined;
-        isGenerating?: boolean | undefined;
-        createdAt: number;
-        updatedAt: number;
-        cwd?: string | undefined;
-        source?: string | undefined;
-      }> = [];
-      const errors: Record<
-        UnifiedProviderId,
-        {
-          code: string;
-          message: string;
-          details?: Record<string, string>;
-        } | null
-      > = {
-        codex: null,
-        opencode: null,
-      };
-
-      await Promise.all(
-        listUnifiedProviders().map(async (provider) => {
-          const adapter = resolveUnifiedAdapter(provider);
-          if (!adapter) {
-            errors[provider] = {
-              code: "providerDisabled",
-              message: `Provider ${provider} is not available`,
-            };
-            return;
-          }
-
-          try {
-            const result = await adapter.execute({
-              kind: "listThreads",
-              provider,
-              limit,
-              archived,
-              all,
-              maxPages,
-              cursor,
-            });
-
-            for (const thread of result.data) {
-              threadIndex.register(thread.id, thread.provider);
-              rows.push({
-                ...thread,
-                preview: compactSidebarPreview(thread.preview),
-              });
-            }
-          } catch (error) {
-            const message = toErrorMessage(error);
-            errors[provider] = {
-              code: "listThreadsFailed",
-              message,
-              details: {
-                provider,
-              },
-            };
-            logger.warn(
-              {
-                provider,
-                error: message,
-              },
-              "unified-sidebar-threads-failed",
-            );
-          }
-        }),
-      );
-
+      const result = await listUnifiedSidebarThreads({
+        limit,
+        archived,
+        all,
+        maxPages,
+        cursor,
+      });
       jsonResponse(res, 200, {
         ok: true,
-        rows,
-        errors,
+        rows: result.rows,
+        errors: result.errors,
       });
       return;
     }
@@ -971,6 +1216,8 @@ const server = http.createServer(async (req, res) => {
           ok: true,
           trace: summary,
         });
+        queueDebugDelta?.();
+        queueCoreDelta?.();
         return;
       }
 
@@ -991,6 +1238,7 @@ const server = http.createServer(async (req, res) => {
         activeTrace.summary.eventCount += 1;
 
         jsonResponse(res, 200, { ok: true });
+        queueDebugDelta?.();
         return;
       }
 
@@ -1017,6 +1265,8 @@ const server = http.createServer(async (req, res) => {
           ok: true,
           trace: trace.summary,
         });
+        queueDebugDelta?.();
+        queueCoreDelta?.();
         return;
       }
 
@@ -1083,13 +1333,44 @@ const server = http.createServer(async (req, res) => {
       method: req.method ?? "unknown",
       url: req.url ?? "unknown",
     });
-    broadcastRuntimeState();
+    queueCoreDelta?.();
+    broadcastSyncError?.(runtimeLastError, "requestFailed");
     jsonResponse(res, 500, {
       ok: false,
       error: runtimeLastError,
     });
   }
 });
+
+const io = new SocketServer(server, {
+  path: "/api/unified/ws",
+  transports: ["websocket"],
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"],
+  },
+});
+
+const realtimeCoordinator = new RealtimeCoordinator({
+  io,
+  buildCoreState: () => buildRealtimeCoreState(),
+  buildThreadState: (input) => buildRealtimeThreadState(input),
+  buildDebugState: () => buildRealtimeDebugState(),
+});
+realtimeCoordinator.start();
+
+queueCoreDelta = () => {
+  realtimeCoordinator.queueCoreDelta();
+};
+queueDebugDelta = () => {
+  realtimeCoordinator.queueDebugDelta();
+};
+queueThreadDelta = (threadId: string) => {
+  realtimeCoordinator.queueThreadDelta(threadId);
+};
+broadcastSyncError = (message: string, code?: string) => {
+  realtimeCoordinator.broadcastSyncError(message, code);
+};
 
 server.on("connection", (socket) => {
   activeSockets.add(socket);
@@ -1154,7 +1435,8 @@ async function start(): Promise<void> {
     }
   }
 
-  broadcastRuntimeState();
+  queueCoreDelta?.();
+  queueDebugDelta?.();
   printStartupBanner();
   logger.info({ url: `http://${HOST}:${PORT}` }, "monitor-server-ready");
 }
@@ -1167,16 +1449,11 @@ async function shutdown(): Promise<void> {
   }
 
   shutdownPromise = (async () => {
-    clearInterval(sseKeepaliveTimer);
-
-    for (const client of unifiedSseClients) {
-      try {
-        client.end();
-      } catch {
-        // Ignore close errors while shutting down.
-      }
-    }
-    unifiedSseClients.clear();
+    await new Promise<void>((resolve) => {
+      io.close(() => {
+        resolve();
+      });
+    });
 
     for (const socket of activeSockets) {
       socket.destroy();

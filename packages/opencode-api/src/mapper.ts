@@ -96,15 +96,6 @@ export interface MappedThreadConversationState {
   source: "opencode";
 }
 
-export interface OpenCodeSsePayload {
-  type: "opencode-event";
-  sessionId: string;
-  relatedSessionId: string | null;
-  relevantToSession: boolean;
-  eventType: OpenCodeEventType;
-  payload: Event;
-}
-
 const ToolInputSchema = z
   .object({
     command: z.string().optional(),
@@ -344,20 +335,8 @@ export function partToTurnItem(part: Part): MappedTurnItem {
   return mapPart(part);
 }
 
-export function mapOpenCodeEventToSsePayload(
-  event: Event,
-  sessionId: string
-): OpenCodeSsePayload {
-  const relatedSessionId = extractRelatedSessionId(event);
-
-  return {
-    type: "opencode-event",
-    sessionId,
-    relatedSessionId,
-    relevantToSession: relatedSessionId === null ? true : relatedSessionId === sessionId,
-    eventType: event.type,
-    payload: event
-  };
+export function extractOpenCodeEventRelatedSessionId(event: Event): string | null {
+  return extractRelatedSessionId(event);
 }
 
 function mapPart<K extends OpenCodePartType>(part: PartByType<K>): MappedTurnItem {

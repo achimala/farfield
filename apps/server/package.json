@@ -25,6 +25,7 @@
   "dependencies": {
     "@opencode-ai/sdk": "^1.2.6",
     "pino": "^9.5.0",
+    "socket.io": "^4.8.1",
     "zod": "^3.24.1"
   },
   "devDependencies": {
@@ -32,6 +33,7 @@
     "@farfield/opencode-api": "workspace:*",
     "@farfield/protocol": "workspace:*",
     "@farfield/unified-surface": "workspace:*",
-    "esbuild": "^0.25.10"
+    "esbuild": "^0.25.10",
+    "socket.io-client": "^4.8.1"
   }
 }

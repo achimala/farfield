@@ -147,3 +147,17 @@ export function buildServerUrl(path: string, baseUrlOverride?: string): string {
       : resolveServerBaseUrl();
   return new URL(parsedPath, `${baseUrl}/`).toString();
 }
+
+export function buildServerWebSocketUrl(
+  path: string,
+  baseUrlOverride?: string,
+): string {
+  const parsedPath = ApiPathSchema.parse(path);
+  const baseUrl =
+    typeof baseUrlOverride === "string"
+      ? parseServerBaseUrl(baseUrlOverride)
+      : resolveServerBaseUrl();
+  const url = new URL(parsedPath, `${baseUrl}/`);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString();
+}

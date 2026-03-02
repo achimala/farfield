@@ -1250,6 +1250,270 @@ export const UNIFIED_EVENT_KINDS = [
   "error"
 ] as const satisfies ReadonlyArray<UnifiedEventKind>;
 
+export const UnifiedRealtimeTabSchema = z.enum(["chat", "debug"]);
+export type UnifiedRealtimeTab = z.infer<typeof UnifiedRealtimeTabSchema>;
+
+const UnifiedRealtimeHealthStateSchema = z
+  .object({
+    appReady: z.boolean(),
+    ipcConnected: z.boolean(),
+    ipcInitialized: z.boolean(),
+    gitCommit: z.union([z.string(), z.null()]).optional(),
+    lastError: z.union([z.string(), z.null()]),
+    historyCount: z.number().int().nonnegative(),
+    threadOwnerCount: z.number().int().nonnegative()
+  })
+  .strict();
+
+const UnifiedRealtimeAgentCapabilitiesSchema = z
+  .object({
+    canListModels: z.boolean(),
+    canListCollaborationModes: z.boolean(),
+    canSetCollaborationMode: z.boolean(),
+    canSubmitUserInput: z.boolean(),
+    canReadLiveState: z.boolean(),
+    canReadStreamEvents: z.boolean(),
+    canListProjectDirectories: z.boolean()
+  })
+  .strict();
+
+const UnifiedRealtimeAgentDescriptorSchema = z
+  .object({
+    id: UnifiedProviderIdSchema,
+    label: z.string(),
+    enabled: z.boolean(),
+    connected: z.boolean(),
+    features: z.record(
+      UnifiedFeatureIdSchema,
+      UnifiedFeatureAvailabilitySchema
+    ),
+    capabilities: UnifiedRealtimeAgentCapabilitiesSchema,
+    projectDirectories: z.array(z.string())
+  })
+  .strict();
+
+const UnifiedRealtimeAgentsStateSchema = z
+  .object({
+    agents: z.array(UnifiedRealtimeAgentDescriptorSchema),
+    defaultAgentId: UnifiedProviderIdSchema
+  })
+  .strict();
+
+const UnifiedRealtimeProviderErrorSchema = z
+  .object({
+    code: z.string(),
+    message: z.string(),
+    details: JsonValueSchema.optional()
+  })
+  .strict();
+
+const UnifiedRealtimeSidebarErrorsSchema = z
+  .object({
+    codex: z.union([UnifiedRealtimeProviderErrorSchema, z.null()]),
+    opencode: z.union([UnifiedRealtimeProviderErrorSchema, z.null()])
+  })
+  .strict();
+
+const UnifiedRealtimeTraceSummarySchema = z
+  .object({
+    id: z.string(),
+    label: z.string(),
+    startedAt: z.string(),
+    stoppedAt: z.union([z.string(), z.null()]),
+    eventCount: z.number().int().nonnegative(),
+    path: z.string()
+  })
+  .strict();
+
+const UnifiedRealtimeTraceStatusSchema = z
+  .object({
+    active: z.union([UnifiedRealtimeTraceSummarySchema, z.null()]),
+    recent: z.array(UnifiedRealtimeTraceSummarySchema)
+  })
+  .strict();
+
+const UnifiedRealtimeHistoryEntrySchema = z
+  .object({
+    id: z.string(),
+    at: z.string(),
+    source: z.enum(["ipc", "app", "system"]),
+    direction: z.enum(["in", "out", "system"]),
+    meta: z.record(JsonValueSchema)
+  })
+  .strict();
+export type UnifiedRealtimeHistoryEntry = z.infer<
+  typeof UnifiedRealtimeHistoryEntrySchema
+>;
+
+export const UnifiedRealtimeCoreStateSchema = z
+  .object({
+    health: z.union([UnifiedRealtimeHealthStateSchema, z.null()]),
+    agents: UnifiedRealtimeAgentsStateSchema,
+    sidebar: z
+      .object({
+        rows: z.array(UnifiedThreadSummarySchema),
+        errors: UnifiedRealtimeSidebarErrorsSchema
+      })
+      .strict(),
+    rateLimits: z.union([JsonValueSchema, z.null()]),
+    traceStatus: z.union([UnifiedRealtimeTraceStatusSchema, z.null()]),
+    history: z.array(UnifiedRealtimeHistoryEntrySchema)
+  })
+  .strict();
+export type UnifiedRealtimeCoreState = z.infer<
+  typeof UnifiedRealtimeCoreStateSchema
+>;
+
+const UnifiedRealtimeLiveStateErrorSchema = z.union([
+  z
+    .object({
+      kind: z.literal("reductionFailed"),
+      message: z.string(),
+      eventIndex: z.union([z.number().int().nonnegative(), z.null()]),
+      patchIndex: z.union([z.number().int().nonnegative(), z.null()])
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("parseFailed"),
+      message: z.string(),
+      eventIndex: z.union([z.number().int().nonnegative(), z.null()]),
+      patchIndex: z.union([z.number().int().nonnegative(), z.null()])
+    })
+    .strict(),
+  z.null()
+]);
+
+export const UnifiedRealtimeThreadStateSchema = z
+  .object({
+    threadId: NonEmptyStringSchema,
+    readThread: z.union([UnifiedThreadSchema, z.null()]),
+    liveState: z
+      .object({
+        ownerClientId: z.union([z.string(), z.null()]),
+        conversationState: z.union([UnifiedThreadSchema, z.null()]),
+        liveStateError: UnifiedRealtimeLiveStateErrorSchema
+      })
+      .strict(),
+    streamEvents: z.array(JsonValueSchema)
+  })
+  .strict();
+export type UnifiedRealtimeThreadState = z.infer<
+  typeof UnifiedRealtimeThreadStateSchema
+>;
+
+export const UnifiedRealtimeSnapshotSchema = z
+  .object({
+    kind: z.literal("snapshot"),
+    syncVersion: z.number().int().nonnegative(),
+    core: UnifiedRealtimeCoreStateSchema,
+    selectedThread: z.union([UnifiedRealtimeThreadStateSchema, z.null()])
+  })
+  .strict();
+
+export const UnifiedRealtimeCoreDeltaSchema = z
+  .object({
+    kind: z.literal("coreDelta"),
+    syncVersion: z.number().int().nonnegative(),
+    core: UnifiedRealtimeCoreStateSchema
+  })
+  .strict();
+
+export const UnifiedRealtimeThreadDeltaSchema = z
+  .object({
+    kind: z.literal("threadDelta"),
+    syncVersion: z.number().int().nonnegative(),
+    thread: UnifiedRealtimeThreadStateSchema
+  })
+  .strict();
+
+export const UnifiedRealtimeDebugDeltaSchema = z
+  .object({
+    kind: z.literal("debugDelta"),
+    syncVersion: z.number().int().nonnegative(),
+    traceStatus: z.union([UnifiedRealtimeTraceStatusSchema, z.null()]),
+    history: z.array(UnifiedRealtimeHistoryEntrySchema)
+  })
+  .strict();
+
+const UnifiedRealtimeSyncErrorSchema = z
+  .object({
+    kind: z.literal("syncError"),
+    syncVersion: z.number().int().nonnegative(),
+    message: z.string(),
+    code: z.string().optional(),
+    details: z.union([JsonValueSchema, z.null()]).optional()
+  })
+  .strict();
+
+export const UnifiedRealtimeServerMessageSchema = z.discriminatedUnion("kind", [
+  UnifiedRealtimeSnapshotSchema,
+  UnifiedRealtimeCoreDeltaSchema,
+  UnifiedRealtimeThreadDeltaSchema,
+  UnifiedRealtimeDebugDeltaSchema,
+  UnifiedRealtimeSyncErrorSchema
+]);
+export type UnifiedRealtimeServerMessage = z.infer<
+  typeof UnifiedRealtimeServerMessageSchema
+>;
+export type UnifiedRealtimeServerMessageKind =
+  UnifiedRealtimeServerMessage["kind"];
+
+const UnifiedRealtimeHelloMessageSchema = z
+  .object({
+    kind: z.literal("hello"),
+    selectedThreadId: z.union([z.string(), z.null()]),
+    activeTab: UnifiedRealtimeTabSchema
+  })
+  .strict();
+
+const UnifiedRealtimeSelectionChangedMessageSchema = z
+  .object({
+    kind: z.literal("selectionChanged"),
+    selectedThreadId: z.union([z.string(), z.null()])
+  })
+  .strict();
+
+const UnifiedRealtimeActiveTabChangedMessageSchema = z
+  .object({
+    kind: z.literal("activeTabChanged"),
+    activeTab: UnifiedRealtimeTabSchema
+  })
+  .strict();
+
+const UnifiedRealtimeRequestSnapshotMessageSchema = z
+  .object({
+    kind: z.literal("requestSnapshot")
+  })
+  .strict();
+
+export const UnifiedRealtimeClientMessageSchema = z.discriminatedUnion("kind", [
+  UnifiedRealtimeHelloMessageSchema,
+  UnifiedRealtimeSelectionChangedMessageSchema,
+  UnifiedRealtimeActiveTabChangedMessageSchema,
+  UnifiedRealtimeRequestSnapshotMessageSchema
+]);
+export type UnifiedRealtimeClientMessage = z.infer<
+  typeof UnifiedRealtimeClientMessageSchema
+>;
+export type UnifiedRealtimeClientMessageKind =
+  UnifiedRealtimeClientMessage["kind"];
+
+export const UNIFIED_REALTIME_SERVER_MESSAGE_KINDS = [
+  "snapshot",
+  "coreDelta",
+  "threadDelta",
+  "debugDelta",
+  "syncError"
+] as const satisfies ReadonlyArray<UnifiedRealtimeServerMessageKind>;
+
+export const UNIFIED_REALTIME_CLIENT_MESSAGE_KINDS = [
+  "hello",
+  "selectionChanged",
+  "activeTabChanged",
+  "requestSnapshot"
+] as const satisfies ReadonlyArray<UnifiedRealtimeClientMessageKind>;
+
 type AssertTrue<T extends true> = T;
 type IsNever<T> = [T] extends [never] ? true : false;
 
@@ -1335,12 +1599,26 @@ type MissingCommandResultKinds = Exclude<UnifiedCommandResultKind, keyof typeof 
 type MissingItemKinds = Exclude<UnifiedItemKind, keyof typeof ITEM_KIND_COVERAGE>;
 type MissingFeatureIds = Exclude<UnifiedFeatureId, keyof typeof FEATURE_ID_COVERAGE>;
 type MissingEventKinds = Exclude<UnifiedEventKind, keyof typeof EVENT_KIND_COVERAGE>;
+type MissingRealtimeServerMessageKinds = Exclude<
+  UnifiedRealtimeServerMessageKind,
+  (typeof UNIFIED_REALTIME_SERVER_MESSAGE_KINDS)[number]
+>;
+type MissingRealtimeClientMessageKinds = Exclude<
+  UnifiedRealtimeClientMessageKind,
+  (typeof UNIFIED_REALTIME_CLIENT_MESSAGE_KINDS)[number]
+>;
 
 type _AssertNoMissingCommandKinds = AssertTrue<IsNever<MissingCommandKinds>>;
 type _AssertNoMissingCommandResultKinds = AssertTrue<IsNever<MissingCommandResultKinds>>;
 type _AssertNoMissingItemKinds = AssertTrue<IsNever<MissingItemKinds>>;
 type _AssertNoMissingFeatureIds = AssertTrue<IsNever<MissingFeatureIds>>;
 type _AssertNoMissingEventKinds = AssertTrue<IsNever<MissingEventKinds>>;
+type _AssertNoMissingRealtimeServerMessageKinds = AssertTrue<
+  IsNever<MissingRealtimeServerMessageKinds>
+>;
+type _AssertNoMissingRealtimeClientMessageKinds = AssertTrue<
+  IsNever<MissingRealtimeClientMessageKinds>
+>;
 
 void (
   {
@@ -1352,6 +1630,8 @@ void (
     commandResultCoverage: COMMAND_RESULT_KIND_COVERAGE,
     itemCoverage: ITEM_KIND_COVERAGE,
     featureCoverage: FEATURE_ID_COVERAGE,
-    eventCoverage: EVENT_KIND_COVERAGE
+    eventCoverage: EVENT_KIND_COVERAGE,
+    realtimeServerKinds: UNIFIED_REALTIME_SERVER_MESSAGE_KINDS,
+    realtimeClientKinds: UNIFIED_REALTIME_CLIENT_MESSAGE_KINDS
   }
 );

@@ -41,7 +41,7 @@ import {
   getSavedServerBaseUrl,
   getServerBaseUrl,
   getStreamEvents,
-  getUnifiedEventsUrl,
+  getUnifiedWebSocketUrl,
   readThread,
   getTraceStatus,
   interruptThread,
@@ -60,6 +60,10 @@ import {
   type AgentId,
 } from "@/lib/api";
 import {
+  createUnifiedRealtimeSocket,
+  type UnifiedRealtimeSocket,
+} from "@/lib/realtime-socket";
+import {
   groupColors,
   readCollapseMap,
   readProjectColors,
@@ -70,7 +74,9 @@ import {
   writeSidebarOrder,
 } from "@/lib/sidebar-prefs";
 import {
-  UnifiedEventSchema,
+  type UnifiedRealtimeCoreState,
+  type UnifiedRealtimeServerMessage,
+  type UnifiedRealtimeThreadState,
   type UnifiedThreadRequestResponse,
   type UnifiedFeatureAvailability,
   type UnifiedFeatureId,
@@ -106,6 +112,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { AppServerGetAccountRateLimitsResponseSchema } from "@farfield/protocol";
 import { z } from "zod";
 
 /* ── Types ─────────────────────────────────────────────────── */
@@ -134,10 +141,17 @@ type ConversationTurn = NonNullable<
 type ConversationTurnItem = NonNullable<ConversationTurn["items"]>[number];
 type FlatConversationItem = ChatTimelineEntry;
 
-interface RefreshFlags {
-  refreshCore: boolean;
-  refreshHistory: boolean;
-  refreshSelectedThread: boolean;
+function toTraceStatusState(
+  traceStatus: UnifiedRealtimeCoreState["traceStatus"],
+): TraceStatus | null {
+  if (!traceStatus) {
+    return null;
+  }
+  return {
+    ok: true,
+    active: traceStatus.active,
+    recent: traceStatus.recent,
+  };
 }
 
 const TokenUsageSnakeCaseSchema = z
@@ -559,8 +573,6 @@ const ASSUMED_APP_DEFAULT_MODEL = "gpt-5.3-codex";
 const ASSUMED_APP_DEFAULT_EFFORT = "medium";
 const AGENT_CACHE_TTL_MS = 30_000;
 const PROVIDER_CATALOG_CACHE_TTL_MS = 20_000;
-const CORE_REFRESH_INTERVAL_MS = 5_000;
-const SELECTED_THREAD_REFRESH_INTERVAL_MS = 1_000;
 const DEBUG_UI_ENABLED = import.meta.env.MODE !== "production";
 const MOBILE_SIDEBAR_WIDTH_PX = 256;
 const MOBILE_SWIPE_EDGE_PX = 24;
@@ -1176,14 +1188,7 @@ export function App(): React.JSX.Element {
   const activeTabRef = useRef<"chat" | "debug">(
     initialTab,
   );
-  const refreshTimerRef = useRef<number | null>(null);
-  const pendingRefreshFlagsRef = useRef<RefreshFlags>({
-    refreshCore: false,
-    refreshHistory: false,
-    refreshSelectedThread: false,
-  });
-  const coreRefreshIntervalRef = useRef<number | null>(null);
-  const selectedThreadRefreshIntervalRef = useRef<number | null>(null);
+  const realtimeSocketRef = useRef<UnifiedRealtimeSocket | null>(null);
   const mobileSidebarSwipeRef = useRef<MobileSidebarSwipeGesture | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const chatContentRef = useRef<HTMLDivElement>(null);
@@ -1255,8 +1260,8 @@ export function App(): React.JSX.Element {
   const reversedHistory = useMemo(() => history.slice().reverse(), [history]);
   const hasServerBaseUrlDraftChanges =
     serverBaseUrlDraft.trim() !== serverBaseUrl;
-  const unifiedEventsUrl = useMemo(
-    () => getUnifiedEventsUrl(serverBaseUrl),
+  const unifiedWebSocketUrl = useMemo(
+    () => getUnifiedWebSocketUrl(serverBaseUrl),
     [serverBaseUrl],
   );
   const upsertSidebarThread = useCallback((threadSummary: Thread) => {
@@ -2324,8 +2329,234 @@ export function App(): React.JSX.Element {
     }
   }, [refreshAll]);
 
+  const applyRealtimeCoreState = useCallback(
+    (coreState: UnifiedRealtimeCoreState) => {
+      const incomingThreads = sortThreadsByRecency(coreState.sidebar.rows);
+      const optimisticSelectedThreadIds = optimisticSelectedThreadIdsRef.current;
+      if (optimisticSelectedThreadIds.size > 0) {
+        for (const thread of incomingThreads) {
+          optimisticSelectedThreadIds.delete(thread.id);
+        }
+      }
+
+      const nextThreadProviders = new Map(threadProviderByIdRef.current);
+      for (const thread of incomingThreads) {
+        nextThreadProviders.set(thread.id, thread.provider);
+      }
+      threadProviderByIdRef.current = nextThreadProviders;
+
+      setThreadListErrors((prev) =>
+        hasSameThreadListErrors(prev, coreState.sidebar.errors)
+          ? prev
+          : coreState.sidebar.errors,
+      );
+
+      setThreads((previousThreads) => {
+        const nextThreads = mergeIncomingThreads(
+          incomingThreads,
+          previousThreads,
+        );
+        const existingIds = new Set(nextThreads.map((thread) => thread.id));
+        for (const thread of previousThreads) {
+          if (existingIds.has(thread.id)) {
+            continue;
+          }
+          const shouldKeepThread =
+            optimisticSelectedThreadIdsRef.current.has(thread.id) ||
+            thread.id === selectedThreadIdRef.current;
+          if (!shouldKeepThread) {
+            continue;
+          }
+          existingIds.add(thread.id);
+          nextThreads.push(thread);
+        }
+        const sortedThreads = sortThreadsByRecency(nextThreads);
+        const nextThreadsSignature = buildThreadsSignature(sortedThreads);
+        if (signaturesMatch(threadsSignatureRef.current, nextThreadsSignature)) {
+          return previousThreads;
+        }
+        threadsSignatureRef.current = nextThreadsSignature;
+        return sortedThreads;
+      });
+
+      setHealth(
+        coreState.health
+          ? {
+              ok: true,
+              state: coreState.health,
+            }
+          : null,
+      );
+
+      setTraceStatus(toTraceStatusState(coreState.traceStatus));
+      setHistory(coreState.history);
+
+      const parsedRateLimits =
+        AppServerGetAccountRateLimitsResponseSchema.safeParse(
+          coreState.rateLimits,
+        );
+      setRateLimits(parsedRateLimits.success ? parsedRateLimits.data : null);
+
+      setAgentDescriptors((prev) => {
+        if (
+          prev.length === coreState.agents.agents.length &&
+          prev.every((agent, index) => {
+            const nextAgent = coreState.agents.agents[index];
+            if (!nextAgent) {
+              return false;
+            }
+            return (
+              agent.id === nextAgent.id &&
+              agent.enabled === nextAgent.enabled &&
+              agent.connected === nextAgent.connected
+            );
+          })
+        ) {
+          return prev;
+        }
+        return coreState.agents.agents;
+      });
+
+      const enabledAgents = coreState.agents.agents
+        .filter((agent) => agent.enabled)
+        .map((agent) => agent.id);
+      const nextDefaultAgent = enabledAgents.includes(
+        coreState.agents.defaultAgentId,
+      )
+        ? coreState.agents.defaultAgentId
+        : (enabledAgents[0] ?? coreState.agents.defaultAgentId);
+
+      setSelectedAgentId((cur) => {
+        if (!hasHydratedAgentSelectionRef.current) {
+          hasHydratedAgentSelectionRef.current = true;
+          return nextDefaultAgent;
+        }
+        return enabledAgents.includes(cur) ? cur : nextDefaultAgent;
+      });
+
+      setSelectedThreadId((cur) => {
+        if (cur) {
+          return cur;
+        }
+        if (selectedThreadIdRef.current) {
+          const listedThreadStillExists = incomingThreads.some(
+            (threadSummary) => threadSummary.id === selectedThreadIdRef.current,
+          );
+          const hasOptimisticSelection = optimisticSelectedThreadIdsRef.current.has(
+            selectedThreadIdRef.current,
+          );
+          const hasLoadedThreadState = threadViewStateCacheRef.current.has(
+            selectedThreadIdRef.current,
+          );
+          if (
+            listedThreadStillExists ||
+            hasOptimisticSelection ||
+            hasLoadedThreadState
+          ) {
+            return selectedThreadIdRef.current;
+          }
+        }
+        const preferredThread = incomingThreads.find(
+          (thread) => thread.provider === nextDefaultAgent,
+        );
+        if (preferredThread) {
+          return preferredThread.id;
+        }
+        return incomingThreads[0]?.id ?? null;
+      });
+    },
+    [],
+  );
+
+  const applyRealtimeThreadState = useCallback(
+    (threadState: UnifiedRealtimeThreadState) => {
+      if (threadState.readThread) {
+        threadProviderByIdRef.current.set(
+          threadState.readThread.id,
+          threadState.readThread.provider,
+        );
+      }
+
+      const nextReadThreadState: ReadThreadResponse | null =
+        threadState.readThread
+          ? {
+              thread: threadState.readThread,
+            }
+          : null;
+      const nextLiveState: LiveStateResponse = {
+        ok: true,
+        threadId: threadState.threadId,
+        ownerClientId: threadState.liveState.ownerClientId,
+        conversationState: threadState.liveState.conversationState,
+        liveStateError: threadState.liveState.liveStateError,
+      };
+      const nextStreamEvents = threadState.streamEvents;
+
+      threadViewStateCacheRef.current.set(threadState.threadId, {
+        readThreadState: nextReadThreadState,
+        liveState: nextLiveState,
+        streamEvents: nextStreamEvents,
+      });
+
+      if (selectedThreadIdRef.current !== threadState.threadId) {
+        return;
+      }
+
+      startTransition(() => {
+        setReadThreadState(nextReadThreadState);
+        setLiveState(nextLiveState);
+        setStreamEvents(nextStreamEvents);
+      });
+    },
+    [],
+  );
+
+  const handleRealtimeMessage = useCallback(
+    (message: UnifiedRealtimeServerMessage) => {
+      if (message.kind === "snapshot") {
+        applyRealtimeCoreState(message.core);
+        if (message.selectedThread) {
+          applyRealtimeThreadState(message.selectedThread);
+        }
+        return;
+      }
+
+      if (message.kind === "coreDelta") {
+        applyRealtimeCoreState(message.core);
+        return;
+      }
+
+      if (message.kind === "threadDelta") {
+        applyRealtimeThreadState(message.thread);
+        return;
+      }
+
+      if (message.kind === "debugDelta") {
+        setTraceStatus(toTraceStatusState(message.traceStatus));
+        setHistory(message.history);
+        return;
+      }
+
+      if (message.kind === "syncError") {
+        setError(message.message);
+      }
+    },
+    [applyRealtimeCoreState, applyRealtimeThreadState],
+  );
+
   useEffect(() => {
     selectedThreadIdRef.current = selectedThreadId;
+  }, [selectedThreadId]);
+
+  useEffect(() => {
+    const socket = realtimeSocketRef.current;
+    if (!socket) {
+      return;
+    }
+    socket.send({
+      kind: "selectionChanged",
+      selectedThreadId,
+    });
   }, [selectedThreadId]);
 
   useEffect(() => {
@@ -2346,6 +2577,17 @@ export function App(): React.JSX.Element {
 
   useEffect(() => {
     activeTabRef.current = activeTab;
+  }, [activeTab]);
+
+  useEffect(() => {
+    const socket = realtimeSocketRef.current;
+    if (!socket) {
+      return;
+    }
+    socket.send({
+      kind: "activeTabChanged",
+      activeTab,
+    });
   }, [activeTab]);
 
   useEffect(() => {
@@ -2397,135 +2639,6 @@ export function App(): React.JSX.Element {
     void loadCore().catch((error) => setError(toErrorMessage(error)));
   }, [selectedAgentId]);
 
-  useEffect(() => {
-    const refreshCoreData = () => {
-      if (document.visibilityState === "hidden") {
-        return;
-      }
-      const loadCore = loadCoreDataRef.current;
-      if (!loadCore) {
-        return;
-      }
-      void loadCore().catch((e) => setError(toErrorMessage(e)));
-    };
-    const resumeCoreRefresh = () => {
-      startCoreRefresh();
-      refreshCoreData();
-    };
-
-    const startCoreRefresh = () => {
-      if (coreRefreshIntervalRef.current !== null) {
-        return;
-      }
-      coreRefreshIntervalRef.current = window.setInterval(
-        refreshCoreData,
-        CORE_REFRESH_INTERVAL_MS,
-      );
-    };
-
-    const stopCoreRefresh = () => {
-      if (coreRefreshIntervalRef.current === null) {
-        return;
-      }
-      window.clearInterval(coreRefreshIntervalRef.current);
-      coreRefreshIntervalRef.current = null;
-    };
-
-    resumeCoreRefresh();
-    const onVisibilityChange = () => {
-      if (document.visibilityState === "hidden") {
-        stopCoreRefresh();
-        return;
-      }
-      resumeCoreRefresh();
-    };
-    const onPageHide = () => {
-      stopCoreRefresh();
-    };
-    const onPageShow = () => {
-      resumeCoreRefresh();
-    };
-
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    window.addEventListener("pagehide", onPageHide);
-    window.addEventListener("pageshow", onPageShow);
-    return () => {
-      stopCoreRefresh();
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-      window.removeEventListener("pagehide", onPageHide);
-      window.removeEventListener("pageshow", onPageShow);
-    };
-  }, []);
-
-  useEffect(() => {
-    const stopSelectedThreadRefresh = () => {
-      if (selectedThreadRefreshIntervalRef.current === null) {
-        return;
-      }
-      window.clearInterval(selectedThreadRefreshIntervalRef.current);
-      selectedThreadRefreshIntervalRef.current = null;
-    };
-
-    if (!selectedThreadId) {
-      stopSelectedThreadRefresh();
-      return;
-    }
-
-    const refreshSelectedThreadData = () => {
-      if (document.visibilityState === "hidden") {
-        return;
-      }
-      const load = loadSelectedThreadRef.current;
-      if (!load) {
-        return;
-      }
-      void load(selectedThreadId, {
-        includeTurns: true,
-        includeStreamEvents: activeTabRef.current === "debug",
-      }).catch((e) =>
-        setError(toErrorMessage(e)),
-      );
-    };
-    const resumeSelectedThreadRefresh = () => {
-      startSelectedThreadRefresh();
-      refreshSelectedThreadData();
-    };
-
-    const startSelectedThreadRefresh = () => {
-      if (selectedThreadRefreshIntervalRef.current !== null) {
-        return;
-      }
-      selectedThreadRefreshIntervalRef.current = window.setInterval(
-        refreshSelectedThreadData,
-        SELECTED_THREAD_REFRESH_INTERVAL_MS,
-      );
-    };
-
-    resumeSelectedThreadRefresh();
-    const onVisibilityChange = () => {
-      if (document.visibilityState === "hidden") {
-        stopSelectedThreadRefresh();
-        return;
-      }
-      resumeSelectedThreadRefresh();
-    };
-    const onPageHide = () => {
-      stopSelectedThreadRefresh();
-    };
-    const onPageShow = () => {
-      resumeSelectedThreadRefresh();
-    };
-
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    window.addEventListener("pagehide", onPageHide);
-    window.addEventListener("pageshow", onPageShow);
-    return () => {
-      stopSelectedThreadRefresh();
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-      window.removeEventListener("pagehide", onPageHide);
-      window.removeEventListener("pageshow", onPageShow);
-    };
-  }, [selectedThreadId]);
 
   useEffect(() => {
     if (!selectedThreadId) {
@@ -2556,216 +2669,65 @@ export function App(): React.JSX.Element {
   }, [selectedThreadId]);
 
   useEffect(() => {
-    let disposed = false;
-    let source: EventSource | null = null;
-    let reconnectTimer: number | null = null;
-    let reconnectDelayMs = 1000;
-    let hasOpenedConnection = false;
+    const socket = createUnifiedRealtimeSocket({
+      socketUrl: unifiedWebSocketUrl,
+      onConnect: () => {
+        socket.send({
+          kind: "hello",
+          selectedThreadId: selectedThreadIdRef.current,
+          activeTab: activeTabRef.current,
+        });
+      },
+      onDisconnect: () => {
+        // No-op. Socket.IO handles reconnect.
+      },
+      onProtocolError: (message) => {
+        setError(message);
+      },
+      onMessage: (message) => {
+        handleRealtimeMessage(message);
+      },
+    });
+    realtimeSocketRef.current = socket;
 
-    const scheduleRefresh = (
-      refreshCore: boolean,
-      refreshHistory: boolean,
-      refreshSelectedThread: boolean,
-    ) => {
-      const previousFlags = pendingRefreshFlagsRef.current;
-      pendingRefreshFlagsRef.current = {
-        refreshCore: previousFlags.refreshCore || refreshCore,
-        refreshHistory: previousFlags.refreshHistory || refreshHistory,
-        refreshSelectedThread:
-          previousFlags.refreshSelectedThread || refreshSelectedThread,
-      };
-
-      if (refreshTimerRef.current) {
-        window.clearTimeout(refreshTimerRef.current);
-      }
-      refreshTimerRef.current = window.setTimeout(() => {
-        refreshTimerRef.current = null;
-        const flags = pendingRefreshFlagsRef.current;
-        pendingRefreshFlagsRef.current = {
-          refreshCore: false,
-          refreshHistory: false,
-          refreshSelectedThread: false,
-        };
-        void (async () => {
-          try {
-            if (flags.refreshCore) {
-              const loadCore = loadCoreDataRef.current;
-              if (loadCore) {
-                await loadCore();
-              }
-            } else if (
-              flags.refreshHistory &&
-              activeTabRef.current === "debug"
-            ) {
-              const nextHistory = await listDebugHistory(120);
-              startTransition(() => {
-                setHistory((prev) => {
-                  if (
-                    prev.length === nextHistory.history.length &&
-                    prev[prev.length - 1]?.id ===
-                      nextHistory.history[nextHistory.history.length - 1]?.id
-                  ) {
-                    return prev;
-                  }
-                  return nextHistory.history;
-                });
-              });
-            }
-            if (flags.refreshSelectedThread && selectedThreadIdRef.current) {
-              const loadThread = loadSelectedThreadRef.current;
-              if (loadThread) {
-                await loadThread(selectedThreadIdRef.current, {
-                  includeTurns: true,
-                  includeStreamEvents: activeTabRef.current === "debug",
-                });
-              }
-            }
-          } catch (e) {
-            setError(toErrorMessage(e));
-          }
-        })();
-      }, 200);
+    const connectSocket = () => {
+      socket.connect();
     };
 
-    const scheduleReconnect = () => {
-      if (disposed || reconnectTimer !== null) {
-        return;
-      }
-      reconnectTimer = window.setTimeout(() => {
-        reconnectTimer = null;
-        connectEvents();
-      }, reconnectDelayMs);
-      reconnectDelayMs = Math.min(reconnectDelayMs * 2, 10_000);
-    };
-
-    const connectEvents = () => {
-      if (disposed || source) {
-        return;
-      }
-
-      source = new EventSource(unifiedEventsUrl);
-      source.onopen = () => {
-        reconnectDelayMs = 1000;
-        if (hasOpenedConnection) {
-          return;
-        }
-        hasOpenedConnection = true;
-        scheduleRefresh(
-          true,
-          activeTabRef.current === "debug",
-          Boolean(selectedThreadIdRef.current),
-        );
-      };
-
-      source.onmessage = (event: MessageEvent<string>) => {
-        let refreshCore = false;
-        const refreshHistory = false;
-        let refreshSelectedThread = false;
-
-        try {
-          const parsedEventResult = UnifiedEventSchema.safeParse(
-            JSON.parse(event.data),
-          );
-          if (!parsedEventResult.success) {
-            setError(
-              `Invalid unified event payload: ${parsedEventResult.error.issues
-                .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
-                .join(" | ")}`,
-            );
-            refreshCore = true;
-          } else {
-            const parsedEvent = parsedEventResult.data;
-            if (parsedEvent.kind === "providerStateChanged") {
-              agentCacheRef.current = null;
-              providerCatalogCacheRef.current.clear();
-              refreshCore = true;
-            } else if (parsedEvent.kind === "threadUpdated") {
-              refreshCore = true;
-              if (
-                selectedThreadIdRef.current &&
-                parsedEvent.threadId === selectedThreadIdRef.current
-              ) {
-                refreshSelectedThread = true;
-              }
-            } else if (
-              parsedEvent.kind === "userInputRequested" ||
-              parsedEvent.kind === "userInputResolved"
-            ) {
-              if (
-                selectedThreadIdRef.current &&
-                parsedEvent.threadId === selectedThreadIdRef.current
-              ) {
-                refreshCore = true;
-                refreshSelectedThread = true;
-              }
-            } else if (parsedEvent.kind === "error") {
-              refreshCore = true;
-            }
-          }
-        } catch (error) {
-          setError(`Invalid unified event payload: ${toErrorMessage(error)}`);
-          refreshCore = true;
-        }
-
-        scheduleRefresh(refreshCore, refreshHistory, refreshSelectedThread);
-      };
-
-      source.onerror = () => {
-        if (source) {
-          source.close();
-          source = null;
-        }
-        scheduleReconnect();
-      };
-    };
-
-    const closeEvents = () => {
-      if (reconnectTimer !== null) {
-        window.clearTimeout(reconnectTimer);
-        reconnectTimer = null;
-      }
-      if (refreshTimerRef.current) {
-        window.clearTimeout(refreshTimerRef.current);
-        refreshTimerRef.current = null;
-      }
-      pendingRefreshFlagsRef.current = {
-        refreshCore: false,
-        refreshHistory: false,
-        refreshSelectedThread: false,
-      };
-      if (source) {
-        source.close();
-        source = null;
-      }
+    const disconnectSocket = () => {
+      socket.disconnect();
     };
 
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") {
-        connectEvents();
+        connectSocket();
+        socket.send({ kind: "requestSnapshot" });
         return;
       }
-      closeEvents();
+      disconnectSocket();
     };
     const onPageHide = () => {
-      closeEvents();
+      disconnectSocket();
     };
     const onPageShow = () => {
-      connectEvents();
+      connectSocket();
+      socket.send({ kind: "requestSnapshot" });
     };
 
     document.addEventListener("visibilitychange", onVisibilityChange);
     window.addEventListener("pagehide", onPageHide);
     window.addEventListener("pageshow", onPageShow);
-    connectEvents();
+
+    connectSocket();
 
     return () => {
-      disposed = true;
+      realtimeSocketRef.current = null;
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("pagehide", onPageHide);
       window.removeEventListener("pageshow", onPageShow);
-      closeEvents();
+      disconnectSocket();
     };
-  }, [unifiedEventsUrl]);
+  }, [handleRealtimeMessage, unifiedWebSocketUrl]);
 
   useEffect(() => {
     if (!activeRequest) {

@@ -1,6 +1,13 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type {
+import {
+  UnifiedRealtimeClientMessageSchema,
+  UnifiedRealtimeCoreStateSchema,
+  UnifiedRealtimeServerMessageSchema,
+  type UnifiedRealtimeClientMessage,
+  type UnifiedRealtimeCoreState,
+  type UnifiedRealtimeServerMessage,
+  type UnifiedRealtimeThreadState,
   JsonValue,
   UnifiedFeatureAvailability,
   UnifiedFeatureId,
@@ -9,41 +16,70 @@ import type {
 } from "@farfield/unified-surface";
 import { App } from "../src/App";
 
-class MockEventSource {
-  private static instances: MockEventSource[] = [];
-  public onmessage: ((event: MessageEvent<string>) => void) | null = null;
-  public onerror: ((event: Event) => void) | null = null;
+type SocketPayload = JsonValue | UnifiedRealtimeServerMessage;
+type SocketListener = (payload?: SocketPayload) => void;
 
-  public constructor(_url: string) {
-    MockEventSource.instances.push(this);
+class MockRealtimeSocket {
+  private static instances: MockRealtimeSocket[] = [];
+  private static clientMessages: UnifiedRealtimeClientMessage[] = [];
+  private readonly listeners = new Map<string, SocketListener[]>();
+
+  public static reset(): void {
+    MockRealtimeSocket.instances = [];
+    MockRealtimeSocket.clientMessages = [];
   }
 
-  public close(): void {
-    MockEventSource.instances = MockEventSource.instances.filter(
-      (instance) => instance !== this,
-    );
+  public static getClientMessages(): UnifiedRealtimeClientMessage[] {
+    return [...MockRealtimeSocket.clientMessages];
   }
 
-  public static emit(
-    payload: Record<
-      string,
-      object | string | number | boolean | null | undefined
-    >,
-  ): void {
-    const event = new MessageEvent<string>("message", {
-      data: JSON.stringify(payload),
-    });
-    for (const instance of MockEventSource.instances) {
-      instance.onmessage?.(event);
+  public static emitServerMessage(payload: UnifiedRealtimeServerMessage): void {
+    const parsed = UnifiedRealtimeServerMessageSchema.parse(payload);
+    for (const instance of MockRealtimeSocket.instances) {
+      instance.emitToListeners("unified-realtime-server-message", parsed);
     }
   }
 
-  public static reset(): void {
-    MockEventSource.instances = [];
+  public constructor() {
+    MockRealtimeSocket.instances.push(this);
+  }
+
+  public on(event: string, listener: SocketListener): this {
+    const current = this.listeners.get(event) ?? [];
+    current.push(listener);
+    this.listeners.set(event, current);
+    return this;
+  }
+
+  public emit(_event: string, _payload?: JsonValue): boolean {
+    if (_event === "unified-realtime-client-message") {
+      const parsed = UnifiedRealtimeClientMessageSchema.parse(_payload);
+      MockRealtimeSocket.clientMessages.push(parsed);
+    }
+    return true;
+  }
+
+  public connect(): void {
+    this.emitToListeners("connect");
+  }
+
+  public disconnect(): void {
+    this.emitToListeners("disconnect");
+  }
+
+  private emitToListeners(event: string, payload?: SocketPayload): void {
+    const listeners = this.listeners.get(event) ?? [];
+    for (const listener of listeners) {
+      listener(payload);
+    }
   }
 }
 
-vi.stubGlobal("EventSource", MockEventSource);
+vi.mock("socket.io-client", () => {
+  return {
+    io: vi.fn(() => new MockRealtimeSocket()),
+  };
+});
 
 Element.prototype.scrollTo = vi.fn();
 window.scrollTo = vi.fn();
@@ -394,6 +430,78 @@ function buildConversationStateFixture(
   };
 }
 
+function buildRealtimeFeatureSet(): Record<string, { status: "available" }> {
+  const features: Record<string, { status: "available" }> = {};
+  for (const featureId of FEATURE_IDS) {
+    features[featureId] = { status: "available" };
+  }
+  return features;
+}
+
+function buildRealtimeCoreStateFixture(
+  rows: UnifiedRealtimeCoreState["sidebar"]["rows"],
+): UnifiedRealtimeCoreState {
+  return UnifiedRealtimeCoreStateSchema.parse({
+    health: {
+      appReady: true,
+      ipcConnected: true,
+      ipcInitialized: true,
+      gitCommit: "abc123",
+      lastError: null,
+      historyCount: 0,
+      threadOwnerCount: 0,
+    },
+    agents: {
+      agents: [
+        {
+          id: "codex",
+          label: "Codex",
+          enabled: true,
+          connected: true,
+          features: buildRealtimeFeatureSet(),
+          capabilities: {
+            canListModels: true,
+            canListCollaborationModes: true,
+            canSetCollaborationMode: true,
+            canSubmitUserInput: true,
+            canReadLiveState: true,
+            canReadStreamEvents: true,
+            canListProjectDirectories: true,
+          },
+          projectDirectories: ["/tmp/project"],
+        },
+      ],
+      defaultAgentId: "codex",
+    },
+    sidebar: {
+      rows,
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    },
+    rateLimits: null,
+    traceStatus: null,
+    history: [],
+  });
+}
+
+function buildRealtimeThreadStateFixture(
+  threadId: string,
+  modelId: string,
+): UnifiedRealtimeThreadState {
+  return {
+    threadId,
+    readThread: buildConversationStateFixture(threadId, modelId),
+    liveState: {
+      ownerClientId: "client-1",
+      conversationState: buildConversationStateFixture(threadId, modelId),
+      liveStateError: null,
+    },
+    streamEvents: [],
+  };
+}
+
 function jsonResponse(
   payload: Record<
     string,
@@ -419,7 +527,7 @@ function jsonErrorResponse(
 }
 
 beforeEach(() => {
-  MockEventSource.reset();
+  MockRealtimeSocket.reset();
   window.history.replaceState(null, "", "/");
   localStorageBacking.clear();
 
@@ -655,6 +763,185 @@ describe("App", () => {
     render(<App />);
     expect((await screen.findAllByText("Farfield")).length).toBeGreaterThan(0);
     expect(await screen.findByText("No thread selected")).toBeTruthy();
+  });
+
+  it("connects via websocket and sends hello", async () => {
+    render(<App />);
+    await waitFor(() => {
+      expect(
+        MockRealtimeSocket.getClientMessages().some(
+          (message) => message.kind === "hello",
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it("applies websocket snapshot state", async () => {
+    const threadId = "ws-snapshot-thread";
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: threadId,
+          provider: "codex",
+          preview: "Before snapshot preview",
+          title: null,
+          createdAt: 1700000000,
+          updatedAt: 1700000000,
+          cwd: "/tmp/project",
+          source: "codex",
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+    render(<App />);
+    expect((await screen.findAllByText("Before snapshot preview")).length).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(
+        MockRealtimeSocket.getClientMessages().some(
+          (message) => message.kind === "hello",
+        ),
+      ).toBe(true);
+    });
+
+    MockRealtimeSocket.emitServerMessage({
+      kind: "snapshot",
+      syncVersion: 1,
+      core: buildRealtimeCoreStateFixture([
+        {
+          id: threadId,
+          provider: "codex",
+          preview: "Snapshot thread preview",
+          title: null,
+          createdAt: 1700000000,
+          updatedAt: 1700000001,
+          cwd: "/tmp/project",
+          source: "codex",
+        },
+      ]),
+      selectedThread: null,
+    });
+
+    expect((await screen.findAllByText("Snapshot thread preview")).length).toBeGreaterThan(0);
+  });
+
+  it("applies websocket core deltas", async () => {
+    const threadId = "ws-core-thread";
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: threadId,
+          provider: "codex",
+          preview: "Before core delta preview",
+          title: null,
+          createdAt: 1700000000,
+          updatedAt: 1700000000,
+          cwd: "/tmp/project",
+          source: "codex",
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+    render(<App />);
+    expect((await screen.findAllByText("Before core delta preview")).length).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(
+        MockRealtimeSocket.getClientMessages().some(
+          (message) => message.kind === "hello",
+        ),
+      ).toBe(true);
+    });
+
+    MockRealtimeSocket.emitServerMessage({
+      kind: "coreDelta",
+      syncVersion: 2,
+      core: buildRealtimeCoreStateFixture([
+        {
+          id: threadId,
+          provider: "codex",
+          preview: "Core delta preview",
+          title: null,
+          createdAt: 1700000000,
+          updatedAt: 1700000002,
+          cwd: "/tmp/project",
+          source: "codex",
+        },
+      ]),
+    });
+
+    expect((await screen.findAllByText("Core delta preview")).length).toBeGreaterThan(0);
+  });
+
+  it("applies websocket debug deltas while debug tab is active", async () => {
+    window.history.replaceState(null, "", "/debug");
+    render(<App />);
+    expect(await screen.findByText("History")).toBeTruthy();
+
+    MockRealtimeSocket.emitServerMessage({
+      kind: "debugDelta",
+      syncVersion: 3,
+      traceStatus: {
+        active: {
+          id: "trace-1",
+          label: "Live trace",
+          startedAt: "2026-03-01T00:00:00.000Z",
+          stoppedAt: null,
+          eventCount: 3,
+          path: "/tmp/trace-1.ndjson",
+        },
+        recent: [],
+      },
+      history: [
+        {
+          id: "hist-1",
+          at: "2026-03-01T00:00:00.000Z",
+          source: "system",
+          direction: "system",
+          meta: {
+            kind: "test",
+          },
+        },
+      ],
+    });
+
+    expect(await screen.findByText("recording")).toBeTruthy();
+    expect(await screen.findByText("1 entries")).toBeTruthy();
+  });
+
+  it("does not start polling intervals", async () => {
+    const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
+    try {
+      render(<App />);
+      await waitFor(() => {
+        expect(
+          MockRealtimeSocket.getClientMessages().some(
+            (message) => message.kind === "hello",
+          ),
+        ).toBe(true);
+      });
+      const pollingIntervalCalls = setIntervalSpy.mock.calls.filter((call) => {
+        const delay = call[1];
+        return typeof delay === "number" && delay >= 1_000;
+      });
+      expect(pollingIntervalCalls).toHaveLength(0);
+    } finally {
+      setIntervalSpy.mockRestore();
+    }
   });
 
   it("shows waiting indicators in the sidebar from thread summaries", async () => {
@@ -1247,20 +1534,18 @@ describe("App", () => {
 
     modelId = "gpt-new-codex";
 
-    MockEventSource.emit({
-      kind: "threadUpdated",
-      threadId,
-      provider: "codex",
-      thread: buildConversationStateFixture(threadId, modelId),
+    MockRealtimeSocket.emitServerMessage({
+      kind: "threadDelta",
+      syncVersion: 2,
+      thread: buildRealtimeThreadStateFixture(threadId, modelId),
     });
 
     await waitFor(
       () => {
-        expect(latestObservedModel).toBe("gpt-new-codex");
+        expect(screen.getByText("gpt-new-codex")).toBeTruthy();
       },
       { timeout: 5000 },
     );
-    expect(latestObservedModel).toBe("gpt-new-codex");
   }, 15000);
 
   it("uses live pending requests when live reduction fails", async () => {
