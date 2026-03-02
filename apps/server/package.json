@@ -1,23 +1,37 @@
 {
   "name": "@farfield/server",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.2.2",
+  "private": false,
   "type": "module",
+  "description": "Farfield server for Codex and OpenCode",
+  "bin": "./dist/cli.js",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "dev:remote": "HOST=0.0.0.0 PORT=4311 tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js",
+    "build:bundle": "rm -rf dist && esbuild src/index.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/cli.js --banner:js='#!/usr/bin/env node' --external:pino --external:zod --external:@opencode-ai/sdk --external:@opencode-ai/sdk/*",
+    "prepack": "bun run build:bundle",
+    "start": "node dist/cli.js",
     "test": "vitest run --passWithNoTests",
     "lint": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@opencode-ai/sdk": "^1.2.6",
+    "pino": "^9.5.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
     "@farfield/api": "workspace:*",
     "@farfield/opencode-api": "workspace:*",
     "@farfield/protocol": "workspace:*",
     "@farfield/unified-surface": "workspace:*",
-    "pino": "^9.5.0",
-    "zod": "^3.24.1"
+    "esbuild": "^0.25.10"
   }
 }

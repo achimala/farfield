@@ -78,6 +78,7 @@ import {
 import { useTheme } from "@/hooks/useTheme";
 import { ChatTimeline, type ChatTimelineEntry } from "@/components/ChatTimeline";
 import { ChatComposer } from "@/components/ChatComposer";
+import { CodeSnippet } from "@/components/CodeSnippet";
 import { PendingApprovalCard } from "@/components/PendingApprovalCard";
 import { PendingInformationalRequestCard } from "@/components/PendingInformationalRequestCard";
 import { PendingRequestCard } from "@/components/PendingRequestCard";
@@ -560,6 +561,7 @@ const AGENT_CACHE_TTL_MS = 30_000;
 const PROVIDER_CATALOG_CACHE_TTL_MS = 20_000;
 const CORE_REFRESH_INTERVAL_MS = 5_000;
 const SELECTED_THREAD_REFRESH_INTERVAL_MS = 1_000;
+const DEBUG_UI_ENABLED = import.meta.env.MODE !== "production";
 const MOBILE_SIDEBAR_WIDTH_PX = 256;
 const MOBILE_SWIPE_EDGE_PX = 24;
 const MOBILE_SIDEBAR_TOGGLE_THRESHOLD_PX = 88;
@@ -909,6 +911,20 @@ function parseUiStateFromPath(pathname: string): {
   threadId: string | null;
   tab: "chat" | "debug";
 } {
+  if (!DEBUG_UI_ENABLED) {
+    const segments = pathname
+      .split("/")
+      .filter((segment) => segment.length > 0);
+    if (
+      segments[0] === "threads" &&
+      typeof segments[1] === "string" &&
+      segments[1].length > 0
+    ) {
+      return { threadId: decodeURIComponent(segments[1]), tab: "chat" };
+    }
+    return { threadId: null, tab: "chat" };
+  }
+
   const segments = pathname.split("/").filter((segment) => segment.length > 0);
   if (segments.length === 0) {
     return { threadId: null, tab: "chat" };
@@ -934,6 +950,13 @@ function buildPathFromUiState(
   threadId: string | null,
   tab: "chat" | "debug",
 ): string {
+  if (!DEBUG_UI_ENABLED) {
+    if (!threadId) {
+      return "/";
+    }
+    return `/threads/${encodeURIComponent(threadId)}`;
+  }
+
   if (!threadId) {
     return tab === "debug" ? "/debug" : "/";
   }
@@ -1049,6 +1072,9 @@ export function App(): React.JSX.Element {
   const initialSnapshot = ENABLE_VIEW_SNAPSHOT_CACHE
     ? appViewSnapshotCache
     : null;
+  const initialTab: "chat" | "debug" = DEBUG_UI_ENABLED
+    ? initialSnapshot?.activeTab ?? initialUiState.tab
+    : "chat";
 
   /* State */
   const [error, setError] = useState("");
@@ -1116,7 +1142,7 @@ export function App(): React.JSX.Element {
 
   /* UI state */
   const [activeTab, setActiveTab] = useState<"chat" | "debug">(
-    initialSnapshot?.activeTab ?? initialUiState.tab,
+    initialTab,
   );
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [mobileSidebarDragOffset, setMobileSidebarDragOffset] = useState<
@@ -1148,7 +1174,7 @@ export function App(): React.JSX.Element {
   /* Refs */
   const selectedThreadIdRef = useRef<string | null>(null);
   const activeTabRef = useRef<"chat" | "debug">(
-    initialSnapshot?.activeTab ?? initialUiState.tab,
+    initialTab,
   );
   const refreshTimerRef = useRef<number | null>(null);
   const pendingRefreshFlagsRef = useRef<RefreshFlags>({
@@ -1194,6 +1220,8 @@ export function App(): React.JSX.Element {
   const threadsSignatureRef = useRef<string[]>([]);
   const modesSignatureRef = useRef<string[]>([]);
   const modelsSignatureRef = useRef<string[]>([]);
+  const historyDetailCacheRef = useRef<Map<string, HistoryDetail>>(new Map());
+  const historyDetailRequestIdRef = useRef(0);
 
   /* Derived */
   const selectedThread = useMemo(
@@ -1224,6 +1252,7 @@ export function App(): React.JSX.Element {
     [threadListErrors],
   );
   const selectedAgentLabel = selectedAgentDescriptor?.label ?? "Agent";
+  const reversedHistory = useMemo(() => history.slice().reverse(), [history]);
   const hasServerBaseUrlDraftChanges =
     serverBaseUrlDraft.trim() !== serverBaseUrl;
   const unifiedEventsUrl = useMemo(
@@ -3247,7 +3276,20 @@ export function App(): React.JSX.Element {
       setHistoryDetail(null);
       return;
     }
+
+    const cached = historyDetailCacheRef.current.get(id);
+    if (cached) {
+      setHistoryDetail(cached);
+      return;
+    }
+
+    const requestId = historyDetailRequestIdRef.current + 1;
+    historyDetailRequestIdRef.current = requestId;
     const detail = await getHistoryEntry(id);
+    historyDetailCacheRef.current.set(id, detail);
+    if (historyDetailRequestIdRef.current !== requestId) {
+      return;
+    }
     setHistoryDetail(detail);
   }, []);
 
@@ -3940,20 +3982,22 @@ export function App(): React.JSX.Element {
             </TooltipContent>
           </Tooltip>
           <div className="flex items-center gap-1 shrink-0">
-            <IconBtn
-              onClick={() => {
-                setActiveTab((currentTab) =>
-                  currentTab === "debug" ? "chat" : "debug",
-                );
-                if (viewport === "mobile") {
-                  closeMobileSidebar();
-                }
-              }}
-              active={activeTab === "debug"}
-              title="Debug"
-            >
-              <Bug size={14} />
-            </IconBtn>
+            {DEBUG_UI_ENABLED ? (
+              <IconBtn
+                onClick={() => {
+                  setActiveTab((currentTab) =>
+                    currentTab === "debug" ? "chat" : "debug",
+                  );
+                  if (viewport === "mobile") {
+                    closeMobileSidebar();
+                  }
+                }}
+                active={activeTab === "debug"}
+                title="Debug"
+              >
+                <Bug size={14} />
+              </IconBtn>
+            ) : null}
             <IconBtn onClick={toggleTheme} title="Toggle theme">
               {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
             </IconBtn>
@@ -4579,39 +4623,36 @@ export function App(): React.JSX.Element {
                     <div className="flex-1 grid grid-cols-[200px_minmax(0,1fr)] min-h-0 divide-x divide-border overflow-hidden">
                       {/* Entry list */}
                       <div className="overflow-y-auto py-1">
-                        {history
-                          .slice()
-                          .reverse()
-                          .map((entry) => (
-                            <Button
-                              key={entry.id}
-                              type="button"
-                              onClick={() => setSelectedHistoryId(entry.id)}
-                              variant="ghost"
-                              className={`w-full h-auto flex-col items-start justify-start gap-0 rounded-none px-3 py-2 text-left transition-colors ${
-                                selectedHistoryId === entry.id
-                                  ? "bg-muted text-foreground"
-                                  : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                              }`}
-                            >
-                              <div className="flex items-center gap-1.5 mb-0.5">
-                                <span
-                                  className={`text-[9px] px-1.5 py-0.5 rounded font-mono uppercase leading-4 ${
-                                    entry.direction === "in"
-                                      ? "bg-success/15 text-success"
-                                      : entry.direction === "out"
-                                        ? "bg-blue-500/15 text-blue-400"
-                                        : "bg-muted text-muted-foreground"
-                                  }`}
-                                >
-                                  {entry.source} {entry.direction}
-                                </span>
-                              </div>
-                              <div className="text-[10px] text-muted-foreground/50 font-mono truncate">
-                                {entry.at}
-                              </div>
-                            </Button>
-                          ))}
+                        {reversedHistory.map((entry) => (
+                          <Button
+                            key={entry.id}
+                            type="button"
+                            onClick={() => setSelectedHistoryId(entry.id)}
+                            variant="ghost"
+                            className={`w-full h-auto flex-col items-start justify-start gap-0 rounded-none px-3 py-2 text-left transition-colors ${
+                              selectedHistoryId === entry.id
+                                ? "bg-muted text-foreground"
+                                : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                            }`}
+                          >
+                            <div className="flex items-center gap-1.5 mb-0.5">
+                              <span
+                                className={`text-[9px] px-1.5 py-0.5 rounded font-mono uppercase leading-4 ${
+                                  entry.direction === "in"
+                                    ? "bg-success/15 text-success"
+                                    : entry.direction === "out"
+                                      ? "bg-blue-500/15 text-blue-400"
+                                      : "bg-muted text-muted-foreground"
+                                }`}
+                              >
+                                {entry.source} {entry.direction}
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-muted-foreground/50 font-mono truncate">
+                              {entry.at}
+                            </div>
+                          </Button>
+                        ))}
                       </div>
 
                       {/* Payload detail */}
@@ -4621,15 +4662,11 @@ export function App(): React.JSX.Element {
                             Select an entry
                           </div>
                         ) : (
-                          <>
-                            <pre className="font-mono text-[11px] text-muted-foreground leading-5 whitespace-pre-wrap break-words">
-                              {JSON.stringify(
-                                historyDetail.fullPayload,
-                                null,
-                                2,
-                              )}
-                            </pre>
-                          </>
+                          <CodeSnippet
+                            code={historyDetail.fullPayloadJson}
+                            language="json"
+                            className="[&>pre]:border [&>pre]:border-border [&>pre]:bg-muted/20 [&>pre]:text-[11px] [&>pre]:leading-5"
+                          />
                         )}
                       </div>
                     </div>

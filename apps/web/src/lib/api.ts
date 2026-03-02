@@ -188,27 +188,28 @@ const TraceStatusSchema = z
   })
   .passthrough();
 
+const HistoryEntrySummarySchema = z
+  .object({
+    id: z.string(),
+    at: z.string(),
+    source: z.enum(["ipc", "app", "system"]),
+    direction: z.enum(["in", "out", "system"]),
+    meta: z.record(JsonValueSchema),
+  })
+  .strict();
+
 const HistoryListSchema = z
   .object({
     ok: z.literal(true),
-    history: z.array(
-      z.object({
-        id: z.string(),
-        at: z.string(),
-        source: z.enum(["ipc", "app", "system"]),
-        direction: z.enum(["in", "out", "system"]),
-        payload: JsonValueSchema,
-        meta: z.record(JsonValueSchema),
-      }),
-    ),
+    history: z.array(HistoryEntrySummarySchema),
   })
   .passthrough();
 
 const HistoryDetailSchema = z
   .object({
     ok: z.literal(true),
-    entry: HistoryListSchema.shape.history.element,
-    fullPayload: JsonValueSchema,
+    entry: HistoryEntrySummarySchema,
+    fullPayloadJson: z.string(),
   })
   .passthrough();
 

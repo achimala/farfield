@@ -22,7 +22,44 @@ This is an independent project and is not affiliated with, endorsed by, or spons
 
 ## Quick start (recommended)
 
-You can run the Farfield server locally, then use the hosted frontend at [farfield.app](https://farfield.app). This is always updated with the latest features, and saves you the trouble of hosting it yourself. You still need to expose the server securely, however, for remote access. We cover how to do this with Tailscale below, as a simple option.
+Start the Farfield server:
+
+```bash
+npx -y @farfield/server@latest
+```
+
+or:
+
+```bash
+bunx @farfield/server@latest
+```
+
+This runs the backend on `127.0.0.1:4311` by default.
+
+You can pass server flags too to customize the agents (default is only Codex):
+
+```bash
+npx -y @farfield/server@latest -- --agents=opencode
+npx -y @farfield/server@latest -- --agents=codex,opencode
+npx -y @farfield/server@latest -- --agents=all
+```
+
+You can access the web app at [farfield.app](https://farfield.app). Tap the bottom left status dot to pull up settings.
+
+You will need to make port 4311 remotely accessible via HTTPS and give the public URL to it to the Farfield frontend. None of this routes through an external server. The app runs inside entirely in your browser and tunnels directly to the Farfield server you started above, and all of it is open-source for you to audit yourself. However, if you are ultra paranoid, you can run and host the Farfield frontend too; read on!
+
+The securest way to open the port for remote access is by putting all devices involved in a private VPN. Tailscale is a free option that works.
+
+Doing this with Tailscale is as simple as installing Tailscale on your phone, computer, etc., and running this command on the device hosting the Farfield server:
+```bash
+tailscale serve --https=443 http://127.0.0.1:4311
+```
+
+We are working on easier options. Stay tuned!
+
+## Running from source
+
+Clone the repo and do this:
 
 ```bash
 bun install
@@ -50,7 +87,7 @@ bun install
 bun run dev
 ```
 
-Opens local frontend at `http://localhost:4312`.
+Opens local frontend at `http://localhost:4312`. By default `dev` does not expose the port, it's only accessible on your device.
 
 More local dev options:
 
@@ -88,10 +125,10 @@ FARFIELD_API_ORIGIN=http://127.0.0.1:4311 bun run start
 ## Requirements
 
 - Node.js 20+
-- Bun 1.2+
+- Bun 1.2+ (needed for source checkout workflow)
 - Codex or OpenCode installed locally
 
-## Detailed setup for hosted frontend access
+## More details on Tailscale setup
 
 This is the detailed setup for the recommended model:
 
@@ -154,78 +191,6 @@ Farfield stores this in browser storage and uses it for API calls and live event
 - Do not use raw tailnet IPs with `https://` (for example `https://100.x.x.x:4311`) in the browser; this won't work.
 - If you use `tailscale serve --https=443`, do not include `:4311` in the URL you enter in Settings.
 - **Use automatic** in Settings clears the saved server URL and returns to built-in default behavior.
-
-## Unified Architecture
-
-Farfield now routes both providers through one strict unified surface.
-
-- Server entrypoints for the web app are under `/api/unified/*`.
-- Codex runs through native app-server methods only.
-- OpenCode runs through SDK type mappings only.
-- Web UI consumes unified schemas and does not import provider SDK/protocol types.
-- Feature gating comes from typed unified feature availability, not provider-specific conditionals in UI logic.
-
-### Unified Endpoints
-
-- `POST /api/unified/command`
-- `GET /api/unified/features`
-- `GET /api/unified/threads`
-- `GET /api/unified/thread/:id`
-- `GET /api/unified/events` (SSE)
-
-## Strict Checks
-
-Run this before pushing:
-
-```bash
-bun run verify:strict
-```
-
-This runs:
-
-- `verify:no-cheats`
-- `verify:no-provider-ui-imports`
-- workspace `typecheck`
-- workspace `test`
-- generated artifact cleanliness checks for Codex and OpenCode manifests
-
-## Codex Schema Sync
-
-Farfield now vendors official Codex app-server schemas and generates protocol Zod validators from them.
-
-```bash
-bun run generate:codex-schema
-```
-
-This command updates:
-
-- `packages/codex-protocol/vendor/codex-app-server-schema/` (stable + experimental TypeScript and JSON Schema)
-- `packages/codex-protocol/src/generated/app-server/` (generated Zod schema modules used by the app)
-
-## OpenCode Manifest Sync
-
-Farfield also generates an OpenCode manifest from SDK unions used by the mapper layer.
-
-```bash
-bun run generate:opencode-manifest
-```
-
-## Provider Schema Update Flow
-
-When Codex or OpenCode updates protocol/SDK shapes:
-
-1. Run `bun run generate:codex-schema`
-2. Run `bun run generate:opencode-manifest`
-3. Run `bun run verify:strict`
-4. Commit generated changes together with any mapper updates
-
-## Release Checklist
-
-1. Run `bun run verify:strict`
-2. Confirm `bun run generate:codex-schema` produces no uncommitted changes
-3. Confirm `bun run generate:opencode-manifest` produces no uncommitted changes
-4. Review `git status` for only intended files
-5. Ship only after all workspace tests pass
 
 ## License
 

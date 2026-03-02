@@ -1,4 +1,5 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
+import type { Socket } from "node:net";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
@@ -34,7 +35,7 @@ import {
 const HOST = process.env["HOST"] ?? "127.0.0.1";
 const PORT = Number(process.env["PORT"] ?? 4311);
 const HISTORY_LIMIT = 2_000;
-const USER_AGENT = "farfield/0.2.0";
+const USER_AGENT = "farfield/0.2.2";
 const IPC_RECONNECT_DELAY_MS = 1_000;
 const SIDEBAR_PREVIEW_MAX_CHARS = 180;
 
@@ -48,6 +49,14 @@ interface HistoryEntry {
   direction: "in" | "out" | "system";
   payload: unknown;
   meta: Record<string, unknown>;
+}
+
+interface DebugHistoryListEntry {
+  id: string;
+  at: string;
+  source: HistoryEntry["source"];
+  direction: HistoryEntry["direction"];
+  meta: HistoryEntry["meta"];
 }
 
 interface TraceSummary {
@@ -189,6 +198,16 @@ function compactSidebarPreview(preview: string): string {
   return `${compact.slice(0, sliceLength).trimEnd()}...`;
 }
 
+function toDebugHistoryListEntry(entry: HistoryEntry): DebugHistoryListEntry {
+  return {
+    id: entry.id,
+    at: entry.at,
+    source: entry.source,
+    direction: entry.direction,
+    meta: entry.meta,
+  };
+}
+
 function ensureTraceDirectory(): void {
   if (!fs.existsSync(TRACE_DIR)) {
     fs.mkdirSync(TRACE_DIR, { recursive: true });
@@ -221,6 +240,7 @@ const gitCommit = resolveGitCommitHash();
 const history: HistoryEntry[] = [];
 const historyById = new Map<string, unknown>();
 const unifiedSseClients = new Set<ServerResponse>();
+const activeSockets = new Set<Socket>();
 const SSE_KEEPALIVE_INTERVAL_MS = 15_000;
 const threadIndex = new ThreadIndex();
 
@@ -387,9 +407,73 @@ function broadcastRuntimeState(): void {
   }
 }
 
-setInterval(() => {
+const sseKeepaliveTimer = setInterval(() => {
   writeSseKeepalive();
 }, SSE_KEEPALIVE_INTERVAL_MS);
+sseKeepaliveTimer.unref();
+
+function printStartupBanner(): void {
+  const supportsColor =
+    process.stdout.isTTY &&
+    process.env["NO_COLOR"] !== "1" &&
+    process.env["TERM"] !== "dumb";
+  const color = {
+    reset: "\u001B[0m",
+    bold: "\u001B[1m",
+    dim: "\u001B[2m",
+    green: "\u001B[32m",
+    cyan: "\u001B[36m",
+    yellow: "\u001B[33m",
+    blue: "\u001B[34m",
+    underline: "\u001B[4m",
+  } as const;
+  const paint = (
+    text: string,
+    tone: keyof typeof color,
+    options?: { bold?: boolean; underline?: boolean },
+  ): string => {
+    if (!supportsColor) {
+      return text;
+    }
+    const prefixes: string[] = [color[tone]];
+    if (options?.bold) {
+      prefixes.push(color.bold);
+    }
+    if (options?.underline) {
+      prefixes.push(color.underline);
+    }
+    return `${prefixes.join("")}${text}${color.reset}`;
+  };
+  const rule = supportsColor
+    ? paint("=".repeat(68), "dim")
+    : "=".repeat(68);
+  const lines = [
+    "",
+    rule,
+    paint("Farfield Server", "green", { bold: true }),
+    paint(`Local URL: http://${HOST}:${PORT}`, "cyan", { bold: true }),
+    paint("Open this now: https://farfield.app", "blue", {
+      bold: true,
+      underline: true,
+    }),
+    paint(`Agents: ${configuredAgentIds.join(", ")}`, "dim"),
+    "",
+    paint("Remote access (recommended):", "yellow", { bold: true }),
+    "1. Keep this server private. Do not expose it to the public internet.",
+    "2. Put it behind a VPN, such as Tailscale.",
+    "3. In farfield.app, open Settings and set your server URL.",
+    "",
+    paint("Setup guide:", "cyan", { bold: true }),
+    paint("https://github.com/achimala/farfield#readme", "blue", {
+      underline: true,
+    }),
+    "",
+    paint("Press Control+C to stop.", "dim", { bold: true }),
+    rule,
+    "",
+  ];
+  process.stdout.write(lines.join("\n"));
+}
 
 function parseUnifiedProviderId(
   value: string | null,
@@ -814,13 +898,6 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (segments[0] === "api" && segments[1] === "debug") {
-      if (req.method === "GET" && segments[2] === "history") {
-        const limit = parseInteger(url.searchParams.get("limit"), 120);
-        const data = history.slice(-limit);
-        jsonResponse(res, 200, { ok: true, history: data });
-        return;
-      }
-
       if (req.method === "GET" && segments[2] === "history" && segments[3]) {
         const entryId = decodeURIComponent(segments[3]);
         const entry = history.find((item) => item.id === entryId) ?? null;
@@ -834,9 +911,16 @@ const server = http.createServer(async (req, res) => {
 
         jsonResponse(res, 200, {
           ok: true,
-          entry,
-          fullPayload: historyById.get(entryId) ?? null,
+          entry: toDebugHistoryListEntry(entry),
+          fullPayloadJson: JSON.stringify(historyById.get(entryId) ?? null, null, 2),
         });
+        return;
+      }
+
+      if (req.method === "GET" && segments[2] === "history") {
+        const limit = parseInteger(url.searchParams.get("limit"), 120);
+        const data = history.slice(-limit).map(toDebugHistoryListEntry);
+        jsonResponse(res, 200, { ok: true, history: data });
         return;
       }
 
@@ -1007,6 +1091,13 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+server.on("connection", (socket) => {
+  activeSockets.add(socket);
+  socket.on("close", () => {
+    activeSockets.delete(socket);
+  });
+});
+
 async function start(): Promise<void> {
   ensureTraceDirectory();
 
@@ -1064,25 +1155,99 @@ async function start(): Promise<void> {
   }
 
   broadcastRuntimeState();
+  printStartupBanner();
   logger.info({ url: `http://${HOST}:${PORT}` }, "monitor-server-ready");
 }
 
+let shutdownPromise: Promise<void> | null = null;
+
 async function shutdown(): Promise<void> {
-  if (activeTrace) {
-    activeTrace.stream.end();
-    activeTrace = null;
+  if (shutdownPromise) {
+    return shutdownPromise;
   }
 
-  await registry.stopAll();
-  await new Promise<void>((resolve) => server.close(() => resolve()));
+  shutdownPromise = (async () => {
+    clearInterval(sseKeepaliveTimer);
+
+    for (const client of unifiedSseClients) {
+      try {
+        client.end();
+      } catch {
+        // Ignore close errors while shutting down.
+      }
+    }
+    unifiedSseClients.clear();
+
+    for (const socket of activeSockets) {
+      socket.destroy();
+    }
+    activeSockets.clear();
+
+    if (activeTrace) {
+      activeTrace.stream.end();
+      activeTrace = null;
+    }
+
+    await registry.stopAll();
+
+    if (server.listening) {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+    }
+  })();
+
+  return shutdownPromise;
+}
+
+let shutdownRequested = false;
+let forcedExitTimer: NodeJS.Timeout | null = null;
+
+async function handleShutdownSignal(signal: "SIGINT" | "SIGTERM"): Promise<void> {
+  if (shutdownRequested) {
+    process.stderr.write(`\nReceived ${signal} again. Exiting now.\n`);
+    process.exit(130);
+    return;
+  }
+
+  shutdownRequested = true;
+  process.stdout.write("\nStopping Farfield server...\n");
+
+  forcedExitTimer = setTimeout(() => {
+    process.stderr.write("Shutdown is taking too long. Exiting now.\n");
+    process.exit(130);
+  }, 4_000);
+  forcedExitTimer.unref();
+
+  try {
+    await shutdown();
+    if (forcedExitTimer) {
+      clearTimeout(forcedExitTimer);
+      forcedExitTimer = null;
+    }
+    process.exit(0);
+  } catch (error) {
+    if (forcedExitTimer) {
+      clearTimeout(forcedExitTimer);
+      forcedExitTimer = null;
+    }
+    process.stderr.write(`Shutdown failed: ${toErrorMessage(error)}\n`);
+    process.exit(1);
+  }
 }
 
 process.on("SIGINT", () => {
-  void shutdown().then(() => process.exit(0));
+  void handleShutdownSignal("SIGINT");
 });
 
 process.on("SIGTERM", () => {
-  void shutdown().then(() => process.exit(0));
+  void handleShutdownSignal("SIGTERM");
 });
 
 void start().catch((error) => {

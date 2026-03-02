@@ -69,7 +69,7 @@ export function formatServerHelpText(): string {
   return [
     "Farfield server",
     "",
-    "Usage: tsx watch src/index.ts [--agents=<ids>]",
+    "Usage: farfield-server [--agents=<ids>]",
     "",
     "Flags:",
     "  --agents=<ids>   Comma-separated agent ids. Allowed: codex, opencode, all",
