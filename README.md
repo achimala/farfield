@@ -85,6 +85,44 @@ If you need a custom backend origin for API proxying:
 FARFIELD_API_ORIGIN=http://127.0.0.1:4311 bun run start
 ```
 
+### React Compiler and production profiling
+
+Frontend build supports two optional flags:
+
+- `REACT_COMPILER=0` disables React Compiler transform (compiler is enabled by default for `vite build`).
+- `REACT_PROFILING=1` uses React profiling build so React DevTools Profiler works in production preview.
+
+Example A/B commands:
+
+```bash
+# default production build (compiler enabled)
+bun run --filter @farfield/web build
+
+# baseline production build (compiler disabled)
+REACT_COMPILER=0 bun run --filter @farfield/web build
+
+# production profiling build (compiler enabled)
+REACT_PROFILING=1 bun run --filter @farfield/web build
+
+# production profiling build (compiler disabled)
+REACT_PROFILING=1 REACT_COMPILER=0 bun run --filter @farfield/web build
+```
+
+Run two UIs side-by-side against one backend:
+
+```bash
+# backend (terminal 1)
+bun run --filter @farfield/server start
+
+# baseline UI (terminal 2, compiler disabled)
+REACT_PROFILING=1 REACT_COMPILER=0 bun run --filter @farfield/web build -- --outDir dist-baseline
+bun run --filter @farfield/web preview -- --host 127.0.0.1 --port 4312 --strictPort --outDir dist-baseline
+
+# compiler UI (terminal 3, compiler enabled by default)
+REACT_PROFILING=1 bun run --filter @farfield/web build -- --outDir dist-compiler
+bun run --filter @farfield/web preview -- --host 127.0.0.1 --port 4313 --strictPort --outDir dist-compiler
+```
+
 ## Requirements
 
 - Node.js 20+
