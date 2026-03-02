@@ -41,6 +41,12 @@ const schemaTargets = [
     exportName: "ModelListResponseSchema"
   },
   {
+    id: "get-account-rate-limits-response",
+    source: path.join(vendorRoot, "stable", "json", "v2", "GetAccountRateLimitsResponse.json"),
+    fileName: "GetAccountRateLimitsResponseSchema.ts",
+    exportName: "GetAccountRateLimitsResponseSchema"
+  },
+  {
     id: "request-id",
     source: path.join(vendorRoot, "stable", "json", "RequestId.json"),
     fileName: "RequestIdSchema.ts",
