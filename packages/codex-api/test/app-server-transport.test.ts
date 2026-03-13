@@ -129,6 +129,27 @@ reader.on("line", (line) => {
   }
 
   if (message.method === "model/list") {
+    if (message.params?.limit === 2) {
+      process.stdout.write(
+        "{\\"id\\":" + message.id + ",\\"result\\":{\\"data\\":[{\\"preview\\":\\"line one" + String.fromCharCode(10) + "line two\\",\\"control\\":\\"a" + String.fromCharCode(0) + "b\\"}]}}\\n"
+      );
+      return;
+    }
+
+    if (message.params?.limit === 3) {
+      const emoji = Buffer.from("😀", "utf8");
+      const payload = Buffer.from(
+        "{\\"id\\":" + message.id + ",\\"result\\":{\\"data\\":[{\\"emoji\\":\\"😀\\"}]}}\\n",
+        "utf8"
+      );
+      const splitAt = payload.indexOf(emoji) + 2;
+      process.stdout.write(payload.subarray(0, splitAt));
+      setTimeout(() => {
+        process.stdout.write(payload.subarray(splitAt));
+      }, 0);
+      return;
+    }
+
     process.stdout.write(JSON.stringify({
       id: message.id,
       result: {
@@ -227,4 +248,61 @@ describe("ChildProcessAppServerTransport", () => {
     },
     15_000,
   );
+
+  it("parses stdout responses with raw control characters inside strings", async () => {
+    const { executablePath, recordsPath } = createFakeAppServer();
+    const stderrLines: string[] = [];
+
+    const transport = new ChildProcessAppServerTransport({
+      executablePath,
+      userAgent: "farfield-test",
+      env: {
+        FAKE_APP_SERVER_RECORDS: recordsPath,
+      },
+      onStderr: (line) => {
+        stderrLines.push(line);
+      },
+    });
+
+    const result = await transport.request("model/list", { limit: 2 });
+    await transport.close();
+
+    expect(result).toEqual({
+      data: [
+        {
+          preview: "line one\nline two",
+          control: "a\u0000b",
+        },
+      ],
+    });
+    expect(stderrLines).toEqual([]);
+  });
+
+  it("parses stdout responses with split multi-byte UTF-8 characters", async () => {
+    const { executablePath, recordsPath } = createFakeAppServer();
+    const stderrLines: string[] = [];
+
+    const transport = new ChildProcessAppServerTransport({
+      executablePath,
+      userAgent: "farfield-test",
+      env: {
+        FAKE_APP_SERVER_RECORDS: recordsPath,
+      },
+      onStderr: (line) => {
+        stderrLines.push(line);
+      },
+    });
+
+    const result = await transport.request("model/list", { limit: 3 });
+    await transport.close();
+
+    expect(result).toEqual({
+      data: [
+        {
+          emoji: "😀",
+        },
+      ],
+    });
+    expect(stderrLines).toEqual([]);
+  });
 });

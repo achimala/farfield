@@ -65,6 +65,27 @@ function toErrorMessage(error: Error | string): string {
   return error;
 }
 
+function escapeJsonControlCharacter(char: string): string {
+  switch (char) {
+    case "\b":
+      return "\\b";
+    case "\f":
+      return "\\f";
+    case "\n":
+      return "\\n";
+    case "\r":
+      return "\\r";
+    case "\t":
+      return "\\t";
+  }
+
+  const code = char.charCodeAt(0);
+  if (code <= 0x1f) {
+    return `\\u${code.toString(16).padStart(4, "0")}`;
+  }
+  return char;
+}
+
 export class ChildProcessAppServerTransport implements AppServerTransport {
   private readonly executablePath: string;
   private readonly userAgent: string;
@@ -83,6 +104,10 @@ export class ChildProcessAppServerTransport implements AppServerTransport {
   private requestId = 0;
   private initialized = false;
   private initializeInFlight: Promise<void> | null = null;
+  private stdoutFrameBuffer = "";
+  private stdoutFrameDepth = 0;
+  private stdoutFrameInString = false;
+  private stdoutFrameEscaped = false;
 
   public constructor(options: ChildProcessAppServerTransportOptions) {
     this.executablePath = options.executablePath;
@@ -131,6 +156,8 @@ export class ChildProcessAppServerTransport implements AppServerTransport {
       return;
     }
 
+    this.resetStdoutFrameState();
+
     const child = spawn(this.executablePath, ["app-server"], {
       cwd: this.cwd,
       env: {
@@ -143,6 +170,7 @@ export class ChildProcessAppServerTransport implements AppServerTransport {
     });
 
     child.on("exit", (code, signal) => {
+      this.resetStdoutFrameState();
       const reason = `app-server exited (code=${String(code)}, signal=${String(signal)})`;
       this.rejectAll(new AppServerTransportError(reason));
       this.process = null;
@@ -151,6 +179,7 @@ export class ChildProcessAppServerTransport implements AppServerTransport {
     });
 
     child.on("error", (error) => {
+      this.resetStdoutFrameState();
       this.rejectAll(
         new AppServerTransportError(`app-server process error: ${error.message}`)
       );
@@ -159,82 +188,15 @@ export class ChildProcessAppServerTransport implements AppServerTransport {
       this.initializeInFlight = null;
     });
 
-    const lineReader = readline.createInterface({ input: child.stdout });
-    lineReader.on("line", (line) => {
-      const trimmed = line.trim();
-      if (!trimmed) {
-        return;
-      }
-
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (text: string) => {
       try {
-        const raw = JSON.parse(trimmed);
-        const message = parseJsonRpcIncomingMessage(raw);
-
-        if (message.kind === "response") {
-          const pending = this.pending.get(message.value.id);
-          if (!pending) {
-            return;
-          }
-
-          this.pending.delete(message.value.id);
-          clearTimeout(pending.timer);
-
-          if (message.value.error) {
-            const responseError = JsonRpcErrorSchema.parse(message.value.error);
-            pending.reject(
-              new AppServerRpcError(
-                responseError.code,
-                responseError.message,
-                responseError.data
-              )
-            );
-            return;
-          }
-
-          pending.resolve(message.value.result);
-          return;
-        }
-
-        if (message.kind === "request") {
-          const parsedRequest = AppServerServerRequestSchema.safeParse(
-            message.value
-          );
-          if (!parsedRequest.success) {
-            void this.sendErrorResponse(
-              message.value.id,
-              -32600,
-              `Unhandled app-server request: ${message.value.method}`
-            ).catch(() => {});
-            return;
-          }
-
-          const request = parsedRequest.data;
-          for (const listener of this.serverRequestListeners) {
-            listener(request);
-          }
-          return;
-        }
-
-        const parsedNotification = AppServerServerNotificationSchema.safeParse(
-          message.value
-        );
-        if (!parsedNotification.success) {
-          return;
-        }
-
-        const notification = parsedNotification.data;
-        for (const listener of this.serverNotificationListeners) {
-          listener(notification);
-        }
+        this.consumeStdoutText(text);
       } catch (error) {
-        const messageText = toErrorMessage(
-          error instanceof Error ? error : String(error)
-        );
         this.rejectAll(
-          new AppServerTransportError(
-            `failed to process app-server message: ${messageText}`
-          )
+          new AppServerTransportError(`invalid app-server stdout: ${String(error)}`)
         );
+        child.kill("SIGTERM");
       }
     });
 
@@ -249,6 +211,149 @@ export class ChildProcessAppServerTransport implements AppServerTransport {
     });
 
     this.process = child;
+  }
+
+  private resetStdoutFrameState(): void {
+    this.stdoutFrameBuffer = "";
+    this.stdoutFrameDepth = 0;
+    this.stdoutFrameInString = false;
+    this.stdoutFrameEscaped = false;
+  }
+
+  private handleIncomingMessage(
+    raw: Parameters<typeof parseJsonRpcIncomingMessage>[0]
+  ): void {
+    const message = parseJsonRpcIncomingMessage(raw);
+
+    if (message.kind === "response") {
+      const pending = this.pending.get(message.value.id);
+      if (!pending) {
+        return;
+      }
+
+      this.pending.delete(message.value.id);
+      clearTimeout(pending.timer);
+
+      if (message.value.error) {
+        const responseError = JsonRpcErrorSchema.parse(message.value.error);
+        pending.reject(
+          new AppServerRpcError(
+            responseError.code,
+            responseError.message,
+            responseError.data
+          )
+        );
+        return;
+      }
+
+      pending.resolve(message.value.result);
+      return;
+    }
+
+    if (message.kind === "request") {
+      const parsedRequest = AppServerServerRequestSchema.safeParse(
+        message.value
+      );
+      if (!parsedRequest.success) {
+        void this.sendErrorResponse(
+          message.value.id,
+          -32600,
+          `Unhandled app-server request: ${message.value.method}`
+        ).catch(() => {});
+        return;
+      }
+
+      const request = parsedRequest.data;
+      for (const listener of this.serverRequestListeners) {
+        listener(request);
+      }
+      return;
+    }
+
+    const parsedNotification = AppServerServerNotificationSchema.safeParse(
+      message.value
+    );
+    if (!parsedNotification.success) {
+      return;
+    }
+
+    const notification = parsedNotification.data;
+    for (const listener of this.serverNotificationListeners) {
+      listener(notification);
+    }
+  }
+
+  private consumeStdoutText(text: string): void {
+    for (const char of text) {
+      if (this.stdoutFrameDepth === 0) {
+        if (/\s/.test(char)) {
+          continue;
+        }
+        if (char !== "{") {
+          throw new AppServerTransportError(
+            `app-server stdout started with unexpected character: ${JSON.stringify(char)}`
+          );
+        }
+        this.resetStdoutFrameState();
+        this.stdoutFrameDepth = 1;
+        this.stdoutFrameBuffer = "{";
+        continue;
+      }
+
+      if (this.stdoutFrameInString) {
+        if (this.stdoutFrameEscaped) {
+          this.stdoutFrameBuffer += escapeJsonControlCharacter(char);
+          this.stdoutFrameEscaped = false;
+          continue;
+        }
+
+        if (char === "\\") {
+          this.stdoutFrameBuffer += char;
+          this.stdoutFrameEscaped = true;
+          continue;
+        }
+
+        if (char === "\"") {
+          this.stdoutFrameBuffer += char;
+          this.stdoutFrameInString = false;
+          continue;
+        }
+
+        this.stdoutFrameBuffer += escapeJsonControlCharacter(char);
+        continue;
+      }
+
+      this.stdoutFrameBuffer += char;
+
+      if (char === "\"") {
+        this.stdoutFrameInString = true;
+        continue;
+      }
+
+      if (char === "{") {
+        this.stdoutFrameDepth += 1;
+        continue;
+      }
+
+      if (char === "}") {
+        this.stdoutFrameDepth -= 1;
+        if (this.stdoutFrameDepth < 0) {
+          throw new AppServerTransportError("app-server stdout produced an unmatched closing brace");
+        }
+        if (this.stdoutFrameDepth === 0) {
+          try {
+            const raw = JSON.parse(this.stdoutFrameBuffer);
+            this.resetStdoutFrameState();
+            this.handleIncomingMessage(raw);
+          } catch (error) {
+            this.resetStdoutFrameState();
+            throw new AppServerTransportError(
+              `failed to process app-server message: ${String(error)}`
+            );
+          }
+        }
+      }
+    }
   }
 
   private rejectAll(error: Error): void {
@@ -407,6 +512,7 @@ export class ChildProcessAppServerTransport implements AppServerTransport {
       return;
     }
 
+    this.resetStdoutFrameState();
     this.process = null;
     this.initialized = false;
     this.initializeInFlight = null;
