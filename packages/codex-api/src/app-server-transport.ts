@@ -43,6 +43,10 @@ export class ChildProcessAppServerTransport implements AppServerTransport {
   private requestId = 0;
   private initialized = false;
   private initializeInFlight: Promise<void> | null = null;
+  private stdoutFrameBuffer = "";
+  private stdoutFrameDepth = 0;
+  private stdoutFrameInString = false;
+  private stdoutFrameEscaped = false;
 
   public constructor(options: ChildProcessAppServerTransportOptions) {
     this.executablePath = options.executablePath;
@@ -84,40 +88,18 @@ export class ChildProcessAppServerTransport implements AppServerTransport {
       this.initializeInFlight = null;
     });
 
-    const lineReader = readline.createInterface({ input: child.stdout });
-    lineReader.on("line", (line) => {
-      const trimmed = line.trim();
-      if (!trimmed) {
-        return;
+    child.stdout.on("data", (chunk: Buffer | string) => {
+      const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      try {
+        this.consumeStdoutText(text);
+      } catch (error) {
+        const reason =
+          error instanceof Error
+            ? error
+            : new AppServerTransportError(`invalid app-server stdout: ${String(error)}`);
+        this.rejectAll(reason);
+        child.kill("SIGTERM");
       }
-
-      const raw = JSON.parse(trimmed);
-      const message = parseJsonRpcIncomingMessage(raw);
-
-      if (message.kind === "notification") {
-        return;
-      }
-
-      const pending = this.pending.get(message.value.id);
-      if (!pending) {
-        return;
-      }
-
-      this.pending.delete(message.value.id);
-      clearTimeout(pending.timer);
-
-      if (message.value.error) {
-        pending.reject(
-          new AppServerRpcError(
-            message.value.error.code,
-            message.value.error.message,
-            message.value.error.data
-          )
-        );
-        return;
-      }
-
-      pending.resolve(message.value.result);
     });
 
     const stderrReader = readline.createInterface({ input: child.stderr });
@@ -131,6 +113,123 @@ export class ChildProcessAppServerTransport implements AppServerTransport {
     });
 
     this.process = child;
+  }
+
+  private resetStdoutFrameState(): void {
+    this.stdoutFrameBuffer = "";
+    this.stdoutFrameDepth = 0;
+    this.stdoutFrameInString = false;
+    this.stdoutFrameEscaped = false;
+  }
+
+  private handleIncomingMessage(raw: unknown): void {
+    const message = parseJsonRpcIncomingMessage(raw);
+
+    if (message.kind === "notification") {
+      return;
+    }
+
+    const pending = this.pending.get(message.value.id);
+    if (!pending) {
+      return;
+    }
+
+    this.pending.delete(message.value.id);
+    clearTimeout(pending.timer);
+
+    if (message.value.error) {
+      pending.reject(
+        new AppServerRpcError(
+          message.value.error.code,
+          message.value.error.message,
+          message.value.error.data
+        )
+      );
+      return;
+    }
+
+    pending.resolve(message.value.result);
+  }
+
+  private consumeStdoutText(text: string): void {
+    for (const char of text) {
+      if (this.stdoutFrameDepth === 0) {
+        if (/\s/.test(char)) {
+          continue;
+        }
+        if (char !== "{") {
+          throw new AppServerTransportError(
+            `app-server stdout started with unexpected character: ${JSON.stringify(char)}`
+          );
+        }
+        this.resetStdoutFrameState();
+        this.stdoutFrameDepth = 1;
+        this.stdoutFrameBuffer = "{";
+        continue;
+      }
+
+      if (this.stdoutFrameInString) {
+        if (this.stdoutFrameEscaped) {
+          this.stdoutFrameBuffer += char;
+          this.stdoutFrameEscaped = false;
+          continue;
+        }
+
+        if (char === "\\") {
+          this.stdoutFrameBuffer += char;
+          this.stdoutFrameEscaped = true;
+          continue;
+        }
+
+        if (char === "\"") {
+          this.stdoutFrameBuffer += char;
+          this.stdoutFrameInString = false;
+          continue;
+        }
+
+        if (char === "\n") {
+          this.stdoutFrameBuffer += "\\n";
+          continue;
+        }
+
+        if (char === "\r") {
+          this.stdoutFrameBuffer += "\\r";
+          continue;
+        }
+
+        if (char === "\t") {
+          this.stdoutFrameBuffer += "\\t";
+          continue;
+        }
+
+        this.stdoutFrameBuffer += char;
+        continue;
+      }
+
+      this.stdoutFrameBuffer += char;
+
+      if (char === "\"") {
+        this.stdoutFrameInString = true;
+        continue;
+      }
+
+      if (char === "{") {
+        this.stdoutFrameDepth += 1;
+        continue;
+      }
+
+      if (char === "}") {
+        this.stdoutFrameDepth -= 1;
+        if (this.stdoutFrameDepth < 0) {
+          throw new AppServerTransportError("app-server stdout produced an unmatched closing brace");
+        }
+        if (this.stdoutFrameDepth === 0) {
+          const raw = JSON.parse(this.stdoutFrameBuffer);
+          this.resetStdoutFrameState();
+          this.handleIncomingMessage(raw);
+        }
+      }
+    }
   }
 
   private rejectAll(error: Error): void {
