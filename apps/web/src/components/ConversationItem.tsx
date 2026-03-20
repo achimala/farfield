@@ -25,6 +25,7 @@ const TOOL_BLOCK_TYPES: readonly UnifiedItem["type"][] = [
   "fileChange",
   "webSearch",
   "mcpToolCall",
+  "dynamicToolCall",
   "collabAgentToolCall",
   "remoteTaskCreated",
   "forkedFromConversation",
@@ -53,10 +54,92 @@ function readTextContent(content: UserMessageLikeItem["content"]): string {
     .join("\n");
 }
 
+function readImageContent(content: UserMessageLikeItem["content"]): string[] {
+  return content
+    .map((part) => (part.type === "image" ? part.url.trim() : ""))
+    .filter((url) => url.length > 0);
+}
+
+function stringifyPreview(value: unknown, maxLength = 600): string {
+  if (typeof value === "string") {
+    if (value.length <= maxLength) {
+      return value;
+    }
+    return `${value.slice(0, maxLength)}...`;
+  }
+  const serialized = JSON.stringify(value);
+  if (!serialized) {
+    return "";
+  }
+  if (serialized.length <= maxLength) {
+    return serialized;
+  }
+  return `${serialized.slice(0, maxLength)}...`;
+}
+
+function summarizeDynamicToolContent(
+  item: Extract<UnifiedItem, { type: "dynamicToolCall" }>,
+): string | null {
+  const contentItems = item.contentItems ?? [];
+  if (contentItems.length === 0) {
+    return null;
+  }
+
+  const firstTextItem = contentItems.find(
+    (contentItem) => contentItem.type === "inputText" && contentItem.text.length > 0,
+  );
+  if (firstTextItem?.type === "inputText") {
+    const text = firstTextItem.text.trim();
+    if (text.length <= 240) {
+      return text;
+    }
+    return `${text.slice(0, 240)}...`;
+  }
+
+  const imageCount = contentItems.filter(
+    (contentItem) => contentItem.type === "inputImage",
+  ).length;
+  return imageCount > 0 ? `${imageCount} image result(s)` : null;
+}
+
 interface RendererContext {
   isActive: boolean;
   toolSpacing: string;
   onSelectThread: (threadId: string) => void;
+}
+
+function renderUserMessageBubble(item: UserMessageLikeItem): React.JSX.Element | null {
+  const text = readTextContent(item.content);
+  const imageUrls = readImageContent(item.content);
+
+  if (!text && imageUrls.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="flex justify-end">
+      <div className="max-w-[80%] rounded-2xl bg-muted px-4 py-2.5 text-sm text-foreground leading-relaxed">
+        {text && <p className="whitespace-pre-wrap break-words">{text}</p>}
+        {imageUrls.length > 0 && (
+          <div className={`${text ? "mt-3" : ""} flex flex-col gap-2`}>
+            {imageUrls.map((url, index) => (
+              <div
+                key={`${item.id}-image-${String(index)}`}
+                className="rounded-xl border border-border/60 bg-background/30 px-3 py-2"
+              >
+                <div className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+                  User image {String(index + 1)}
+                </div>
+                <div className="mt-1 break-all text-xs text-muted-foreground">
+                  {url}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 type ItemRendererMap = {
@@ -66,35 +149,9 @@ type ItemRendererMap = {
 };
 
 const ITEM_RENDERERS = {
-  userMessage: ({ item }) => {
-    const text = readTextContent(item.content);
-    if (!text) {
-      return null;
-    }
+  userMessage: ({ item }) => renderUserMessageBubble(item),
 
-    return (
-      <div className="flex justify-end">
-        <div className="max-w-[80%] rounded-2xl bg-muted px-4 py-2.5 text-sm text-foreground leading-relaxed">
-          <p className="whitespace-pre-wrap break-words">{text}</p>
-        </div>
-      </div>
-    );
-  },
-
-  steeringUserMessage: ({ item }) => {
-    const text = readTextContent(item.content);
-    if (!text) {
-      return null;
-    }
-
-    return (
-      <div className="flex justify-end">
-        <div className="max-w-[80%] rounded-2xl bg-muted px-4 py-2.5 text-sm text-foreground leading-relaxed">
-          <p className="whitespace-pre-wrap break-words">{text}</p>
-        </div>
-      </div>
-    );
-  },
+  steeringUserMessage: ({ item }) => renderUserMessageBubble(item),
 
   agentMessage: ({ item }) => {
     if (!item.text) {
@@ -239,7 +296,7 @@ const ITEM_RENDERERS = {
   ),
 
   mcpToolCall: ({ item, toolSpacing }) => {
-    const argumentsText = JSON.stringify(item.arguments);
+    const argumentsText = stringifyPreview(item.arguments);
     return (
       <div
         className={`${toolSpacing} rounded-lg border border-border bg-muted/20 px-3 py-2`}
@@ -263,6 +320,46 @@ const ITEM_RENDERERS = {
         {item.result?.content && item.result.content.length > 0 && (
           <div className="mt-2 text-xs text-muted-foreground">
             Result parts: {item.result.content.length}
+          </div>
+        )}
+        <div className="mt-2 text-[11px] text-muted-foreground font-mono whitespace-pre-wrap break-all">
+          {argumentsText}
+        </div>
+      </div>
+    );
+  },
+
+  dynamicToolCall: ({ item, toolSpacing }) => {
+    const argumentsText = stringifyPreview(item.arguments);
+    const previewText = summarizeDynamicToolContent(item);
+    return (
+      <div
+        className={`${toolSpacing} rounded-lg border border-border bg-muted/20 px-3 py-2`}
+      >
+        <div className="text-[10px] text-muted-foreground font-mono mb-1 uppercase tracking-wider">
+          Dynamic tool
+        </div>
+        <div className="text-xs text-foreground/90 whitespace-pre-wrap break-words">
+          {item.tool} ({item.status})
+        </div>
+        {item.durationMs != null && (
+          <div className="mt-1 text-[11px] text-muted-foreground font-mono">
+            {item.durationMs}ms
+          </div>
+        )}
+        {item.success != null && (
+          <div className="mt-1 text-[11px] text-muted-foreground">
+            Success: {item.success ? "true" : "false"}
+          </div>
+        )}
+        {item.contentItems && item.contentItems.length > 0 && (
+          <div className="mt-2 text-xs text-muted-foreground">
+            Result parts: {item.contentItems.length}
+          </div>
+        )}
+        {previewText && (
+          <div className="mt-2 text-xs text-foreground/80 whitespace-pre-wrap break-words">
+            {previewText}
           </div>
         )}
         <div className="mt-2 text-[11px] text-muted-foreground font-mono whitespace-pre-wrap break-all">
@@ -394,6 +491,8 @@ function renderItem(
       return ITEM_RENDERERS.webSearch({ item, ...context });
     case "mcpToolCall":
       return ITEM_RENDERERS.mcpToolCall({ item, ...context });
+    case "dynamicToolCall":
+      return ITEM_RENDERERS.dynamicToolCall({ item, ...context });
     case "collabAgentToolCall":
       return ITEM_RENDERERS.collabAgentToolCall({ item, ...context });
     case "imageView":

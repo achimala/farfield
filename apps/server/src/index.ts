@@ -16,6 +16,7 @@ import {
   TraceMarkBodySchema,
   TraceStartBodySchema,
 } from "./http-schemas.js";
+import { prepareHistoryPayloadForStorage } from "./debug-history.js";
 import { logger } from "./logger.js";
 import {
   parseServerCliOptions,
@@ -34,7 +35,7 @@ import {
 
 const HOST = process.env["HOST"] ?? "127.0.0.1";
 const PORT = Number(process.env["PORT"] ?? 4311);
-const HISTORY_LIMIT = 2_000;
+const HISTORY_LIMIT = 400;
 const USER_AGENT = "farfield/0.2.2";
 const IPC_RECONNECT_DELAY_MS = 1_000;
 const SIDEBAR_PREVIEW_MAX_CHARS = 180;
@@ -47,7 +48,6 @@ interface HistoryEntry {
   at: string;
   source: "ipc" | "app" | "system";
   direction: "in" | "out" | "system";
-  payload: unknown;
   meta: Record<string, unknown>;
 }
 
@@ -76,6 +76,31 @@ interface ActiveTrace {
 function resolveCodexExecutablePath(): string {
   if (process.env["CODEX_CLI_PATH"]) {
     return process.env["CODEX_CLI_PATH"];
+  }
+
+  if (process.platform === "win32") {
+    const windowsCandidates = [
+      "codex.ps1",
+      "codex.cmd",
+      "codex",
+      "codex.exe",
+    ];
+
+    for (const candidate of windowsCandidates) {
+      try {
+        const resolved = execFileSync("where.exe", [candidate], {
+          encoding: "utf8",
+        })
+          .split(/\r?\n/)
+          .map((entry) => entry.trim())
+          .find((entry) => entry.length > 0);
+        if (resolved) {
+          return resolved;
+        }
+      } catch {
+        // Try the next candidate.
+      }
+    }
   }
 
   const desktopPath = "/Applications/Codex.app/Contents/Resources/codex";
@@ -238,7 +263,7 @@ const ipcSocketPath = resolveIpcSocketPath();
 const gitCommit = resolveGitCommitHash();
 
 const history: HistoryEntry[] = [];
-const historyById = new Map<string, unknown>();
+const historyById = new Map<string, string>();
 const unifiedSseClients = new Set<ServerResponse>();
 const activeSockets = new Set<Socket>();
 const SSE_KEEPALIVE_INTERVAL_MS = 15_000;
@@ -263,17 +288,22 @@ function pushHistory(
   payload: unknown,
   meta: Record<string, unknown> = {},
 ): HistoryEntry {
+  const storedPayload = prepareHistoryPayloadForStorage(payload);
   const entry: HistoryEntry = {
     id: randomUUID(),
     at: new Date().toISOString(),
     source,
     direction,
-    payload,
-    meta,
+    meta: {
+      ...meta,
+      payloadBytes: storedPayload.originalBytes,
+      storedPayloadBytes: storedPayload.storedBytes,
+      payloadCompacted: storedPayload.compacted,
+    },
   };
 
   history.push(entry);
-  historyById.set(entry.id, payload);
+  historyById.set(entry.id, storedPayload.json);
 
   if (history.length > HISTORY_LIMIT) {
     const removed = history.shift();
@@ -282,7 +312,11 @@ function pushHistory(
     }
   }
 
-  recordTraceEvent({ type: "history", ...entry });
+  recordTraceEvent({
+    type: "history",
+    ...entry,
+    payloadJson: storedPayload.json,
+  });
   return entry;
 }
 
@@ -336,6 +370,7 @@ const unifiedAdapters = createUnifiedProviderAdapters({
 
 function getRuntimeStateSnapshot(): Record<string, unknown> {
   const codexRuntimeState = codexAdapter?.getRuntimeState();
+  const codexRuntimeCounts = codexAdapter?.getTrackedThreadRuntimeCounts();
 
   return {
     appExecutable: codexExecutable,
@@ -348,6 +383,25 @@ function getRuntimeStateSnapshot(): Record<string, unknown> {
     lastError: runtimeLastError ?? codexRuntimeState?.lastError ?? null,
     historyCount: history.length,
     threadOwnerCount: codexAdapter?.getThreadOwnerCount() ?? 0,
+    trackedThreadCount: codexRuntimeCounts?.trackedThreadCount ?? 0,
+    streamEventThreadCount: codexRuntimeCounts?.streamEventThreadCount ?? 0,
+    totalBufferedStreamEventCount:
+      codexRuntimeCounts?.totalBufferedStreamEventCount ?? 0,
+    streamSnapshotThreadCount:
+      codexRuntimeCounts?.streamSnapshotThreadCount ?? 0,
+    threadTitleCount: codexRuntimeCounts?.threadTitleCount ?? 0,
+    maxTrackedThreadCountSeen:
+      codexRuntimeCounts?.maxTrackedThreadCountSeen ?? 0,
+    maxTotalBufferedStreamEventCountSeen:
+      codexRuntimeCounts?.maxTotalBufferedStreamEventCountSeen ?? 0,
+    maxBufferedStreamEventsPerThreadSeen:
+      codexRuntimeCounts?.maxBufferedStreamEventsPerThreadSeen ?? 0,
+    archivedRestoreHitCount: codexRuntimeCounts?.archivedRestoreHitCount ?? 0,
+    archivedRestoreFailureCount:
+      codexRuntimeCounts?.archivedRestoreFailureCount ?? 0,
+    streamParseFailureCount: codexRuntimeCounts?.streamParseFailureCount ?? 0,
+    streamReductionFailureCount:
+      codexRuntimeCounts?.streamReductionFailureCount ?? 0,
     activeTrace: activeTrace?.summary ?? null,
   };
 }
@@ -818,6 +872,10 @@ const server = http.createServer(async (req, res) => {
         url.searchParams.get("includeTurns"),
         true,
       );
+      const maxRenderableItems = parseInteger(
+        url.searchParams.get("maxRenderableItems"),
+        0,
+      );
       const knownProviders = threadIndex.providers(threadId);
       const resolvedProvider = threadIndex.resolve(threadId);
       const provider = providerFromQuery ?? resolvedProvider;
@@ -872,6 +930,9 @@ const server = http.createServer(async (req, res) => {
           provider,
           threadId,
           includeTurns,
+          ...(maxRenderableItems > 0
+            ? { maxRenderableItems }
+            : {}),
         });
 
         threadIndex.register(result.thread.id, result.thread.provider);
@@ -890,6 +951,9 @@ const server = http.createServer(async (req, res) => {
               provider,
               threadId,
               includeTurns,
+              ...(maxRenderableItems > 0
+                ? { maxRenderableItems }
+                : {}),
             },
           },
         });
@@ -912,7 +976,7 @@ const server = http.createServer(async (req, res) => {
         jsonResponse(res, 200, {
           ok: true,
           entry: toDebugHistoryListEntry(entry),
-          fullPayloadJson: JSON.stringify(historyById.get(entryId) ?? null, null, 2),
+          fullPayloadJson: historyById.get(entryId) ?? "null",
         });
         return;
       }

@@ -1,6 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import readline from "node:readline";
 import { randomUUID } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import type { AppServerClientRequestMethod } from "@farfield/protocol";
 import {
   AppServerRpcError,
@@ -31,6 +33,98 @@ export interface ChildProcessAppServerTransportOptions {
   onStderr?: (line: string) => void;
 }
 
+interface SpawnSpec {
+  command: string;
+  args: string[];
+}
+
+function buildCodexNpmShimSpawnSpec(
+  executablePath: string,
+  args: string[]
+): SpawnSpec | null {
+  if (process.platform !== "win32") {
+    return null;
+  }
+
+  const ext = path.extname(executablePath).toLowerCase();
+  const baseName = path.basename(executablePath, ext).toLowerCase();
+  if (baseName !== "codex" || (ext !== ".cmd" && ext !== ".ps1")) {
+    return null;
+  }
+
+  const shimDir = path.dirname(executablePath);
+  const scriptPath = path.join(
+    shimDir,
+    "node_modules",
+    "@openai",
+    "codex",
+    "bin",
+    "codex.js"
+  );
+  if (!fs.existsSync(scriptPath)) {
+    return null;
+  }
+
+  const bundledNode = path.join(shimDir, "node.exe");
+  return {
+    command: fs.existsSync(bundledNode) ? bundledNode : "node",
+    args: [scriptPath, ...args]
+  };
+}
+
+function quoteCmdArg(value: string): string {
+  if (value.length === 0) {
+    return '""';
+  }
+  if (!/[\s"]/.test(value)) {
+    return value;
+  }
+  return `"${value.replace(/"/g, '""')}"`;
+}
+
+function buildSpawnSpec(executablePath: string, args: string[]): SpawnSpec {
+  const codexShimSpec = buildCodexNpmShimSpawnSpec(executablePath, args);
+  if (codexShimSpec) {
+    return codexShimSpec;
+  }
+
+  if (process.platform !== "win32") {
+    return {
+      command: executablePath,
+      args
+    };
+  }
+
+  const ext = path.extname(executablePath).toLowerCase();
+  if (ext === ".ps1") {
+    return {
+      command: "powershell.exe",
+      args: [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        executablePath,
+        ...args
+      ]
+    };
+  }
+
+  if (ext === ".cmd" || ext === ".bat") {
+    const comspec = process.env["ComSpec"] || "cmd.exe";
+    const commandLine = [quoteCmdArg(executablePath), ...args.map(quoteCmdArg)].join(" ");
+    return {
+      command: comspec,
+      args: ["/d", "/s", "/c", commandLine]
+    };
+  }
+
+  return {
+    command: executablePath,
+    args
+  };
+}
+
 export class ChildProcessAppServerTransport implements AppServerTransport {
   private readonly executablePath: string;
   private readonly userAgent: string;
@@ -58,7 +152,8 @@ export class ChildProcessAppServerTransport implements AppServerTransport {
       return;
     }
 
-    const child = spawn(this.executablePath, ["app-server"], {
+    const spawnSpec = buildSpawnSpec(this.executablePath, ["app-server"]);
+    const child = spawn(spawnSpec.command, spawnSpec.args, {
       cwd: this.cwd,
       env: {
         ...process.env,

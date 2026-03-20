@@ -74,22 +74,20 @@ const ApiPathSchema = z
 
 export type StoredServerTarget = z.infer<typeof StoredServerTargetSchema>;
 
-function isLocalHost(hostname: string): boolean {
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
-}
-
 export function getDefaultServerBaseUrl(): string {
   if (typeof window === "undefined") {
     return `http://127.0.0.1:${String(DEFAULT_SERVER_PORT)}`;
   }
 
-  const hostname = window.location.hostname;
-
-  if (isLocalHost(hostname)) {
-    return `http://127.0.0.1:${String(DEFAULT_SERVER_PORT)}`;
+  if (
+    (window.location.protocol === "http:" ||
+      window.location.protocol === "https:") &&
+    window.location.host
+  ) {
+    return window.location.origin;
   }
 
-  return window.location.origin;
+  return `http://127.0.0.1:${String(DEFAULT_SERVER_PORT)}`;
 }
 
 export function readStoredServerTarget(): StoredServerTarget | null {

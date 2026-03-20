@@ -145,14 +145,21 @@ export const TodoListPlanStepSchema = z
   })
   .passthrough();
 
-export const TodoListItemSchema = z
+const TodoListItemBaseSchema = z
   .object({
     id: NonEmptyStringSchema,
-    type: z.literal("todo-list"),
-    explanation: z.string().optional(),
+    explanation: z.union([z.string(), z.null()]).optional(),
     plan: z.array(TodoListPlanStepSchema)
   })
   .passthrough();
+
+export const TodoListItemSchema = TodoListItemBaseSchema.extend({
+  type: z.literal("todo-list")
+});
+
+export const TodoListCamelItemSchema = TodoListItemBaseSchema.extend({
+  type: z.literal("todoList")
+});
 
 export const PlanImplementationItemSchema = z
   .object({
@@ -200,7 +207,7 @@ export const CommandExecutionItemSchema = z
     id: NonEmptyStringSchema,
     command: z.string(),
     cwd: z.string().optional(),
-    processId: z.string().optional(),
+    processId: z.union([z.string(), z.null()]).optional(),
     status: NonEmptyStringSchema,
     commandActions: z.array(CommandActionSchema).optional(),
     aggregatedOutput: z.union([z.string(), z.null()]).optional(),
@@ -313,6 +320,41 @@ export const McpToolCallItemSchema = z
   })
   .passthrough();
 
+export const DynamicToolCallContentItemSchema = z
+  .discriminatedUnion("type", [
+    z
+      .object({
+        type: z.literal("inputText"),
+        text: z.string()
+      })
+      .passthrough(),
+    z
+      .object({
+        type: z.literal("inputImage"),
+        imageUrl: z.string()
+      })
+      .passthrough()
+  ]);
+
+export const DynamicToolCallStatusSchema = z.enum([
+  "inProgress",
+  "completed",
+  "failed"
+]);
+
+export const DynamicToolCallItemSchema = z
+  .object({
+    type: z.literal("dynamicToolCall"),
+    id: NonEmptyStringSchema,
+    tool: z.string(),
+    arguments: JsonValueSchema,
+    status: DynamicToolCallStatusSchema,
+    contentItems: z.union([z.array(DynamicToolCallContentItemSchema), z.null()]).optional(),
+    success: z.union([z.boolean(), z.null()]).optional(),
+    durationMs: z.union([NonNegativeIntSchema, z.null()]).optional()
+  })
+  .passthrough();
+
 export const CollabAgentToolSchema = z.enum([
   "spawnAgent",
   "sendInput",
@@ -384,6 +426,7 @@ export const TurnItemSchema = z.discriminatedUnion("type", [
   ReasoningItemSchema,
   PlanItemSchema,
   TodoListItemSchema,
+  TodoListCamelItemSchema,
   PlanImplementationItemSchema,
   UserInputResponseItemSchema,
   CommandExecutionItemSchema,
@@ -391,6 +434,7 @@ export const TurnItemSchema = z.discriminatedUnion("type", [
   ContextCompactionItemSchema,
   WebSearchItemSchema,
   McpToolCallItemSchema,
+  DynamicToolCallItemSchema,
   CollabAgentToolCallItemSchema,
   ImageViewItemSchema,
   EnteredReviewModeItemSchema,

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { AppServerClient } from "../src/app-server-client.js";
 import type { AppServerTransport } from "../src/app-server-transport.js";
+import { AppServerRpcError } from "../src/errors.js";
 
 const START_THREAD_RESPONSE = {
   thread: {
@@ -113,6 +114,90 @@ describe("AppServerClient.resumeThread", () => {
       threadId: "thread-1",
       persistExtendedHistory: true
     });
+  });
+});
+
+describe("AppServerClient.readThread", () => {
+  it("falls back to thread/resume when thread/read is unsupported", async () => {
+    const transport: AppServerTransport = {
+      request: vi
+        .fn()
+        .mockRejectedValueOnce(
+          new AppServerRpcError(
+            -32600,
+            "Invalid request: unknown variant `thread/read`, expected one of `thread/resume`"
+          )
+        )
+        .mockResolvedValueOnce({
+          thread: {
+            id: "thread-1",
+            turns: [
+              {
+                id: "turn-1",
+                status: "completed",
+                items: []
+              }
+            ],
+            requests: []
+          }
+        }),
+      respond: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined)
+    };
+
+    const client = new AppServerClient(transport);
+    const result = await client.readThread("thread-1");
+
+    expect(transport.request).toHaveBeenNthCalledWith(1, "thread/read", {
+      threadId: "thread-1",
+      includeTurns: true
+    });
+    expect(transport.request).toHaveBeenNthCalledWith(2, "thread/resume", {
+      threadId: "thread-1",
+      persistExtendedHistory: true
+    });
+    expect(result.thread.turns).toHaveLength(1);
+  });
+
+  it("drops turns when thread/read fallback is used without includeTurns", async () => {
+    const transport: AppServerTransport = {
+      request: vi
+        .fn()
+        .mockRejectedValueOnce(
+          new AppServerRpcError(
+            -32600,
+            "Invalid request: unknown variant `thread/read`, expected one of `thread/resume`"
+          )
+        )
+        .mockResolvedValueOnce({
+          thread: {
+            id: "thread-1",
+            turns: [
+              {
+                id: "turn-1",
+                status: "completed",
+                items: []
+              }
+            ],
+            requests: []
+          }
+        }),
+      respond: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined)
+    };
+
+    const client = new AppServerClient(transport);
+    const result = await client.readThread("thread-1", false);
+
+    expect(transport.request).toHaveBeenNthCalledWith(1, "thread/read", {
+      threadId: "thread-1",
+      includeTurns: false
+    });
+    expect(transport.request).toHaveBeenNthCalledWith(2, "thread/resume", {
+      threadId: "thread-1",
+      persistExtendedHistory: false
+    });
+    expect(result.thread.turns).toEqual([]);
   });
 });
 

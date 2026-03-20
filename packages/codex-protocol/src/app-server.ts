@@ -23,8 +23,6 @@ import {
 const AppServerThreadListResponseBaseSchema = GeneratedThreadListResponseSchema.passthrough();
 const AppServerThreadReadResponseBaseSchema = GeneratedThreadReadResponseSchema.passthrough();
 const AppServerModelListResponseBaseSchema = GeneratedModelListResponseSchema.passthrough();
-const AppServerCollaborationModeListResponseBaseSchema =
-  GeneratedCollaborationModeListResponseSchema.passthrough();
 const AppServerGetAccountRateLimitsResponseBaseSchema =
   GeneratedGetAccountRateLimitsResponseSchema.passthrough();
 const AppServerStartThreadRequestBaseSchema = GeneratedThreadStartParamsSchema.passthrough();
@@ -35,11 +33,32 @@ const AppServerServerRequestBaseSchema = z.union([
 
 const ThreadTitleSchema = z.union([z.string(), z.null()]).optional();
 const ThreadIsGeneratingSchema = z.boolean().optional();
+const AppServerModelReasoningEffortItemSchema = z
+  .object({
+    reasoningEffort: z.string(),
+    description: z.string().optional()
+  })
+  .passthrough();
 
-const AppServerGeneratedThreadListItemSchema = AppServerThreadListResponseBaseSchema.shape.data.element.extend({
-  title: ThreadTitleSchema,
-  isGenerating: ThreadIsGeneratingSchema
-});
+const AppServerGeneratedThreadListItemSchema = z
+  .object({
+    id: z.string().min(1),
+    preview: z.string(),
+    title: ThreadTitleSchema,
+    name: z.union([z.string(), z.null()]).optional(),
+    isGenerating: ThreadIsGeneratingSchema,
+    createdAt: z.number().int().nonnegative(),
+    updatedAt: z.number().int().nonnegative(),
+    cwd: z.string().optional(),
+    source: z.any().optional(),
+    modelProvider: z.string().optional(),
+    cliVersion: z.string().optional(),
+    path: z.union([z.string(), z.null()]).optional(),
+    gitInfo: z.any().optional(),
+    status: z.any().optional(),
+    turns: z.array(z.any()).optional()
+  })
+  .passthrough();
 
 const OpenCodeThreadListItemSchema = z
   .object({
@@ -79,18 +98,58 @@ export const AppServerReadThreadResponseSchema: z.ZodObject<
   })
   .passthrough();
 
-export const AppServerModelSchema = AppServerModelListResponseBaseSchema.shape.data.element;
+export const AppServerModelSchema = z
+  .object({
+    id: z.string().min(1),
+    model: z.string().min(1),
+    displayName: z.string().optional(),
+    description: z.string().optional(),
+    hidden: z.boolean().optional(),
+    supportedReasoningEfforts: z.array(AppServerModelReasoningEffortItemSchema).default([]),
+    defaultReasoningEffort: z.string().optional(),
+    inputModalities: z.array(z.any()).optional(),
+    supportsPersonality: z.boolean().optional(),
+    isDefault: z.boolean().optional(),
+    upgrade: z.union([z.string(), z.null()]).optional(),
+    upgradeInfo: z.any().optional(),
+    availabilityNux: z.any().optional()
+  })
+  .passthrough();
 
 export const AppServerModelReasoningEffortSchema =
-  AppServerModelSchema.shape.supportedReasoningEfforts.element;
+  AppServerModelReasoningEffortItemSchema;
 
-export const AppServerListModelsResponseSchema = AppServerModelListResponseBaseSchema;
+export const AppServerListModelsResponseSchema = z
+  .object({
+    data: z.array(AppServerModelSchema),
+    nextCursor: z.union([z.string(), z.null()]).optional()
+  })
+  .passthrough();
 
-export const AppServerCollaborationModeListItemSchema =
-  AppServerCollaborationModeListResponseBaseSchema.shape.data.element;
+export const AppServerCollaborationModeListItemSchema = z
+  .object({
+    name: z.string().optional(),
+    mode: z.string().optional(),
+    model: z.union([z.string(), z.null()]).optional(),
+    reasoning_effort: z.union([z.string(), z.null()]).optional(),
+    developer_instructions: z.union([z.string(), z.null()]).optional(),
+    settings: z
+      .object({
+        model: z.union([z.string(), z.null()]).optional(),
+        reasoning_effort: z.union([z.string(), z.null()]).optional(),
+        developer_instructions: z.union([z.string(), z.null()]).optional()
+      })
+      .passthrough()
+      .optional()
+  })
+  .passthrough();
 
-export const AppServerCollaborationModeListResponseSchema =
-  AppServerCollaborationModeListResponseBaseSchema;
+export const AppServerCollaborationModeListResponseSchema = z
+  .object({
+    data: z.array(AppServerCollaborationModeListItemSchema),
+    nextCursor: z.union([z.string(), z.null()]).optional()
+  })
+  .passthrough();
 
 export const AppServerStartThreadRequestSchema = AppServerStartThreadRequestBaseSchema;
 

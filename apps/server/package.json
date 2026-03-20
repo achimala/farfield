@@ -13,7 +13,7 @@
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "dev:remote": "HOST=0.0.0.0 PORT=4311 tsx watch src/index.ts",
+    "dev:remote": "HOST=0.0.0.0 PORT=4311 tsx src/index.ts",
     "build": "tsc -p tsconfig.json",
     "build:bundle": "rm -rf dist && esbuild src/index.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/index.js --banner:js='#!/usr/bin/env node' --external:pino --external:zod --external:@opencode-ai/sdk --external:@opencode-ai/sdk/*",
     "prepack": "bun run build:bundle",

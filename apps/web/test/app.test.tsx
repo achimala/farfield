@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   JsonValue,
@@ -7,10 +7,30 @@ import type {
   UnifiedItem,
   UnifiedThread,
 } from "@farfield/unified-surface";
-import { App } from "../src/App";
+import {
+  App,
+  normalizeCachedThreadViewStateForStorage,
+  normalizeReadThreadResponseForChatWindow,
+  pruneMapToRetainedKeys,
+  retainStreamEventsForView,
+} from "../src/App";
+
+type MaybePromise<T> = T | Promise<T>;
+
+function createDeferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+}
 
 class MockEventSource {
   private static instances: MockEventSource[] = [];
+  public onopen: ((event: Event) => void) | null = null;
   public onmessage: ((event: MessageEvent<string>) => void) | null = null;
   public onerror: ((event: Event) => void) | null = null;
 
@@ -33,8 +53,22 @@ class MockEventSource {
     const event = new MessageEvent<string>("message", {
       data: JSON.stringify(payload),
     });
-    for (const instance of MockEventSource.instances) {
+    for (const instance of [...MockEventSource.instances]) {
       instance.onmessage?.(event);
+    }
+  }
+
+  public static emitOpen(): void {
+    const event = new Event("open");
+    for (const instance of [...MockEventSource.instances]) {
+      instance.onopen?.(event);
+    }
+  }
+
+  public static emitError(): void {
+    const event = new Event("error");
+    for (const instance of [...MockEventSource.instances]) {
+      instance.onerror?.(event);
     }
   }
 
@@ -302,15 +336,19 @@ let modelsFixture: Record<
 let readThreadResolver: (
   threadId: string,
   provider: ProviderId | null,
-) => {
+  options?: {
+    includeTurns: boolean;
+    maxRenderableItems: number | null;
+  },
+) => MaybePromise<{
   ok: true;
   thread: UnifiedThreadFixture;
-} | null;
+} | null>;
 
 let liveStateResolver: (
   threadId: string,
   provider: ProviderId,
-) => {
+) => MaybePromise<{
   kind: "readLiveState";
   threadId: string;
   ownerClientId: string | null;
@@ -321,7 +359,7 @@ let liveStateResolver: (
     eventIndex: number | null;
     patchIndex: number | null;
   } | null;
-};
+}>;
 
 function buildConversationStateFixture(
   threadId: string,
@@ -503,6 +541,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
 });
 
 vi.stubGlobal(
@@ -552,7 +591,20 @@ vi.stubGlobal(
         providerParam === "opencode" || providerParam === "codex"
           ? providerParam
           : null;
-      const readThread = readThreadResolver(threadId, provider);
+      const maxRenderableItemsParam =
+        parsedUrl.searchParams.get("maxRenderableItems");
+      const maxRenderableItems =
+        maxRenderableItemsParam !== null
+          ? Number(maxRenderableItemsParam)
+          : null;
+      const readThread = await readThreadResolver(threadId, provider, {
+        includeTurns: parsedUrl.searchParams.get("includeTurns") !== "false",
+        maxRenderableItems:
+          typeof maxRenderableItems === "number" &&
+          Number.isFinite(maxRenderableItems)
+            ? maxRenderableItems
+            : null,
+      });
       if (readThread) {
         return jsonResponse(readThread);
       }
@@ -607,7 +659,7 @@ vi.stubGlobal(
       if (body.kind === "readLiveState") {
         return jsonResponse({
           ok: true,
-          result: liveStateResolver(body.threadId ?? "", body.provider),
+          result: await liveStateResolver(body.threadId ?? "", body.provider),
         });
       }
 
@@ -651,6 +703,201 @@ vi.stubGlobal(
 );
 
 describe("App", () => {
+  it("retains only the latest token-usage event outside debug view", () => {
+    const firstTokenUsageEvent = {
+      type: "broadcast",
+      method: "thread/tokenUsage/updated",
+      params: {
+        threadId: "thread-1",
+        tokenUsage: {
+          total_token_usage: {
+            total_tokens: 100,
+          },
+          last_token_usage: {
+            total_tokens: 25,
+          },
+          model_context_window: 200_000,
+        },
+      },
+    } satisfies JsonValue;
+    const secondTokenUsageEvent = {
+      type: "broadcast",
+      method: "thread/tokenUsage/updated",
+      params: {
+        threadId: "thread-1",
+        tokenUsage: {
+          total_token_usage: {
+            total_tokens: 140,
+          },
+          last_token_usage: {
+            total_tokens: 40,
+          },
+          model_context_window: 200_000,
+        },
+      },
+    } satisfies JsonValue;
+    const events = [
+      { type: "broadcast", method: "threadUpdated", params: {} },
+      firstTokenUsageEvent,
+      { type: "broadcast", method: "noop", params: { value: "ignored" } },
+      secondTokenUsageEvent,
+    ] satisfies JsonValue[];
+
+    expect(retainStreamEventsForView(events, "chat")).toEqual([
+      secondTokenUsageEvent,
+    ]);
+    expect(retainStreamEventsForView(events, "debug", 2)).toEqual(
+      events.slice(-2),
+    );
+    expect(
+      retainStreamEventsForView(
+        [{ type: "broadcast", method: "threadUpdated", params: {} }],
+        "chat",
+      ),
+    ).toEqual([]);
+  });
+
+  it("reuses already-windowed readThread responses without cloning", () => {
+    const response = {
+      thread: buildConversationStateFixture("thread-windowed", "gpt-5.3-codex", {
+        turnItems: Array.from({ length: 91 }, (_, index) => ({
+          id: `windowed-item-${index}`,
+          type: "agentMessage",
+          text: `windowed-${index}`,
+        })),
+      }),
+    } satisfies { thread: UnifiedThreadFixture };
+
+    const normalized = normalizeReadThreadResponseForChatWindow(response, 90);
+
+    expect(normalized).toBe(response);
+  });
+
+  it("prunes stale thread load revisions to retained thread ids", () => {
+    const revisions = new Map<string, number>([
+      ["thread-1", 1],
+      ["thread-2", 2],
+      ["thread-3", 3],
+    ]);
+
+    pruneMapToRetainedKeys(revisions, ["thread-2", "thread-3"]);
+
+    expect([...revisions.entries()]).toEqual([
+      ["thread-2", 2],
+      ["thread-3", 3],
+    ]);
+  });
+
+  it("counts image-only user messages when trimming chat windows", () => {
+    const response = {
+      thread: buildConversationStateFixture(
+        "thread-windowed-images",
+        "gpt-5.3-codex",
+        {
+          turnItems: Array.from({ length: 95 }, (_, index) => ({
+            id: `windowed-image-${index}`,
+            type: "userMessage",
+            content: [
+              {
+                type: "image",
+                url: `https://example.com/image-${index}.png`,
+              },
+            ],
+          })),
+        },
+      ),
+    } satisfies { thread: UnifiedThreadFixture };
+
+    const normalized = normalizeReadThreadResponseForChatWindow(response, 90);
+
+    expect(normalized?.thread.turns[0]?.items).toHaveLength(91);
+    const firstItem = normalized?.thread.turns[0]?.items[0];
+    expect(firstItem?.type).toBe("userMessage");
+  });
+
+  it("normalizes cached thread state before storing it", () => {
+    const oversizedTurnItems: UnifiedItem[] = Array.from(
+      { length: 95 },
+      (_, index) => ({
+        id: `cached-item-${index}`,
+        type: "agentMessage",
+        text: `cached-message-${index}`,
+      }),
+    );
+    const tokenUsageEvents = [
+      {
+        type: "broadcast",
+        method: "thread/tokenUsage/updated",
+        params: {
+          threadId: "thread-cache-normalized",
+          tokenUsage: {
+            total_token_usage: {
+              total_tokens: 10,
+            },
+            last_token_usage: {
+              total_tokens: 5,
+            },
+            model_context_window: 100,
+          },
+        },
+      },
+      {
+        type: "broadcast",
+        method: "thread/tokenUsage/updated",
+        params: {
+          threadId: "thread-cache-normalized",
+          tokenUsage: {
+            total_token_usage: {
+              total_tokens: 20,
+            },
+            last_token_usage: {
+              total_tokens: 10,
+            },
+            model_context_window: 100,
+          },
+        },
+      },
+    ] satisfies JsonValue[];
+
+    const normalized = normalizeCachedThreadViewStateForStorage(
+      {
+        readThreadState: {
+          thread: buildConversationStateFixture(
+            "thread-cache-normalized",
+            "gpt-5.3-codex",
+            {
+              turnItems: oversizedTurnItems,
+            },
+          ),
+        },
+        liveState: {
+          ok: true,
+          threadId: "thread-cache-normalized",
+          ownerClientId: "owner-1",
+          conversationState: buildConversationStateFixture(
+            "thread-cache-normalized",
+            "gpt-5.3-codex",
+            {
+              turnItems: oversizedTurnItems,
+            },
+          ),
+          liveStateError: null,
+        },
+        streamEvents: tokenUsageEvents,
+      },
+      {
+        activeTab: "chat",
+        chatVisibleItemLimit: 90,
+      },
+    );
+
+    expect(normalized.readThreadState?.thread.turns[0]?.items).toHaveLength(91);
+    expect(normalized.liveState?.conversationState?.turns[0]?.items).toHaveLength(
+      91,
+    );
+    expect(normalized.streamEvents).toEqual([tokenUsageEvents[1]]);
+  });
+
   it("renders core sections", async () => {
     render(<App />);
     expect((await screen.findAllByText("Farfield")).length).toBeGreaterThan(0);
@@ -977,6 +1224,548 @@ describe("App", () => {
     expect(screen.queryByText("listed-thread-loaded")).toBeNull();
   });
 
+  it("clears a stale route-thread error after a later successful reload", async () => {
+    const threadId = "thread-recovered-route";
+    let readAttempts = 0;
+    window.history.replaceState(null, "", `/threads/${threadId}`);
+
+    readThreadResolver = (
+      targetThreadId: string,
+      provider: ProviderId | null,
+    ) => {
+      if (targetThreadId !== threadId) {
+        return null;
+      }
+
+      readAttempts += 1;
+      if (readAttempts === 1) {
+        return null;
+      }
+
+      return {
+        ok: true,
+        thread: buildConversationStateFixture(threadId, "gpt-old-codex", {
+          provider: provider ?? "codex",
+          turnItems: [
+            {
+              id: "agent-recovered-1",
+              type: "agentMessage",
+              text: "route-recovered",
+            },
+          ],
+        }),
+      };
+    };
+
+    liveStateResolver = (targetThreadId: string, provider: ProviderId) => ({
+      kind: "readLiveState",
+      threadId: targetThreadId,
+      ownerClientId: "client-1",
+      conversationState: buildConversationStateFixture(
+        targetThreadId,
+        "gpt-old-codex",
+        {
+          provider,
+          turnItems: [
+            {
+              id: "agent-recovered-1",
+              type: "agentMessage",
+              text: "route-recovered",
+            },
+          ],
+        },
+      ),
+      liveStateError: null,
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("route-recovered")).toBeTruthy();
+    await waitFor(() =>
+      expect(
+        screen.queryByText(`Thread ${threadId} is not registered`),
+      ).toBeNull(),
+    );
+  });
+
+  it("exposes labeled trace inputs on direct debug routes", async () => {
+    const threadId = "thread-debug-route";
+    window.history.replaceState(null, "", `/threads/${threadId}/debug`);
+
+    readThreadResolver = (
+      targetThreadId: string,
+      provider: ProviderId | null,
+    ) => {
+      if (targetThreadId !== threadId) {
+        return null;
+      }
+      return {
+        ok: true,
+        thread: buildConversationStateFixture(threadId, "gpt-old-codex", {
+          provider: provider ?? "codex",
+          turnItems: [
+            {
+              id: "agent-debug-1",
+              type: "agentMessage",
+              text: "debug-route-loaded",
+            },
+          ],
+        }),
+      };
+    };
+
+    liveStateResolver = (targetThreadId: string, provider: ProviderId) => ({
+      kind: "readLiveState",
+      threadId: targetThreadId,
+      ownerClientId: "client-1",
+      conversationState: buildConversationStateFixture(
+        targetThreadId,
+        "gpt-old-codex",
+        {
+          provider,
+          turnItems: [
+            {
+              id: "agent-debug-1",
+              type: "agentMessage",
+              text: "debug-route-loaded",
+            },
+          ],
+        },
+      ),
+      liveStateError: null,
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Trace")).toBeTruthy();
+
+    const traceLabelInput = screen.getByLabelText("Trace label");
+    expect(traceLabelInput.getAttribute("name")).toBe("traceLabel");
+
+    const traceNoteInput = screen.getByLabelText("Trace marker note");
+    expect(traceNoteInput.getAttribute("name")).toBe("traceNote");
+  });
+
+  it("normalizes windows project paths and disambiguates duplicate basenames", async () => {
+    projectDirectoriesFixture = {
+      codex: [
+        "c:\\Users\\magon\\Documents\\Code\\Projects\\AgentWorkingHome_P",
+        "c:\\Users\\magon\\Documents\\Code\\Projects\\P_AgentTools",
+      ],
+      opencode: [],
+    };
+
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: "thread-agent-home-upper",
+          provider: "codex",
+          preview: "first agent home thread",
+          createdAt: 1700000000,
+          updatedAt: 1700000030,
+          cwd: "C:\\Users\\magon\\Documents\\Code\\Projects\\AgentWorkingHome_P",
+          source: "vscode",
+        },
+        {
+          id: "thread-agent-home-lower",
+          provider: "codex",
+          preview: "second agent home thread",
+          createdAt: 1700000001,
+          updatedAt: 1700000031,
+          cwd: "c:\\Users\\magon\\Documents\\Code\\Projects\\AgentWorkingHome_P",
+          source: "vscode",
+        },
+        {
+          id: "thread-worktree-tools",
+          provider: "codex",
+          preview: "worktree tools thread",
+          createdAt: 1700000002,
+          updatedAt: 1700000032,
+          cwd: "C:\\Users\\magon\\.codex\\worktrees\\79d7\\P_AgentTools",
+          source: "vscode",
+        },
+        {
+          id: "thread-project-tools",
+          provider: "codex",
+          preview: "project tools thread",
+          createdAt: 1700000003,
+          updatedAt: 1700000033,
+          cwd: "c:\\Users\\magon\\Documents\\Code\\Projects\\P_AgentTools",
+          source: "vscode",
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    render(<App />);
+
+    expect(await screen.findByText("AgentWorkingHome_P")).toBeTruthy();
+    expect(screen.getAllByText("AgentWorkingHome_P").length).toBe(1);
+    expect(screen.getAllByText("P_AgentTools").length).toBe(2);
+    expect(
+      screen.getByText("C:/Users/magon/.codex/worktrees/79d7/P_AgentTools"),
+    ).toBeTruthy();
+    expect(
+      screen.getByText("c:/Users/magon/Documents/Code/Projects/P_AgentTools"),
+    ).toBeTruthy();
+    expect(screen.getByText("History")).toBeTruthy();
+  });
+
+  it("does not mark groups as historical when the provider cannot list project directories", async () => {
+    featureMatrixFixture = {
+      ok: true,
+      features: {
+        codex: buildFeatureSet(
+          {
+            ...codexCapabilities,
+            canListProjectDirectories: false,
+          },
+          {
+            enabled: true,
+            connected: true,
+          },
+        ),
+        opencode: buildFeatureSet(opencodeCapabilities, {
+          enabled: false,
+          connected: false,
+        }),
+      },
+    };
+
+    projectDirectoriesFixture = {
+      codex: [],
+      opencode: [],
+    };
+
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: "thread-agent-home-current",
+          provider: "codex",
+          preview: "current project thread",
+          createdAt: 1700000000,
+          updatedAt: 1700000030,
+          cwd: "C:\\Users\\magon\\Documents\\Code\\Projects\\AgentWorkingHome_P",
+          source: "vscode",
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    render(<App />);
+
+    const projectButton = await screen.findByRole("button", {
+      name: /AgentWorkingHome_P/,
+    });
+    expect(projectButton.textContent ?? "").not.toContain("HISTORY");
+    expect(screen.queryByText("History")).toBeNull();
+  });
+
+  it("uses selected thread polling only as an SSE fallback in chat view", async () => {
+    const threadId = "thread-live-fallback";
+    window.history.replaceState(null, "", `/threads/${threadId}`);
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: threadId,
+          provider: "codex",
+          preview: "live fallback thread",
+          createdAt: 1700000000,
+          updatedAt: 1700000030,
+          cwd: "C:\\Users\\magon\\Documents\\Code\\Projects\\AgentWorkingHome_P",
+          source: "vscode",
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    let readThreadCallCount = 0;
+    readThreadResolver = (
+      targetThreadId: string,
+      provider: ProviderId | null,
+    ) => {
+      if (targetThreadId !== threadId) {
+        return null;
+      }
+      readThreadCallCount += 1;
+      return {
+        ok: true,
+        thread: buildConversationStateFixture(threadId, "gpt-old-codex", {
+          provider: provider ?? "codex",
+          turnItems: [
+            {
+              id: "agent-live-fallback-1",
+              type: "agentMessage",
+              text: "live-fallback-ready",
+            },
+          ],
+        }),
+      };
+    };
+    liveStateResolver = (targetThreadId: string, provider: ProviderId) => ({
+      kind: "readLiveState",
+      threadId: targetThreadId,
+      ownerClientId: "client-1",
+      conversationState: buildConversationStateFixture(
+        targetThreadId,
+        "gpt-old-codex",
+        {
+          provider,
+          turnItems: [
+            {
+              id: "agent-live-fallback-1",
+              type: "agentMessage",
+              text: "live-fallback-ready",
+            },
+          ],
+        },
+      ),
+      liveStateError: null,
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("live-fallback-ready")).toBeTruthy();
+
+    await act(async () => {
+      MockEventSource.emitOpen();
+      await new Promise((resolve) => window.setTimeout(resolve, 300));
+    });
+
+    const connectedCallCount = readThreadCallCount;
+
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 1400));
+    });
+
+    expect(readThreadCallCount).toBe(connectedCallCount);
+
+    await act(async () => {
+      MockEventSource.emitError();
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(readThreadCallCount).toBeGreaterThan(connectedCallCount),
+    );
+  });
+
+  it("reloads a larger chat window when showing older messages", async () => {
+    const threadId = "thread-windowed-chat";
+    const turnItems: UnifiedItem[] = Array.from({ length: 95 }, (_, index) => ({
+      id: `agent-windowed-${index}`,
+      type: "agentMessage",
+      text: `windowed-message-${index}`,
+    }));
+
+    window.history.replaceState(null, "", `/threads/${threadId}`);
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: threadId,
+          provider: "codex",
+          preview: "windowed thread",
+          createdAt: 1700000000,
+          updatedAt: 1700000030,
+          cwd: "C:\\Users\\magon\\Documents\\Code\\Projects\\AgentWorkingHome_P",
+          source: "vscode",
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    let readThreadCallCount = 0;
+    readThreadResolver = (
+      targetThreadId: string,
+      provider: ProviderId | null,
+    ) => {
+      if (targetThreadId !== threadId) {
+        return null;
+      }
+      readThreadCallCount += 1;
+      return {
+        ok: true,
+        thread: buildConversationStateFixture(threadId, "gpt-old-codex", {
+          provider: provider ?? "codex",
+          turnItems,
+        }),
+      };
+    };
+    liveStateResolver = (targetThreadId: string, provider: ProviderId) => ({
+      kind: "readLiveState",
+      threadId: targetThreadId,
+      ownerClientId: "client-1",
+      conversationState: buildConversationStateFixture(
+        targetThreadId,
+        "gpt-old-codex",
+        {
+          provider,
+          turnItems,
+        },
+      ),
+      liveStateError: null,
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("windowed-message-94")).toBeTruthy();
+    expect(screen.queryByText("windowed-message-0")).toBeNull();
+    const initialReadThreadCallCount = readThreadCallCount;
+
+    fireEvent.click(await screen.findByRole("button", { name: /show older messages/i }));
+
+    expect(await screen.findByText("windowed-message-0")).toBeTruthy();
+    expect(readThreadCallCount).toBeGreaterThan(initialReadThreadCallCount);
+  });
+
+  it("ignores stale chat-window loads after a newer debug load finishes first", async () => {
+    const threadId = "thread-load-race";
+    const staleChatLoad = createDeferred<{
+      ok: true;
+      thread: UnifiedThreadFixture;
+    }>();
+    const freshDebugLoad = createDeferred<{
+      ok: true;
+      thread: UnifiedThreadFixture;
+    }>();
+
+    window.history.replaceState(null, "", `/threads/${threadId}`);
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: threadId,
+          provider: "codex",
+          preview: "race thread",
+          createdAt: 1700000000,
+          updatedAt: 1700000030,
+          cwd: "C:\\Users\\magon\\Documents\\Code\\Projects\\AgentWorkingHome_P",
+          source: "vscode",
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    readThreadResolver = (
+      targetThreadId: string,
+      provider: ProviderId | null,
+      options,
+    ) => {
+      if (targetThreadId !== threadId) {
+        return null;
+      }
+
+      if (options?.maxRenderableItems === null) {
+        return freshDebugLoad.promise;
+      }
+
+      return staleChatLoad.promise;
+    };
+    liveStateResolver = (targetThreadId: string, _provider: ProviderId) => ({
+      kind: "readLiveState",
+      threadId: targetThreadId,
+      ownerClientId: "client-1",
+      conversationState: null,
+      liveStateError: null,
+    });
+
+    render(<App />);
+
+    await act(async () => {
+      window.history.replaceState(null, "", `/threads/${threadId}/debug`);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      freshDebugLoad.resolve({
+        ok: true,
+        thread: {
+          ...buildConversationStateFixture(threadId, "gpt-old-codex", {
+            provider: "codex",
+            turnItems: [
+              {
+                id: "agent-debug-fresh-1",
+                type: "agentMessage",
+                text: "fresh-debug-state",
+              },
+            ],
+          }),
+          title: "Fresh Debug Title",
+        },
+      });
+      await Promise.resolve();
+    });
+
+    expect((await screen.findAllByText("Fresh Debug Title")).length).toBeGreaterThan(
+      0,
+    );
+
+    await act(async () => {
+      staleChatLoad.resolve({
+        ok: true,
+        thread: {
+          ...buildConversationStateFixture(threadId, "gpt-old-codex", {
+            provider: "codex",
+            turnItems: [
+              {
+                id: "agent-chat-stale-1",
+                type: "agentMessage",
+                text: "stale-chat-state",
+              },
+            ],
+          }),
+          title: "Stale Chat Title",
+        },
+      });
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(screen.queryByText("Stale Chat Title")).toBeNull(),
+    );
+    expect(screen.getAllByText("Fresh Debug Title").length).toBeGreaterThan(0);
+  });
+
   it("hides mode controls when capability is disabled", async () => {
     featureMatrixFixture = {
       ok: true,
@@ -1027,7 +1816,9 @@ describe("App", () => {
     };
 
     render(<App />);
-    expect(await screen.findByRole("button", { name: "site" })).toBeTruthy();
+    expect(
+      await screen.findByRole("button", { name: /site/ }),
+    ).toBeTruthy();
   });
 
   it("keeps manual group order over automatic recency sort", async () => {
@@ -1070,8 +1861,8 @@ describe("App", () => {
 
     render(<App />);
 
-    const projA = await screen.findByRole("button", { name: "proj-a" });
-    const projB = await screen.findByRole("button", { name: "proj-b" });
+    const projA = await screen.findByRole("button", { name: /proj-a/ });
+    const projB = await screen.findByRole("button", { name: /proj-b/ });
 
     expect(
       projB.compareDocumentPosition(projA) & Node.DOCUMENT_POSITION_FOLLOWING,

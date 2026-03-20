@@ -656,7 +656,11 @@ export async function listSidebarThreads(options: {
 
 export async function readThread(
   threadId: string,
-  options?: { includeTurns?: boolean; provider?: AgentId },
+  options?: {
+    includeTurns?: boolean;
+    provider?: AgentId;
+    maxRenderableItems?: number;
+  },
 ): Promise<z.infer<typeof ReadThreadResponseSchema>> {
   const params = new URLSearchParams();
   if (typeof options?.provider === "string") {
@@ -664,6 +668,13 @@ export async function readThread(
   }
   if (typeof options?.includeTurns === "boolean") {
     params.set("includeTurns", options.includeTurns ? "1" : "0");
+  }
+  if (
+    typeof options?.maxRenderableItems === "number" &&
+    Number.isInteger(options.maxRenderableItems) &&
+    options.maxRenderableItems > 0
+  ) {
+    params.set("maxRenderableItems", String(options.maxRenderableItems));
   }
 
   const query = params.toString();
@@ -750,11 +761,17 @@ export async function listModels(
 export async function getLiveState(
   threadId: string,
   provider: AgentId,
+  options?: { maxRenderableItems?: number },
 ): Promise<z.infer<typeof LiveStateResponseSchema>> {
   const result = await runUnifiedCommand({
     kind: "readLiveState",
     provider,
     threadId,
+    ...(typeof options?.maxRenderableItems === "number" &&
+    Number.isInteger(options.maxRenderableItems) &&
+    options.maxRenderableItems > 0
+      ? { maxRenderableItems: options.maxRenderableItems }
+      : {}),
   });
 
   if (result.kind !== "readLiveState") {

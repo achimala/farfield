@@ -26,6 +26,7 @@ import {
   ChildProcessAppServerTransport,
   type ChildProcessAppServerTransportOptions
 } from "./app-server-transport.js";
+import { AppServerRpcError } from "./errors.js";
 
 function parseWithSchema<T>(
   schema: z.ZodType<T, z.ZodTypeDef, unknown>,
@@ -37,6 +38,19 @@ function parseWithSchema<T>(
     throw ProtocolValidationError.fromZod(context, parsed.error);
   }
   return parsed.data;
+}
+
+function isUnsupportedThreadReadRpcError(error: unknown): error is AppServerRpcError {
+  if (!(error instanceof AppServerRpcError)) {
+    return false;
+  }
+
+  if (error.code !== -32600) {
+    return false;
+  }
+
+  const normalized = error.message.toLowerCase();
+  return normalized.includes("unknown variant") && normalized.includes("thread/read");
 }
 
 export interface ListThreadsOptions {
@@ -190,12 +204,33 @@ export class AppServerClient {
   }
 
   public async readThread(threadId: string, includeTurns = true): Promise<AppServerReadThreadResponse> {
-    const result = await this.transport.request("thread/read", {
-      threadId,
-      includeTurns
-    });
+    try {
+      const result = await this.transport.request("thread/read", {
+        threadId,
+        includeTurns
+      });
 
-    return parseWithSchema(AppServerReadThreadResponseSchema, result, "AppServerReadThreadResponse");
+      return parseWithSchema(AppServerReadThreadResponseSchema, result, "AppServerReadThreadResponse");
+    } catch (error) {
+      if (!isUnsupportedThreadReadRpcError(error)) {
+        throw error;
+      }
+
+      const resumed = await this.resumeThread(threadId, {
+        persistExtendedHistory: includeTurns
+      });
+      if (includeTurns) {
+        return resumed;
+      }
+
+      return {
+        ...resumed,
+        thread: {
+          ...resumed.thread,
+          turns: []
+        }
+      };
+    }
   }
 
   public async listModels(limit = 100): Promise<AppServerListModelsResponse> {
