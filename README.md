@@ -124,10 +124,11 @@ FARFIELD_API_ORIGIN=http://127.0.0.1:4311 bun run start
 
 ### React Compiler and production profiling
 
-Frontend build supports two optional flags:
+Frontend build supports optional flags:
 
 - `REACT_COMPILER=0` disables React Compiler transform (compiler is enabled by default for `vite build`).
 - `REACT_PROFILING=1` uses React profiling build so React DevTools Profiler works in production preview.
+- `DISABLE_RATE_LIMITS=1` disables quota/rate-limit fetching and hides usage badges in the UI. Useful with custom Codex-compatible backends that do not implement account quota endpoints.
 
 Example A/B commands:
 

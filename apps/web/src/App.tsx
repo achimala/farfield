@@ -562,6 +562,8 @@ const PROVIDER_CATALOG_CACHE_TTL_MS = 20_000;
 const CORE_REFRESH_INTERVAL_MS = 5_000;
 const SELECTED_THREAD_REFRESH_INTERVAL_MS = 1_000;
 const DEBUG_UI_ENABLED = import.meta.env.MODE !== "production";
+const DISABLE_RATE_LIMITS =
+  import.meta.env["VITE_DISABLE_RATE_LIMITS"] === "true";
 const MOBILE_SIDEBAR_WIDTH_PX = 256;
 const MOBILE_SWIPE_EDGE_PX = 24;
 const MOBILE_SIDEBAR_TOGGLE_THRESHOLD_PX = 88;
@@ -1519,7 +1521,8 @@ export function App(): React.JSX.Element {
     selectedAgentDescriptor,
     "createThread",
   );
-  const showUsageBadges = activeThreadAgentId === "codex";
+  const showUsageBadges =
+    activeThreadAgentId === "codex" && !DISABLE_RATE_LIMITS;
   const sessionTokenUsage = useMemo(() => {
     const fromConversationState = parseTokenUsageInfo(
       conversationState?.latestTokenUsageInfo,
@@ -1770,7 +1773,9 @@ export function App(): React.JSX.Element {
       : Promise.resolve(cachedAgents.value);
 
     const healthPromise = getHealth();
-    const rateLimitsPromise = getAccountRateLimits().catch(() => null);
+    const rateLimitsPromise = DISABLE_RATE_LIMITS
+      ? Promise.resolve(null)
+      : getAccountRateLimits().catch(() => null);
     const sidebarPromise = listSidebarThreads({
       limit: 80,
       archived: false,

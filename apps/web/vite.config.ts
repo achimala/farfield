@@ -19,12 +19,17 @@ const FarfieldApiOriginEnvSchema = z.object({
     .enum(["0", "1", "true", "false"])
     .transform((value) => value === "1" || value === "true")
     .optional(),
+  DISABLE_RATE_LIMITS: z
+    .enum(["0", "1", "true", "false"])
+    .transform((value) => value === "1" || value === "true")
+    .optional(),
 });
 const parsedEnv = FarfieldApiOriginEnvSchema.safeParse({
   FARFIELD_API_ORIGIN: process.env["FARFIELD_API_ORIGIN"],
   REACT_COMPILER: process.env["REACT_COMPILER"],
   REACT_PROFILING: process.env["REACT_PROFILING"],
   PWA_ENABLED: process.env["PWA_ENABLED"],
+  DISABLE_RATE_LIMITS: process.env["DISABLE_RATE_LIMITS"],
 });
 if (!parsedEnv.success) {
   const issueDetails = parsedEnv.error.issues
@@ -42,6 +47,7 @@ const apiOrigin =
 const reactCompilerOverride = parsedEnv.data.REACT_COMPILER ?? null;
 const reactProfilingEnabled = parsedEnv.data.REACT_PROFILING ?? false;
 const pwaEnabled = parsedEnv.data.PWA_ENABLED ?? true;
+const disableRateLimits = parsedEnv.data.DISABLE_RATE_LIMITS ?? false;
 
 const resolveAlias: Record<string, string> = {
   "@": path.resolve(__dirname, "./src"),
@@ -58,6 +64,11 @@ export default defineConfig(({ command }) => {
       : reactCompilerOverride;
 
   return {
+    define: {
+      "import.meta.env.VITE_DISABLE_RATE_LIMITS": JSON.stringify(
+        disableRateLimits ? "true" : "false",
+      ),
+    },
     plugins: [
       react(
         reactCompilerEnabled
