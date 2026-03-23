@@ -39,6 +39,43 @@ function parseWithSchema<T>(
   return parsed.data;
 }
 
+const ThreadReadRpcErrorDataSchema = z
+  .object({
+    action: z.string().optional(),
+    method: z.string().optional(),
+    variant: z.string().optional()
+  })
+  .passthrough();
+
+const AppServerRpcErrorLikeSchema = z
+  .object({
+    code: z.number(),
+    data: z.unknown().optional(),
+    message: z.string()
+  })
+  .passthrough();
+
+function isUnsupportedThreadReadRpcError(error: unknown): boolean {
+  const parsedError = AppServerRpcErrorLikeSchema.safeParse(error);
+  if (!parsedError.success || parsedError.data.code !== -32600) {
+    return false;
+  }
+
+  const parsedData = ThreadReadRpcErrorDataSchema.safeParse(parsedError.data.data);
+  if (parsedData.success) {
+    const method = parsedData.data.method ?? parsedData.data.action;
+    if (
+      method === "thread/read" &&
+      parsedData.data.variant?.toLowerCase() === "unknown"
+    ) {
+      return true;
+    }
+  }
+
+  const normalized = parsedError.data.message.toLowerCase();
+  return normalized.includes("unknown variant") && normalized.includes("thread/read");
+}
+
 export interface ListThreadsOptions {
   limit: number;
   archived: boolean;
@@ -190,12 +227,33 @@ export class AppServerClient {
   }
 
   public async readThread(threadId: string, includeTurns = true): Promise<AppServerReadThreadResponse> {
-    const result = await this.transport.request("thread/read", {
-      threadId,
-      includeTurns
-    });
+    try {
+      const result = await this.transport.request("thread/read", {
+        threadId,
+        includeTurns
+      });
 
-    return parseWithSchema(AppServerReadThreadResponseSchema, result, "AppServerReadThreadResponse");
+      return parseWithSchema(AppServerReadThreadResponseSchema, result, "AppServerReadThreadResponse");
+    } catch (error) {
+      if (!isUnsupportedThreadReadRpcError(error)) {
+        throw error;
+      }
+
+      const resumed = await this.resumeThread(threadId, {
+        persistExtendedHistory: includeTurns
+      });
+      if (includeTurns) {
+        return resumed;
+      }
+
+      return {
+        ...resumed,
+        thread: {
+          ...resumed.thread,
+          turns: []
+        }
+      };
+    }
   }
 
   public async listModels(limit = 100): Promise<AppServerListModelsResponse> {

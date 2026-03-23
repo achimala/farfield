@@ -1,3 +1,6 @@
+import { access, readFile, readdir } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import {
   AppServerClient,
   AppServerRpcError,
@@ -71,6 +74,30 @@ export interface CodexAgentOptions {
 }
 
 const ANSI_ESCAPE_REGEX = /\u001B\[[0-?]*[ -/]*[@-~]/g;
+const MAX_TRACKED_THREAD_RUNTIME_STATES = 80;
+const MAX_STREAM_EVENTS_PER_THREAD = 120;
+const ARCHIVED_TOOL_ARGUMENT_PREVIEW_MAX_CHARS = 600;
+const ARCHIVED_TOOL_TEXT_PREVIEW_MAX_CHARS = 240;
+const loggedArchivedUnknownPayloadTypes = new Set<string>();
+const loggedArchivedMalformedJsonlLineKeys = new Set<string>();
+
+type ArchivedJsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | ArchivedJsonValue[]
+  | { [key: string]: ArchivedJsonValue };
+
+type ArchivedThreadItem = ThreadConversationState["turns"][number]["items"][number];
+type ArchivedDynamicToolCallItem = Extract<
+  ArchivedThreadItem,
+  { type: "dynamicToolCall" }
+>;
+type ArchivedDynamicToolContentItem = NonNullable<
+  ArchivedDynamicToolCallItem["contentItems"]
+>[number];
+type ArchivedTodoListItem = Extract<ArchivedThreadItem, { type: "todoList" }>;
 
 export class CodexAgentAdapter implements AgentAdapter {
   public readonly id = "codex";
@@ -85,7 +112,7 @@ export class CodexAgentAdapter implements AgentAdapter {
     canReadRateLimits: true,
   };
 
-  private readonly appClient: AppServerClient;
+  protected readonly appClient: AppServerClient;
   private readonly ipcClient: DesktopIpcClient;
   private readonly service: CodexMonitorService;
   private readonly onStateChange: (() => void) | null;
@@ -102,9 +129,17 @@ export class CodexAgentAdapter implements AgentAdapter {
     StreamSnapshotOrigin
   >();
   private readonly threadTitleById = new Map<string, string | null>();
+  private readonly trackedThreadIds = new Map<string, true>();
   private readonly ipcFrameListeners = new Set<
     (event: CodexIpcFrameEvent) => void
   >();
+  private maxTrackedThreadCountSeen = 0;
+  private maxTotalBufferedStreamEventCountSeen = 0;
+  private maxBufferedStreamEventsPerThreadSeen = 0;
+  private archivedRestoreHitCount = 0;
+  private archivedRestoreFailureCount = 0;
+  private streamParseFailureCount = 0;
+  private streamReductionFailureCount = 0;
   private lastKnownOwnerClientId: string | null = null;
 
   private runtimeState: CodexAgentRuntimeState = {
@@ -148,7 +183,7 @@ export class CodexAgentAdapter implements AgentAdapter {
       });
 
       if (!state.connected) {
-        this.scheduleIpcReconnect();
+        this.scheduleReconnect();
       } else if (this.reconnectTimer) {
         clearTimeout(this.reconnectTimer);
         this.reconnectTimer = null;
@@ -184,10 +219,10 @@ export class CodexAgentAdapter implements AgentAdapter {
       if (frame.type === "broadcast" && threadId) {
         const current = this.streamEventsByThreadId.get(threadId) ?? [];
         current.push(frame);
-        if (current.length > 400) {
-          current.splice(0, current.length - 400);
+        if (current.length > MAX_STREAM_EVENTS_PER_THREAD) {
+          current.splice(0, current.length - MAX_STREAM_EVENTS_PER_THREAD);
         }
-        this.streamEventsByThreadId.set(threadId, current);
+        this.setTrackedThreadEvents(threadId, current);
       }
 
       if (
@@ -210,7 +245,7 @@ export class CodexAgentAdapter implements AgentAdapter {
       }
 
       if (sourceClientId) {
-        this.threadOwnerById.set(conversationId, sourceClientId);
+        this.setTrackedThreadOwner(conversationId, sourceClientId);
       }
 
       try {
@@ -220,8 +255,7 @@ export class CodexAgentAdapter implements AgentAdapter {
         }
 
         const snapshot = parsedBroadcast.params.change.conversationState;
-        this.streamSnapshotByThreadId.set(conversationId, snapshot);
-        this.streamSnapshotOriginByThreadId.set(conversationId, "stream");
+        this.setTrackedThreadSnapshot(conversationId, snapshot, "stream");
         this.setThreadTitle(conversationId, snapshot.title);
       } catch (error) {
         logger.error(
@@ -251,6 +285,43 @@ export class CodexAgentAdapter implements AgentAdapter {
 
   public getThreadOwnerCount(): number {
     return this.threadOwnerById.size;
+  }
+
+  public getTrackedThreadRuntimeCounts(): {
+    trackedThreadCount: number;
+    streamEventThreadCount: number;
+    totalBufferedStreamEventCount: number;
+    streamSnapshotThreadCount: number;
+    threadTitleCount: number;
+    maxTrackedThreadCountSeen: number;
+    maxTotalBufferedStreamEventCountSeen: number;
+    maxBufferedStreamEventsPerThreadSeen: number;
+    archivedRestoreHitCount: number;
+    archivedRestoreFailureCount: number;
+    streamParseFailureCount: number;
+    streamReductionFailureCount: number;
+  } {
+    let totalBufferedStreamEventCount = 0;
+    for (const events of this.streamEventsByThreadId.values()) {
+      totalBufferedStreamEventCount += events.length;
+    }
+
+    return {
+      trackedThreadCount: this.trackedThreadIds.size,
+      streamEventThreadCount: this.streamEventsByThreadId.size,
+      totalBufferedStreamEventCount,
+      streamSnapshotThreadCount: this.streamSnapshotByThreadId.size,
+      threadTitleCount: this.threadTitleById.size,
+      maxTrackedThreadCountSeen: this.maxTrackedThreadCountSeen,
+      maxTotalBufferedStreamEventCountSeen:
+        this.maxTotalBufferedStreamEventCountSeen,
+      maxBufferedStreamEventsPerThreadSeen:
+        this.maxBufferedStreamEventsPerThreadSeen,
+      archivedRestoreHitCount: this.archivedRestoreHitCount,
+      archivedRestoreFailureCount: this.archivedRestoreFailureCount,
+      streamParseFailureCount: this.streamParseFailureCount,
+      streamReductionFailureCount: this.streamReductionFailureCount,
+    };
   }
 
   public isEnabled(): boolean {
@@ -415,53 +486,94 @@ export class CodexAgentAdapter implements AgentAdapter {
 
     let result: Awaited<ReturnType<typeof readThreadWithOption>>;
     try {
-      result = await readThreadWithOption(input.includeTurns);
+      try {
+        result = await readThreadWithOption(input.includeTurns);
+      } catch (error) {
+        const typedError = error instanceof Error ? error : null;
+        const shouldTryResume = shouldAttemptArchivedThreadRestoreForReadError(
+          typedError,
+          input.includeTurns,
+        );
+        if (!shouldTryResume) {
+          throw error;
+        }
+
+        try {
+          await this.resumeThread(input.threadId);
+          result = await readThreadWithOption(input.includeTurns);
+        } catch (resumeRetryError) {
+          const typedResumeRetryError =
+            resumeRetryError instanceof Error ? resumeRetryError : null;
+          const shouldRetryWithoutTurns =
+            input.includeTurns &&
+            (isThreadNotMaterializedIncludeTurnsAppServerRpcError(
+              typedResumeRetryError,
+            ) ||
+              isThreadNoRolloutIncludeTurnsAppServerRpcError(
+                typedResumeRetryError,
+              ));
+          if (!shouldRetryWithoutTurns) {
+            throw resumeRetryError;
+          }
+          result = await readThreadWithOption(false);
+        }
+      }
     } catch (error) {
       const typedError = error instanceof Error ? error : null;
-      const shouldTryResume =
-        isThreadNotLoadedAppServerRpcError(typedError) ||
-        (input.includeTurns &&
-          (isThreadNotMaterializedIncludeTurnsAppServerRpcError(typedError) ||
-            isThreadNoRolloutIncludeTurnsAppServerRpcError(typedError)));
-      if (!shouldTryResume) {
+      if (
+        !shouldAttemptArchivedThreadRestoreForReadError(
+          typedError,
+          input.includeTurns,
+        )
+      ) {
         throw error;
       }
-
-      try {
-        await this.resumeThread(input.threadId);
-        result = await readThreadWithOption(input.includeTurns);
-      } catch (resumeRetryError) {
-        const typedResumeRetryError =
-          resumeRetryError instanceof Error ? resumeRetryError : null;
-        const shouldRetryWithoutTurns =
-          input.includeTurns &&
-          (isThreadNotMaterializedIncludeTurnsAppServerRpcError(
-            typedResumeRetryError,
-          ) ||
-            isThreadNoRolloutIncludeTurnsAppServerRpcError(
-              typedResumeRetryError,
-            ));
-        if (!shouldRetryWithoutTurns) {
-          throw resumeRetryError;
-        }
-        result = await readThreadWithOption(false);
+      const restoredThread = await this.restoreArchivedThreadState(
+        input.threadId,
+        input.includeTurns,
+      );
+      if (!restoredThread) {
+        throw error;
       }
+      this.patchRuntimeState({
+        lastError: null,
+      });
+      result = {
+        thread: restoredThread,
+      };
     }
-    const parsedThread = parseThreadConversationState(result.thread);
+    let parsedThread: ThreadConversationState;
+    try {
+      parsedThread = parseThreadConversationState(result.thread);
+    } catch (error) {
+      const restoredThread = await this.restoreArchivedThreadState(
+        input.threadId,
+        input.includeTurns,
+      );
+      if (!restoredThread) {
+        throw error;
+      }
+      this.patchRuntimeState({
+        lastError: null,
+      });
+      parsedThread = restoredThread;
+    }
     const existingSnapshot = this.streamSnapshotByThreadId.get(input.threadId);
     const shouldStoreSnapshot =
       input.includeTurns ||
       parsedThread.turns.length > 0 ||
       existingSnapshot === undefined;
     if (shouldStoreSnapshot) {
-      this.streamSnapshotByThreadId.set(input.threadId, parsedThread);
       const snapshotOrigin: StreamSnapshotOrigin =
         input.includeTurns && parsedThread.turns.length > 0
           ? "readThreadWithTurns"
           : "readThread";
-      this.streamSnapshotOriginByThreadId.set(input.threadId, snapshotOrigin);
+      this.setTrackedThreadSnapshot(input.threadId, parsedThread, snapshotOrigin);
     }
     this.setThreadTitle(input.threadId, parsedThread.title);
+    this.patchRuntimeState({
+      lastError: null,
+    });
     return {
       thread: parsedThread,
     };
@@ -489,7 +601,7 @@ export class CodexAgentAdapter implements AgentAdapter {
     })();
 
     if (ownerClientId && this.isIpcReady()) {
-      this.threadOwnerById.set(input.threadId, ownerClientId);
+      this.setTrackedThreadOwner(input.threadId, ownerClientId);
       try {
         await this.service.sendMessage({
           threadId: input.threadId,
@@ -642,18 +754,21 @@ export class CodexAgentAdapter implements AgentAdapter {
         () => this.appClient.readThread(input.threadId, true),
       );
       const parsedThread = parseThreadConversationState(refreshedThread.thread);
-      this.streamSnapshotByThreadId.set(input.threadId, parsedThread);
-      this.streamSnapshotOriginByThreadId.set(input.threadId, "readThreadWithTurns");
       this.setThreadTitle(input.threadId, parsedThread.title);
 
       const currentEvents = this.streamEventsByThreadId.get(input.threadId) ?? [];
       currentEvents.push(
         buildSyntheticSnapshotEvent(input.threadId, ownerClientIdForResult, parsedThread),
       );
-      if (currentEvents.length > 400) {
-        currentEvents.splice(0, currentEvents.length - 400);
+      if (currentEvents.length > MAX_STREAM_EVENTS_PER_THREAD) {
+        currentEvents.splice(0, currentEvents.length - MAX_STREAM_EVENTS_PER_THREAD);
       }
-      this.streamEventsByThreadId.set(input.threadId, currentEvents);
+      this.setTrackedThreadSnapshot(
+        input.threadId,
+        parsedThread,
+        "readThreadWithTurns",
+      );
+      this.setTrackedThreadEvents(input.threadId, currentEvents);
 
       return {
         ownerClientId: ownerClientIdForResult,
@@ -668,7 +783,7 @@ export class CodexAgentAdapter implements AgentAdapter {
       input.ownerClientId,
       this.lastKnownOwnerClientId ?? undefined,
     );
-    this.threadOwnerById.set(input.threadId, ownerClientId);
+    this.setTrackedThreadOwner(input.threadId, ownerClientId);
 
     const pendingIpcRequest = await this.resolvePendingIpcRequest(
       input.threadId,
@@ -730,12 +845,20 @@ export class CodexAgentAdapter implements AgentAdapter {
   }
 
   public async readLiveState(threadId: string): Promise<AgentThreadLiveState> {
-    const snapshotState = this.streamSnapshotByThreadId.get(threadId) ?? null;
-    const snapshotOrigin =
+    this.touchTrackedThread(threadId);
+    let snapshotState = this.streamSnapshotByThreadId.get(threadId) ?? null;
+    let snapshotOrigin =
       this.streamSnapshotOriginByThreadId.get(threadId) ?? null;
     const ownerClientId =
       this.threadOwnerById.get(threadId) ?? this.lastKnownOwnerClientId ?? null;
     const rawEvents = this.streamEventsByThreadId.get(threadId) ?? [];
+    if (rawEvents.length === 0 && snapshotState === null) {
+      const restoredState = await this.restoreArchivedThreadState(threadId, true);
+      if (restoredState) {
+        snapshotState = restoredState;
+        snapshotOrigin = "readThreadWithTurns";
+      }
+    }
     if (rawEvents.length === 0) {
       return {
         ownerClientId,
@@ -744,37 +867,32 @@ export class CodexAgentAdapter implements AgentAdapter {
       };
     }
 
-    const events: ReturnType<typeof parseThreadStreamStateChangedBroadcast>[] =
-      [];
-
-    for (let eventIndex = 0; eventIndex < rawEvents.length; eventIndex += 1) {
-      const event = rawEvents[eventIndex];
-      try {
-        events.push(parseThreadStreamStateChangedBroadcast(event));
-      } catch (error) {
-        logger.error(
-          {
-            threadId,
-            eventIndex,
-            error: toErrorMessage(error),
-            ...(error instanceof ProtocolValidationError
-              ? { issues: error.issues }
-              : {}),
-          },
-          "thread-stream-event-parse-failed",
-        );
-        return {
-          ownerClientId,
-          conversationState: snapshotState,
-          liveStateError: {
-            kind: "parseFailed",
-            message: toErrorMessage(error),
-            eventIndex,
-            patchIndex: null,
-          },
-        };
-      }
+    const collectedEvents = collectThreadStreamStateChangedEvents(rawEvents);
+    if (collectedEvents.parseError) {
+      this.streamParseFailureCount += 1;
+      logger.error(
+        {
+          threadId,
+          eventIndex: collectedEvents.parseError.eventIndex,
+          error: collectedEvents.parseError.message,
+          ...(collectedEvents.parseError.issues
+            ? { issues: collectedEvents.parseError.issues }
+            : {}),
+        },
+        "thread-stream-event-parse-failed",
+      );
+      return {
+        ownerClientId,
+        conversationState: snapshotState,
+        liveStateError: {
+          kind: "parseFailed",
+          message: collectedEvents.parseError.message,
+          eventIndex: collectedEvents.parseError.eventIndex,
+          patchIndex: null,
+        },
+      };
     }
+    const events = collectedEvents.events;
 
     if (events.length === 0) {
       return {
@@ -806,7 +924,7 @@ export class CodexAgentAdapter implements AgentAdapter {
           buildSyntheticSnapshotEvent(
             threadId,
             ownerClientId ?? "farfield",
-            snapshotState,
+            snapshotState!,
           ),
           ...reductionEvents,
         ]
@@ -820,6 +938,7 @@ export class CodexAgentAdapter implements AgentAdapter {
         liveStateError: null,
       };
     } catch (error) {
+      this.streamReductionFailureCount += 1;
       const reductionErrorDetails =
         error instanceof ThreadStreamReductionError ? error.details : null;
       const eventIndex = reductionErrorDetails?.eventIndex ?? null;
@@ -853,6 +972,7 @@ export class CodexAgentAdapter implements AgentAdapter {
     threadId: string,
     limit: number,
   ): Promise<AgentThreadStreamEvents> {
+    this.touchTrackedThread(threadId);
     return {
       ownerClientId:
         this.threadOwnerById.get(threadId) ??
@@ -949,7 +1069,7 @@ export class CodexAgentAdapter implements AgentAdapter {
     this.notifyStateChanged();
   }
 
-  private patchRuntimeState(patch: Partial<CodexAgentRuntimeState>): void {
+  protected patchRuntimeState(patch: Partial<CodexAgentRuntimeState>): void {
     this.setRuntimeState({
       ...this.runtimeState,
       ...patch,
@@ -970,7 +1090,7 @@ export class CodexAgentAdapter implements AgentAdapter {
     }
   }
 
-  private scheduleIpcReconnect(): void {
+  private scheduleReconnect(): void {
     if (
       this.reconnectTimer ||
       !this.runtimeState.codexAvailable ||
@@ -994,6 +1114,9 @@ export class CodexAgentAdapter implements AgentAdapter {
       });
       return result;
     } catch (error) {
+      if (error instanceof AppServerTransportError) {
+        this.scheduleReconnect();
+      }
       this.patchRuntimeState({
         appReady: !(error instanceof AppServerTransportError),
         lastError: toErrorMessage(error),
@@ -1027,6 +1150,8 @@ export class CodexAgentAdapter implements AgentAdapter {
             lastError: message,
           });
           logger.warn({ error: message }, "codex-not-found");
+        } else {
+          this.scheduleReconnect();
         }
       }
 
@@ -1053,7 +1178,7 @@ export class CodexAgentAdapter implements AgentAdapter {
           ipcConnected: this.ipcClient.isConnected(),
           lastError: toErrorMessage(error),
         });
-        this.scheduleIpcReconnect();
+        this.scheduleReconnect();
       } finally {
         this.bootstrapInFlight = null;
       }
@@ -1103,6 +1228,59 @@ export class CodexAgentAdapter implements AgentAdapter {
         persistExtendedHistory: true,
       }),
     );
+  }
+
+  protected async restoreArchivedThreadState(
+    threadId: string,
+    includeTurns: boolean,
+  ): Promise<ThreadConversationState | null> {
+    const rolloutPath = await findArchivedRolloutPath(threadId);
+    if (!rolloutPath) {
+      return null;
+    }
+
+    try {
+      const content = await readFile(rolloutPath, "utf8");
+      const metadata = await readThreadIndexMetadata(threadId);
+      const restored = buildArchivedThreadConversationStateFromJsonl(
+        content,
+        threadId,
+        metadata,
+      );
+      if (!restored) {
+        this.archivedRestoreFailureCount += 1;
+        return null;
+      }
+
+      const validated = parseThreadConversationState(restored);
+      const normalized = includeTurns
+        ? validated
+        : {
+            ...validated,
+            turns: [],
+          };
+      if (validated.turns.length > 0) {
+        this.setTrackedThreadSnapshot(
+          threadId,
+          validated,
+          "readThreadWithTurns",
+        );
+      }
+      this.setThreadTitle(threadId, normalized.title);
+      this.archivedRestoreHitCount += 1;
+      return normalized;
+    } catch (error) {
+      this.archivedRestoreFailureCount += 1;
+      logger.warn(
+        {
+          threadId,
+          rolloutPath,
+          error: toErrorMessage(error),
+        },
+        "archived-thread-restore-failed",
+      );
+      return null;
+    }
   }
 
   private async isThreadLoaded(threadId: string): Promise<boolean> {
@@ -1207,10 +1385,59 @@ export class CodexAgentAdapter implements AgentAdapter {
     return snapshot.title;
   }
 
-  private setThreadTitle(
+  private touchTrackedThread(threadId: string): void {
+    const normalized = threadId.trim();
+    if (normalized.length === 0) {
+      return;
+    }
+    if (this.trackedThreadIds.has(normalized)) {
+      this.trackedThreadIds.delete(normalized);
+    }
+    this.trackedThreadIds.set(normalized, true);
+    while (this.trackedThreadIds.size > MAX_TRACKED_THREAD_RUNTIME_STATES) {
+      const oldestThreadId = this.trackedThreadIds.keys().next().value;
+      if (typeof oldestThreadId !== "string") {
+        return;
+      }
+      this.trackedThreadIds.delete(oldestThreadId);
+      this.threadOwnerById.delete(oldestThreadId);
+      this.streamEventsByThreadId.delete(oldestThreadId);
+      this.streamSnapshotByThreadId.delete(oldestThreadId);
+      this.streamSnapshotOriginByThreadId.delete(oldestThreadId);
+      this.threadTitleById.delete(oldestThreadId);
+    }
+    this.updateRuntimeHighWaterMarks();
+  }
+
+  protected setTrackedThreadOwner(threadId: string, ownerClientId: string): void {
+    this.touchTrackedThread(threadId);
+    this.threadOwnerById.set(threadId, ownerClientId);
+  }
+
+  protected setTrackedThreadEvents(threadId: string, events: IpcFrame[]): void {
+    this.touchTrackedThread(threadId);
+    this.streamEventsByThreadId.set(
+      threadId,
+      events.slice(-MAX_STREAM_EVENTS_PER_THREAD),
+    );
+    this.updateRuntimeHighWaterMarks();
+  }
+
+  protected setTrackedThreadSnapshot(
+    threadId: string,
+    snapshot: ThreadConversationState,
+    origin: StreamSnapshotOrigin,
+  ): void {
+    this.touchTrackedThread(threadId);
+    this.streamSnapshotByThreadId.set(threadId, snapshot);
+    this.streamSnapshotOriginByThreadId.set(threadId, origin);
+  }
+
+  protected setThreadTitle(
     threadId: string,
     title: string | null | undefined,
   ): void {
+    this.touchTrackedThread(threadId);
     if (title === undefined) {
       this.threadTitleById.delete(threadId);
       return;
@@ -1229,6 +1456,32 @@ export class CodexAgentAdapter implements AgentAdapter {
 
     this.threadTitleById.set(threadId, title);
   }
+
+  private updateRuntimeHighWaterMarks(): void {
+    this.maxTrackedThreadCountSeen = Math.max(
+      this.maxTrackedThreadCountSeen,
+      this.trackedThreadIds.size,
+    );
+
+    let totalBufferedStreamEventCount = 0;
+    let maxBufferedStreamEventsPerThread = 0;
+    for (const events of this.streamEventsByThreadId.values()) {
+      totalBufferedStreamEventCount += events.length;
+      maxBufferedStreamEventsPerThread = Math.max(
+        maxBufferedStreamEventsPerThread,
+        events.length,
+      );
+    }
+
+    this.maxTotalBufferedStreamEventCountSeen = Math.max(
+      this.maxTotalBufferedStreamEventCountSeen,
+      totalBufferedStreamEventCount,
+    );
+    this.maxBufferedStreamEventsPerThreadSeen = Math.max(
+      this.maxBufferedStreamEventsPerThreadSeen,
+      maxBufferedStreamEventsPerThread,
+    );
+  }
 }
 
 function toErrorMessage(error: Error | string | unknown): string {
@@ -1239,6 +1492,1069 @@ function toErrorMessage(error: Error | string | unknown): string {
     return error;
   }
   return String(error);
+}
+
+export function collectThreadStreamStateChangedEvents(rawEvents: IpcFrame[]): {
+  events: ThreadStreamStateChangedBroadcast[];
+  parseError:
+    | {
+        eventIndex: number;
+        message: string;
+        issues?: ProtocolValidationError["issues"];
+      }
+    | null;
+} {
+  const events: ThreadStreamStateChangedBroadcast[] = [];
+
+  for (let eventIndex = 0; eventIndex < rawEvents.length; eventIndex += 1) {
+    const event = rawEvents[eventIndex];
+    if (!event) {
+      continue;
+    }
+    if (
+      event.type !== "broadcast" ||
+      event.method !== "thread-stream-state-changed"
+    ) {
+      continue;
+    }
+
+    try {
+      events.push(parseThreadStreamStateChangedBroadcast(event));
+    } catch (error) {
+      return {
+        events,
+        parseError: {
+          eventIndex,
+          message: toErrorMessage(error),
+          ...(error instanceof ProtocolValidationError
+            ? { issues: error.issues }
+            : {}),
+        },
+      };
+    }
+  }
+
+  return {
+    events,
+    parseError: null,
+  };
+}
+
+interface ArchivedThreadIndexMetadata {
+  title: string | null;
+  updatedAt: number | null;
+}
+
+interface ArchivedSessionEntry {
+  timestamp?: string;
+  type?: string;
+  payload?: Record<string, ArchivedJsonValue>;
+}
+
+export function buildArchivedThreadConversationStateFromJsonl(
+  content: string,
+  threadId: string,
+  metadata?: ArchivedThreadIndexMetadata | null,
+): ThreadConversationState | null {
+  const entries: ArchivedSessionEntry[] = [];
+  const lines = content.split(/\r?\n/);
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex];
+    const trimmed = line?.trim() ?? "";
+    if (trimmed.length === 0) {
+      continue;
+    }
+
+    try {
+      entries.push(JSON.parse(trimmed) as ArchivedSessionEntry);
+    } catch (error) {
+      logArchivedMalformedJsonlLine(
+        threadId,
+        lineIndex,
+        toErrorMessage(error),
+        lineIndex === lines.length - 1,
+      );
+    }
+  }
+
+  if (entries.length === 0) {
+    return null;
+  }
+
+  let itemCounter = 0;
+  let createdAt = Number.POSITIVE_INFINITY;
+  let updatedAt = 0;
+  let cwd: string | undefined;
+  let source: string | undefined;
+  let title = metadata?.title ?? null;
+  let latestModel: string | null = null;
+  let latestReasoningEffort: string | null = null;
+  let latestTokenUsageInfo: ThreadConversationState["latestTokenUsageInfo"];
+  let currentTurn: ThreadConversationState["turns"][number] | null = null;
+  const turns: ThreadConversationState["turns"] = [];
+  const archivedToolCallsById = new Map<string, ArchivedDynamicToolCallItem>();
+
+  const nextItemId = () => `archived-item-${String(++itemCounter)}`;
+
+  const ensureTurn = () => {
+    if (currentTurn) {
+      return currentTurn;
+    }
+
+    currentTurn = {
+      id: `archived-turn-${String(turns.length + 1)}`,
+      status: "completed",
+      items: [],
+    };
+    turns.push(currentTurn);
+    return currentTurn;
+  };
+
+  const finalizeTurn = (
+    turnId: string | null | undefined,
+    completedAtMs: number | null,
+  ) => {
+    if (!currentTurn) {
+      return;
+    }
+    if (turnId && !currentTurn.turnId) {
+      currentTurn.turnId = turnId;
+    }
+    currentTurn.status = "completed";
+    if (
+      completedAtMs !== null &&
+      currentTurn.finalAssistantStartedAtMs === undefined
+    ) {
+      currentTurn.finalAssistantStartedAtMs = completedAtMs;
+    }
+    currentTurn = null;
+  };
+
+  const ensureArchivedToolCall = (
+    callId: string,
+    tool: unknown,
+    argumentsValue: unknown,
+    status: ArchivedDynamicToolCallItem["status"] = "inProgress",
+  ): ArchivedDynamicToolCallItem => {
+    const normalizedTool = normalizeArchivedToolName(tool);
+    const existing = archivedToolCallsById.get(callId);
+    if (existing) {
+      if (existing.tool === "legacyTool" && normalizedTool !== "legacyTool") {
+        existing.tool = normalizedTool;
+      }
+      if (argumentsValue !== undefined) {
+        existing.arguments = normalizeArchivedToolArguments(argumentsValue);
+      }
+      if (status !== "inProgress" || existing.status === "inProgress") {
+        existing.status = status;
+      }
+      return existing;
+    }
+
+    const turn = ensureTurn();
+    const item: ArchivedDynamicToolCallItem = {
+      id: nextItemId(),
+      type: "dynamicToolCall",
+      tool: normalizedTool,
+      arguments: normalizeArchivedToolArguments(argumentsValue),
+      status,
+    };
+    turn.items.push(item);
+    archivedToolCallsById.set(callId, item);
+    return item;
+  };
+
+  for (const entry of entries) {
+    const timestampSeconds = parseTimestampToUnixSeconds(entry.timestamp);
+    if (timestampSeconds !== null) {
+      createdAt = Math.min(createdAt, timestampSeconds);
+      updatedAt = Math.max(updatedAt, timestampSeconds);
+    }
+
+    const payload = entry.payload;
+    const payloadType = payload?.["type"];
+    if (!payload || typeof payloadType !== "string") {
+      continue;
+    }
+
+    switch (payloadType) {
+      case "session_meta": {
+        const payloadCwd = payload["cwd"];
+        if (typeof payloadCwd === "string" && payloadCwd.trim().length > 0) {
+          cwd = payloadCwd;
+        }
+        const payloadSource = payload["source"];
+        if (
+          typeof payloadSource === "string" &&
+          payloadSource.trim().length > 0
+        ) {
+          source = payloadSource;
+        }
+        title = readArchivedString(payload, [
+          "thread_name",
+          "threadName",
+          "title",
+          "name",
+        ]) ?? title;
+        latestModel =
+          readArchivedString(payload, ["model", "latestModel", "model_name"]) ??
+          latestModel;
+        latestReasoningEffort =
+          readArchivedString(payload, [
+            "reasoning_effort",
+            "reasoningEffort",
+            "effort",
+          ]) ?? latestReasoningEffort;
+        break;
+      }
+
+      case "task_started": {
+        if (currentTurn) {
+          finalizeTurn(null, null);
+        }
+        const payloadTurnId = payload["turn_id"];
+        currentTurn = {
+          id: `archived-turn-${String(turns.length + 1)}`,
+          ...(typeof payloadTurnId === "string" && payloadTurnId.trim()
+            ? { turnId: payloadTurnId }
+            : {}),
+          status: "inProgress",
+          ...(timestampSeconds !== null
+            ? { turnStartedAtMs: timestampSeconds * 1000 }
+            : {}),
+          items: [],
+        };
+        turns.push(currentTurn);
+        latestModel =
+          readArchivedString(payload, ["model", "latestModel", "model_name"]) ??
+          latestModel;
+        latestReasoningEffort =
+          readArchivedString(payload, [
+            "reasoning_effort",
+            "reasoningEffort",
+            "effort",
+          ]) ?? latestReasoningEffort;
+        break;
+      }
+
+      case "user_message": {
+        const turn = ensureTurn();
+        const contentItems: ThreadConversationState["turns"][number]["items"][number] &
+          { type: "userMessage" } = {
+          id: nextItemId(),
+          type: "userMessage",
+          content: [],
+        };
+
+        const payloadMessage = payload["message"];
+        if (typeof payloadMessage === "string" && payloadMessage.length > 0) {
+          contentItems.content.push({
+            type: "text",
+            text: payloadMessage,
+          });
+        }
+
+        const payloadImages = payload["images"];
+        if (Array.isArray(payloadImages)) {
+          for (const image of payloadImages) {
+            if (typeof image === "string" && image.trim().length > 0) {
+              contentItems.content.push({
+                type: "image",
+                url: image,
+              });
+            }
+          }
+        }
+
+        if (contentItems.content.length > 0) {
+          turn.items.push(contentItems);
+        }
+        break;
+      }
+
+      case "message": {
+        const role = readArchivedString(payload, ["role"]);
+        if (!role) {
+          break;
+        }
+
+        if (role === "assistant") {
+          const text = normalizeArchivedAssistantMessageText(payload["content"]);
+          if (!text) {
+            break;
+          }
+          const turn = ensureTurn();
+          const payloadPhase = payload["phase"];
+          turn.items.push({
+            id: nextItemId(),
+            type: "agentMessage",
+            text,
+            ...(typeof payloadPhase === "string" ? { phase: payloadPhase } : {}),
+          });
+          break;
+        }
+
+        const content = normalizeArchivedMessageContent(payload["content"]);
+        if (content.length === 0) {
+          break;
+        }
+
+        const turn = ensureTurn();
+        if (role === "developer" || role === "system") {
+          turn.items.push({
+            id: nextItemId(),
+            type: "steeringUserMessage",
+            content,
+          });
+          break;
+        }
+
+        turn.items.push({
+          id: nextItemId(),
+          type: "userMessage",
+          content,
+        });
+        break;
+      }
+
+      case "agent_message": {
+        const payloadMessage = payload["message"];
+        if (typeof payloadMessage !== "string" || payloadMessage.length === 0) {
+          break;
+        }
+        const turn = ensureTurn();
+        const payloadPhase = payload["phase"];
+        turn.items.push({
+          id: nextItemId(),
+          type: "agentMessage",
+          text: payloadMessage,
+          ...(typeof payloadPhase === "string" ? { phase: payloadPhase } : {}),
+        });
+        break;
+      }
+
+      case "reasoning": {
+        const payloadSummary = payload["summary"];
+        const summary = Array.isArray(payloadSummary)
+          ? payloadSummary.filter(
+              (entry): entry is string => typeof entry === "string",
+            )
+          : [];
+        if (summary.length === 0) {
+          break;
+        }
+        const turn = ensureTurn();
+        turn.items.push({
+          id: nextItemId(),
+          type: "reasoning",
+          summary,
+        });
+        break;
+      }
+
+      case "agent_reasoning": {
+        const payloadText = readArchivedString(payload, ["text", "message"]);
+        const turn = ensureTurn();
+        const payloadSummary = payload["summary"];
+        const summary = Array.isArray(payloadSummary)
+          ? payloadSummary.filter(
+              (entry): entry is string => typeof entry === "string",
+            )
+          : [];
+        if (summary.length === 0 && !payloadText) {
+          break;
+        }
+        turn.items.push({
+          id: nextItemId(),
+          type: "reasoning",
+          ...(summary.length > 0 ? { summary } : {}),
+          ...(payloadText ? { text: payloadText } : {}),
+        });
+        break;
+      }
+
+      case "context_compacted":
+      case "compacted": {
+        const turn = ensureTurn();
+        turn.items.push({
+          id: nextItemId(),
+          type: "contextCompaction",
+          completed: true,
+        });
+        break;
+      }
+
+      case "token_count": {
+        const payloadInfo = payload["info"];
+        if (payloadInfo !== undefined) {
+          latestTokenUsageInfo = payloadInfo;
+        }
+        break;
+      }
+
+      case "web_search_call": {
+        const callId =
+          readArchivedString(payload, ["call_id", "callId"]) ??
+          `archived-web-search-${entry.timestamp ?? String(itemCounter + 1)}`;
+        const action = payload["action"];
+        const item = ensureArchivedToolCall(
+          callId,
+          "web_search",
+          action ?? payload,
+          normalizeArchivedToolStatus(payload["status"], null, "completed"),
+        );
+        const contentItems = normalizeArchivedToolContentItems(
+          normalizeArchivedWebSearchContent(action),
+        );
+        if (contentItems) {
+          item.contentItems = contentItems;
+        }
+        break;
+      }
+
+      case "function_call": {
+        const callId = readArchivedString(payload, ["call_id", "callId"]);
+        if (!callId) {
+          break;
+        }
+        ensureArchivedToolCall(callId, payload["name"], payload["arguments"]);
+        break;
+      }
+
+      case "function_call_output": {
+        const callId = readArchivedString(payload, ["call_id", "callId"]);
+        if (!callId) {
+          break;
+        }
+        const output = payload["output"];
+        const success = normalizeArchivedToolSuccess(output, true);
+        const item = ensureArchivedToolCall(
+          callId,
+          payload["name"],
+          undefined,
+          normalizeArchivedToolStatus(undefined, success, "completed"),
+        );
+        const contentItems = normalizeArchivedToolContentItems(output);
+        if (contentItems) {
+          item.contentItems = contentItems;
+        }
+        if (success !== null) {
+          item.success = success;
+        }
+        break;
+      }
+
+      case "custom_tool_call": {
+        const callId = readArchivedString(payload, ["call_id", "callId"]);
+        if (!callId) {
+          break;
+        }
+        ensureArchivedToolCall(
+          callId,
+          payload["name"],
+          payload["input"],
+          normalizeArchivedToolStatus(payload["status"], null, "inProgress"),
+        );
+        break;
+      }
+
+      case "custom_tool_call_output": {
+        const callId = readArchivedString(payload, ["call_id", "callId"]);
+        if (!callId) {
+          break;
+        }
+        const output = payload["output"];
+        const success = normalizeArchivedToolSuccess(output, true);
+        const item = ensureArchivedToolCall(
+          callId,
+          payload["name"],
+          undefined,
+          normalizeArchivedToolStatus(undefined, success, "completed"),
+        );
+        const contentItems = normalizeArchivedToolContentItems(output);
+        if (contentItems) {
+          item.contentItems = contentItems;
+        }
+        if (success !== null) {
+          item.success = success;
+        }
+        break;
+      }
+
+      case "dynamic_tool_call_request": {
+        const callId = readArchivedString(payload, ["call_id", "callId"]);
+        if (!callId) {
+          break;
+        }
+        ensureArchivedToolCall(callId, payload["tool"], payload["arguments"]);
+        break;
+      }
+
+      case "dynamic_tool_call_response": {
+        const callId = readArchivedString(payload, ["call_id", "callId"]);
+        if (!callId) {
+          break;
+        }
+        const errorText = readArchivedString(payload, ["error"]);
+        const success = normalizeArchivedToolSuccess(
+          payload["success"],
+          errorText ? false : null,
+        );
+        const item = ensureArchivedToolCall(
+          callId,
+          payload["tool"],
+          payload["arguments"],
+          normalizeArchivedToolStatus(payload["status"], success, "completed"),
+        );
+        const contentItems =
+          normalizeArchivedToolContentItems(payload["content_items"]) ??
+          (errorText
+            ? [
+                {
+                  type: "inputText",
+                  text: truncateArchivedTextPreview(
+                    errorText,
+                    ARCHIVED_TOOL_TEXT_PREVIEW_MAX_CHARS,
+                  ),
+                },
+              ]
+            : null);
+        if (contentItems) {
+          item.contentItems = contentItems;
+        }
+        if (success !== null) {
+          item.success = success;
+        }
+        const durationMs = parseArchivedDurationToMs(payload["duration"]);
+        if (durationMs !== null) {
+          item.durationMs = durationMs;
+        }
+        break;
+      }
+
+      case "todo_list":
+      case "todo-list":
+      case "todoList":
+      case "plan_update": {
+        const plan = normalizeArchivedTodoPlan(payload["plan"]);
+        if (plan.length === 0) {
+          break;
+        }
+        const explanation = payload["explanation"];
+        const turn = ensureTurn();
+        turn.items.push({
+          id: nextItemId(),
+          type: "todoList",
+          ...(typeof explanation === "string" || explanation === null
+            ? { explanation }
+            : {}),
+          plan,
+        });
+        break;
+      }
+
+      case "thread_name_updated": {
+        title =
+          readArchivedString(payload, [
+            "thread_name",
+            "threadName",
+            "title",
+            "name",
+          ]) ?? title;
+        break;
+      }
+
+      case "task_complete": {
+        const payloadTurnId = payload["turn_id"];
+        finalizeTurn(
+          typeof payloadTurnId === "string" ? payloadTurnId : null,
+          timestampSeconds !== null ? timestampSeconds * 1000 : null,
+        );
+        break;
+      }
+
+      default:
+        logArchivedUnknownPayloadType(threadId, payloadType);
+        break;
+    }
+  }
+
+  if (currentTurn) {
+    currentTurn.status = "completed";
+    currentTurn = null;
+  }
+
+  if (turns.length === 0 && latestTokenUsageInfo === undefined) {
+    return null;
+  }
+
+  const normalizedCreatedAt = Number.isFinite(createdAt)
+    ? createdAt
+    : metadata?.updatedAt ?? 0;
+  const normalizedUpdatedAt =
+    updatedAt > 0 ? updatedAt : metadata?.updatedAt ?? normalizedCreatedAt;
+
+  return {
+    id: threadId,
+    turns,
+    requests: [],
+    ...(normalizedCreatedAt > 0 ? { createdAt: normalizedCreatedAt } : {}),
+    ...(normalizedUpdatedAt > 0 ? { updatedAt: normalizedUpdatedAt } : {}),
+    ...(title !== undefined ? { title } : {}),
+    latestModel,
+    latestReasoningEffort,
+    ...(cwd ? { cwd } : {}),
+    ...(source ? { source } : {}),
+    ...(latestTokenUsageInfo !== undefined ? { latestTokenUsageInfo } : {}),
+  };
+}
+
+function readArchivedString(
+  payload: Record<string, unknown>,
+  keys: string[],
+): string | null {
+  for (const key of keys) {
+    const value = payload[key];
+    if (typeof value !== "string") {
+      continue;
+    }
+    const normalized = value.trim();
+    if (normalized.length > 0) {
+      return normalized;
+    }
+  }
+  return null;
+}
+
+function logArchivedUnknownPayloadType(
+  threadId: string,
+  payloadType: string,
+): void {
+  if (loggedArchivedUnknownPayloadTypes.has(payloadType)) {
+    return;
+  }
+  loggedArchivedUnknownPayloadTypes.add(payloadType);
+  logger.warn(
+    {
+      threadId,
+      payloadType,
+    },
+    "archived-thread-unknown-payload-type",
+  );
+}
+
+function logArchivedMalformedJsonlLine(
+  threadId: string,
+  lineIndex: number,
+  error: string,
+  truncatedTailCandidate: boolean,
+): void {
+  const key = `${threadId}:${String(lineIndex)}`;
+  if (loggedArchivedMalformedJsonlLineKeys.has(key)) {
+    return;
+  }
+  loggedArchivedMalformedJsonlLineKeys.add(key);
+  logger.warn(
+    {
+      threadId,
+      lineIndex,
+      error,
+      truncatedTailCandidate,
+    },
+    "archived-thread-jsonl-line-parse-failed",
+  );
+}
+
+function normalizeArchivedMessageContent(
+  value: unknown,
+): Array<{ type: "text"; text: string } | { type: "image"; url: string }> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap<{ type: "text"; text: string } | { type: "image"; url: string }>((entry) => {
+    if (!entry || typeof entry !== "object") {
+      return [];
+    }
+
+    const record = entry as Record<string, unknown>;
+    const rawType = readArchivedString(record, ["type"]);
+    if (!rawType) {
+      return [];
+    }
+
+    switch (rawType) {
+      case "input_text":
+      case "output_text": {
+        const text = readArchivedString(record, ["text"]);
+        return text
+          ? [
+              {
+                type: "text",
+                text,
+              },
+            ]
+          : [];
+      }
+
+      case "input_image":
+      case "output_image": {
+        const url = readArchivedString(record, ["image_url", "imageUrl", "url"]);
+        return url
+          ? [
+              {
+                type: "image",
+                url,
+              },
+            ]
+          : [];
+      }
+
+      default:
+        return [];
+    }
+  });
+}
+
+function normalizeArchivedAssistantMessageText(value: unknown): string | null {
+  const textParts = normalizeArchivedMessageContent(value)
+    .filter((item): item is { type: "text"; text: string } => item.type === "text")
+    .map((item) => item.text);
+  if (textParts.length === 0) {
+    return null;
+  }
+  return textParts.join("\n\n");
+}
+
+function normalizeArchivedToolName(value: unknown): string {
+  if (typeof value !== "string") {
+    return "legacyTool";
+  }
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : "legacyTool";
+}
+
+function normalizeArchivedToolArguments(value: unknown): ArchivedJsonValue {
+  if (typeof value === "string") {
+    const parsed = tryParseArchivedJson(value);
+    if (parsed !== undefined) {
+      return normalizeArchivedToolJsonValue(parsed);
+    }
+  }
+  return normalizeArchivedToolJsonValue(value);
+}
+
+function normalizeArchivedToolJsonValue(
+  value: unknown,
+  maxLength = ARCHIVED_TOOL_ARGUMENT_PREVIEW_MAX_CHARS,
+): ArchivedJsonValue {
+  const jsonValue = coerceArchivedJsonValue(value);
+  if (jsonValue === undefined) {
+    return truncateArchivedTextPreview(String(value), maxLength);
+  }
+
+  const serialized =
+    typeof jsonValue === "string" ? jsonValue : JSON.stringify(jsonValue);
+  if (!serialized || serialized.length <= maxLength) {
+    return jsonValue;
+  }
+
+  return `${serialized.slice(0, maxLength)}...`;
+}
+
+function coerceArchivedJsonValue(value: unknown): ArchivedJsonValue | undefined {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    const result: ArchivedJsonValue[] = [];
+    for (const entry of value) {
+      const normalized = coerceArchivedJsonValue(entry);
+      if (normalized === undefined) {
+        continue;
+      }
+      result.push(normalized);
+    }
+    return result;
+  }
+
+  if (typeof value !== "object") {
+    return undefined;
+  }
+
+  const result: Record<string, ArchivedJsonValue> = {};
+  for (const [key, nestedValue] of Object.entries(
+    value as Record<string, unknown>,
+  )) {
+    const normalized = coerceArchivedJsonValue(nestedValue);
+    if (normalized === undefined) {
+      continue;
+    }
+    result[key] = normalized;
+  }
+  return result;
+}
+
+function tryParseArchivedJson(value: string): unknown | undefined {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+
+  if (!/^[{\["0-9tfn-]/.test(trimmed)) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeArchivedToolSuccess(
+  value: unknown,
+  fallback: boolean | null,
+): boolean | null {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (value && typeof value === "object") {
+    const nestedSuccess = (value as Record<string, unknown>)["success"];
+    if (typeof nestedSuccess === "boolean") {
+      return nestedSuccess;
+    }
+  }
+
+  return fallback;
+}
+
+function normalizeArchivedToolStatus(
+  value: unknown,
+  success: boolean | null,
+  fallback: ArchivedDynamicToolCallItem["status"],
+): ArchivedDynamicToolCallItem["status"] {
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase().replace(/[-_\s]+/g, "");
+    if (
+      normalized === "inprogress" ||
+      normalized === "running" ||
+      normalized === "pending"
+    ) {
+      return "inProgress";
+    }
+    if (
+      normalized === "completed" ||
+      normalized === "complete" ||
+      normalized === "success" ||
+      normalized === "succeeded"
+    ) {
+      return "completed";
+    }
+    if (
+      normalized === "failed" ||
+      normalized === "failure" ||
+      normalized === "error" ||
+      normalized === "errored"
+    ) {
+      return "failed";
+    }
+  }
+
+  if (success === true) {
+    return "completed";
+  }
+  if (success === false) {
+    return "failed";
+  }
+  return fallback;
+}
+
+function normalizeArchivedToolContentItems(
+  value: unknown,
+): ArchivedDynamicToolContentItem[] | null {
+  const body =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? ((value as Record<string, unknown>)["body"] ?? value)
+      : value;
+
+  if (Array.isArray(body)) {
+    const items = body
+      .map(normalizeArchivedToolContentItem)
+      .filter(
+        (item): item is ArchivedDynamicToolContentItem => item !== null,
+      );
+    return items.length > 0 ? items : null;
+  }
+
+  if (body === null || body === undefined) {
+    return null;
+  }
+
+  return [normalizeFallbackArchivedToolContentItem(body)];
+}
+
+function normalizeArchivedToolContentItem(
+  value: unknown,
+): ArchivedDynamicToolContentItem | null {
+  if (!value || typeof value !== "object") {
+    return normalizeFallbackArchivedToolContentItem(value);
+  }
+
+  const record = value as Record<string, unknown>;
+  const rawType = readArchivedString(record, ["type"]);
+  if (!rawType) {
+    return normalizeFallbackArchivedToolContentItem(value);
+  }
+
+  switch (rawType) {
+    case "inputText":
+    case "input_text": {
+      const text = readArchivedString(record, ["text"]);
+      if (!text) {
+        return null;
+      }
+      return {
+        type: "inputText",
+        text: truncateArchivedTextPreview(
+          text,
+          ARCHIVED_TOOL_TEXT_PREVIEW_MAX_CHARS,
+        ),
+      };
+    }
+
+    case "inputImage":
+    case "input_image": {
+      const imageUrl = readArchivedString(record, ["imageUrl", "image_url"]);
+      if (!imageUrl) {
+        return null;
+      }
+      return {
+        type: "inputImage",
+        imageUrl,
+      };
+    }
+
+    default:
+      return normalizeFallbackArchivedToolContentItem(value);
+  }
+}
+
+function normalizeFallbackArchivedToolContentItem(
+  value: unknown,
+): ArchivedDynamicToolContentItem {
+  return {
+    type: "inputText",
+    text: truncateArchivedTextPreview(
+      typeof value === "string" ? value : JSON.stringify(value),
+      ARCHIVED_TOOL_TEXT_PREVIEW_MAX_CHARS,
+    ),
+  };
+}
+
+function normalizeArchivedWebSearchContent(
+  value: unknown,
+): Array<{ type: "inputText"; text: string }> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const query = readArchivedString(record, ["query"]);
+  const queriesValue = record["queries"];
+  const queries = Array.isArray(queriesValue)
+    ? queriesValue.filter(
+        (entry): entry is string =>
+          typeof entry === "string" && entry.trim().length > 0,
+      )
+    : [];
+  const lines = query ? [query, ...queries] : queries;
+  const uniqueLines = [...new Set(lines)];
+  if (uniqueLines.length === 0) {
+    return null;
+  }
+
+  return uniqueLines.map((line) => ({
+    type: "inputText",
+    text: truncateArchivedTextPreview(
+      line,
+      ARCHIVED_TOOL_TEXT_PREVIEW_MAX_CHARS,
+    ),
+  }));
+}
+
+function truncateArchivedTextPreview(value: string, maxLength: number): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  return `${value.slice(0, maxLength)}...`;
+}
+
+function normalizeArchivedTodoPlan(
+  value: unknown,
+): ArchivedTodoListItem["plan"] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") {
+      return [];
+    }
+    const record = entry as Record<string, unknown>;
+    const step = readArchivedString(record, ["step"]);
+    const status = readArchivedString(record, ["status"]);
+    if (!step || !status) {
+      return [];
+    }
+    return [{ step, status }];
+  });
+}
+
+function parseArchivedDurationToMs(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return Math.round(value);
+  }
+
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  const numeric = Number(trimmed);
+  if (Number.isFinite(numeric) && numeric >= 0) {
+    return Math.round(numeric);
+  }
+
+  const match = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?$/i.exec(
+    trimmed,
+  );
+  if (!match) {
+    return null;
+  }
+
+  const hours = Number(match[1] ?? 0);
+  const minutes = Number(match[2] ?? 0);
+  const seconds = Number(match[3] ?? 0);
+  if (
+    !Number.isFinite(hours) ||
+    !Number.isFinite(minutes) ||
+    !Number.isFinite(seconds)
+  ) {
+    return null;
+  }
+  return Math.round(((hours * 60 * 60) + (minutes * 60) + seconds) * 1000);
 }
 
 const INVALID_REQUEST_ERROR_CODE = -32600;
@@ -1294,6 +2610,18 @@ export function isThreadNoRolloutIncludeTurnsAppServerRpcError(
   return (
     normalized.includes("no rollout found for thread id") &&
     normalized.includes("app-server error -32600")
+  );
+}
+
+function shouldAttemptArchivedThreadRestoreForReadError(
+  error: Error | null,
+  includeTurns: boolean,
+): boolean {
+  return (
+    isThreadNotLoadedAppServerRpcError(error) ||
+    (includeTurns &&
+      (isThreadNotMaterializedIncludeTurnsAppServerRpcError(error) ||
+        isThreadNoRolloutIncludeTurnsAppServerRpcError(error)))
   );
 }
 
@@ -1463,4 +2791,136 @@ function extractThreadId(frame: IpcFrame): string | null {
   }
 
   return null;
+}
+
+async function readThreadIndexMetadata(
+  threadId: string,
+): Promise<ArchivedThreadIndexMetadata | null> {
+  const codexHomes = getCodexHomeCandidates();
+  for (const codexHome of codexHomes) {
+    const indexPath = path.join(codexHome, "session_index.jsonl");
+    try {
+      const content = await readFile(indexPath, "utf8");
+      for (const line of content.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed) {
+          continue;
+        }
+        const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+        if (parsed["id"] !== threadId) {
+          continue;
+        }
+        const parsedThreadName = parsed["thread_name"];
+        const parsedUpdatedAt = parsed["updated_at"];
+        return {
+          title:
+            typeof parsedThreadName === "string" ? parsedThreadName : null,
+          updatedAt: parseTimestampToUnixSeconds(
+            typeof parsedUpdatedAt === "string" ? parsedUpdatedAt : undefined,
+          ),
+        };
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+async function findArchivedRolloutPath(threadId: string): Promise<string | null> {
+  for (const codexHome of getCodexHomeCandidates()) {
+    const archivedSessionsDir = path.join(codexHome, "archived_sessions");
+    const archivedRollout = await findRolloutPathInDirectory(
+      archivedSessionsDir,
+      threadId,
+      0,
+    );
+    if (archivedRollout) {
+      return archivedRollout;
+    }
+
+    const sessionsDir = path.join(codexHome, "sessions");
+    const activeRollout = await findRolloutPathInDirectory(sessionsDir, threadId, 4);
+    if (activeRollout) {
+      return activeRollout;
+    }
+  }
+
+  return null;
+}
+
+async function findRolloutPathInDirectory(
+  directory: string,
+  threadId: string,
+  remainingDepth: number,
+): Promise<string | null> {
+  try {
+    await access(directory);
+  } catch {
+    return null;
+  }
+
+  const entries = await readdir(directory, { withFileTypes: true });
+
+  for (const entry of entries) {
+    if (!entry.isFile()) {
+      continue;
+    }
+    if (entry.name !== `${threadId}.jsonl`) {
+      continue;
+    }
+    return path.join(directory, entry.name);
+  }
+
+  if (remainingDepth <= 0) {
+    return null;
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const nested = await findRolloutPathInDirectory(
+      path.join(directory, entry.name),
+      threadId,
+      remainingDepth - 1,
+    );
+    if (nested) {
+      return nested;
+    }
+  }
+
+  return null;
+}
+
+function getCodexHomeCandidates(): string[] {
+  const candidates = [
+    process.env["CODEX_HOME"],
+    process.env["USERPROFILE"]
+      ? path.join(process.env["USERPROFILE"], ".codex")
+      : null,
+    process.env["HOME"] ? path.join(process.env["HOME"], ".codex") : null,
+    path.join(os.homedir(), ".codex"),
+  ];
+
+  const unique = new Set<string>();
+  for (const candidate of candidates) {
+    if (!candidate || candidate.trim().length === 0) {
+      continue;
+    }
+    unique.add(candidate);
+  }
+  return [...unique];
+}
+
+function parseTimestampToUnixSeconds(value: string | undefined): number | null {
+  if (!value) {
+    return null;
+  }
+  const milliseconds = Date.parse(value);
+  if (!Number.isFinite(milliseconds)) {
+    return null;
+  }
+  return Math.floor(milliseconds / 1000);
 }

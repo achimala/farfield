@@ -1,5 +1,6 @@
 import {
   assertNever,
+  JsonValueSchema as ProtocolJsonValueSchema,
   type ThreadConversationState,
   UserInputRequestSchema,
 } from "@farfield/protocol";
@@ -36,6 +37,7 @@ type UnifiedCommandResultByKind<K extends UnifiedCommandKind> = Extract<
 type UnifiedCommandHandler<K extends UnifiedCommandKind> = (
   command: UnifiedCommandByKind<K>,
 ) => Promise<UnifiedCommandResultByKind<K>>;
+type ProtocolJsonValue = z.infer<typeof ProtocolJsonValueSchema>;
 
 export type UnifiedCommandHandlerTable = {
   [K in UnifiedCommandKind]: UnifiedCommandHandler<K>;
@@ -58,6 +60,10 @@ export const FEATURE_ID_BY_COMMAND_KIND: Record<
   readStreamEvents: "readStreamEvents",
   listProjectDirectories: "listProjectDirectories",
 };
+
+const DYNAMIC_TOOL_ARGUMENT_PREVIEW_MAX_CHARS = 600;
+const MCP_TOOL_ARGUMENT_PREVIEW_MAX_CHARS = 600;
+const MCP_TOOL_STRUCTURED_CONTENT_PREVIEW_MAX_CHARS = 600;
 
 const PROVIDER_FEATURE_SUPPORT: Record<
   UnifiedProviderId,
@@ -92,6 +98,123 @@ const PROVIDER_FEATURE_SUPPORT: Record<
     listProjectDirectories: true,
   },
 };
+
+function humanizeCollaborationModeLabel(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return "Default";
+  }
+
+  return trimmed
+    .replace(/[-_]+/g, " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+function hasRenderableUnifiedUserMessageContent(
+  item: Extract<UnifiedItem, { type: "userMessage" | "steeringUserMessage" }>,
+): boolean {
+  return item.content.some((part) => {
+    if (part.type === "text") {
+      return part.text.length > 0;
+    }
+    return part.url.length > 0;
+  });
+}
+
+function shouldCountRenderableUnifiedItem(item: UnifiedItem): boolean {
+  switch (item.type) {
+    case "userMessage":
+    case "steeringUserMessage":
+      return hasRenderableUnifiedUserMessageContent(item);
+    case "agentMessage":
+      return item.text.length > 0;
+    case "reasoning":
+      return (item.summary?.length ?? 0) > 0 || Boolean(item.text);
+    case "userInputResponse":
+      return Object.values(item.answers).some((answers) => answers.length > 0);
+    case "error":
+    case "plan":
+    case "todoList":
+    case "planImplementation":
+    case "commandExecution":
+    case "fileChange":
+    case "contextCompaction":
+    case "webSearch":
+    case "mcpToolCall":
+    case "dynamicToolCall":
+    case "collabAgentToolCall":
+    case "imageView":
+    case "enteredReviewMode":
+    case "exitedReviewMode":
+    case "remoteTaskCreated":
+    case "modelChanged":
+    case "forkedFromConversation":
+      return true;
+    default:
+      return assertNever(item);
+  }
+}
+
+function trimUnifiedThreadForRenderableItems(
+  thread: UnifiedThread,
+  maxRenderableItems: number,
+): UnifiedThread {
+  if (maxRenderableItems <= 0 || thread.turns.length === 0) {
+    return thread;
+  }
+
+  const renderableBudget = maxRenderableItems + 1;
+  let renderableCount = 0;
+  let firstTurnIndex = -1;
+  let firstItemIndex = -1;
+
+  for (
+    let turnIndex = thread.turns.length - 1;
+    turnIndex >= 0;
+    turnIndex -= 1
+  ) {
+    const turn = thread.turns[turnIndex];
+    if (!turn) {
+      continue;
+    }
+    const items = turn.items ?? [];
+    for (let itemIndex = items.length - 1; itemIndex >= 0; itemIndex -= 1) {
+      const item = items[itemIndex];
+      if (!item || !shouldCountRenderableUnifiedItem(item)) {
+        continue;
+      }
+      renderableCount += 1;
+      if (renderableCount === renderableBudget) {
+        firstTurnIndex = turnIndex;
+        firstItemIndex = itemIndex;
+      }
+    }
+  }
+
+  if (
+    renderableCount <= renderableBudget ||
+    firstTurnIndex === -1 ||
+    firstItemIndex === -1
+  ) {
+    return thread;
+  }
+
+  return {
+    ...thread,
+    turns: thread.turns.slice(firstTurnIndex).map((turn, index) => {
+      if (index !== 0) {
+        return turn;
+      }
+      return {
+        ...turn,
+        items: (turn.items ?? []).slice(firstItemIndex),
+      };
+    }),
+  };
+}
 
 export class UnifiedBackendFeatureError extends Error {
   public readonly provider: UnifiedProviderId;
@@ -265,10 +388,17 @@ function createHandlerTable(
         threadId: command.threadId,
         includeTurns: command.includeTurns,
       });
+      const mappedThread = mapThread(provider, result.thread);
 
       return {
         kind: "readThread",
-        thread: mapThread(provider, result.thread),
+        thread:
+          typeof command.maxRenderableItems === "number"
+            ? trimUnifiedThreadForRenderableItems(
+                mappedThread,
+                command.maxRenderableItems,
+              )
+            : mappedThread,
       };
     },
 
@@ -317,8 +447,8 @@ function createHandlerTable(
         kind: "listModels",
         data: result.data.map((model) => ({
           id: model.id,
-          displayName: model.displayName,
-          description: model.description,
+          displayName: model.displayName ?? model.id,
+          description: model.description ?? "",
           defaultReasoningEffort: model.defaultReasoningEffort ?? null,
           supportedReasoningEfforts: model.supportedReasoningEfforts.map(
             (entry) => entry.reasoningEffort,
@@ -342,12 +472,28 @@ function createHandlerTable(
       return {
         kind: "listCollaborationModes",
         data: result.data.map((mode) => ({
-          name: mode.name,
+          name:
+            mode.name ??
+            humanizeCollaborationModeLabel(mode.mode ?? "default"),
           mode: mode.mode ?? "default",
-          ...(mode.model !== undefined ? { model: mode.model } : {}),
+          ...(mode.model !== undefined
+            ? { model: mode.model }
+            : mode.settings?.model !== undefined
+              ? { model: mode.settings.model }
+              : {}),
           ...(mode.reasoning_effort !== undefined
             ? { reasoningEffort: mode.reasoning_effort }
-            : {}),
+            : mode.settings?.reasoning_effort !== undefined
+              ? { reasoningEffort: mode.settings.reasoning_effort }
+              : {}),
+          ...(mode.developer_instructions !== undefined
+            ? { developerInstructions: mode.developer_instructions }
+            : mode.settings?.developer_instructions !== undefined
+              ? {
+                  developerInstructions:
+                    mode.settings.developer_instructions,
+                }
+              : {}),
         })),
       };
     },
@@ -430,13 +576,21 @@ function createHandlerTable(
       }
 
       const liveState = await adapter.readLiveState(command.threadId);
+      const mappedConversationState = liveState.conversationState
+        ? mapThread(provider, liveState.conversationState)
+        : null;
       return {
         kind: "readLiveState",
         threadId: command.threadId,
         ownerClientId: liveState.ownerClientId,
-        conversationState: liveState.conversationState
-          ? mapThread(provider, liveState.conversationState)
-          : null,
+        conversationState:
+          mappedConversationState &&
+          typeof command.maxRenderableItems === "number"
+            ? trimUnifiedThreadForRenderableItems(
+                mappedConversationState,
+                command.maxRenderableItems,
+              )
+            : mappedConversationState,
         ...(liveState.liveStateError
           ? { liveStateError: liveState.liveStateError }
           : {}),
@@ -960,10 +1114,11 @@ function mapTurnItem(
       };
 
     case "todo-list":
+    case "todoList":
       return {
         id: item.id,
         type: "todoList",
-        ...(item.explanation !== undefined
+        ...(item.explanation != null
           ? { explanation: item.explanation }
           : {}),
         plan: item.plan.map((entry) => ({
@@ -1081,21 +1236,23 @@ function mapTurnItem(
         server: item.server,
         tool: item.tool,
         status: item.status,
-        arguments: jsonValueFromString(JSON.stringify(item.arguments)),
+        arguments: buildJsonPreviewString(
+          item.arguments,
+          MCP_TOOL_ARGUMENT_PREVIEW_MAX_CHARS,
+        ),
         ...(item.result !== undefined
           ? {
               result: item.result
                 ? {
-                    content: item.result.content.map((entry) =>
-                      jsonValueFromString(JSON.stringify(entry)),
-                    ),
+                    content: item.result.content.map(() => null),
                     ...(item.result.structuredContent !== undefined
                       ? {
                           structuredContent:
                             item.result.structuredContent === null
                               ? null
-                              : jsonValueFromString(
-                                  JSON.stringify(item.result.structuredContent),
+                              : buildJsonPreviewString(
+                                  item.result.structuredContent,
+                                  MCP_TOOL_STRUCTURED_CONTENT_PREVIEW_MAX_CHARS,
                                 ),
                         }
                       : {}),
@@ -1106,6 +1263,33 @@ function mapTurnItem(
         ...(item.error !== undefined
           ? { error: item.error ? { message: item.error.message } : null }
           : {}),
+        ...(item.durationMs !== undefined
+          ? { durationMs: item.durationMs }
+          : {}),
+      };
+
+    case "dynamicToolCall":
+      return {
+        id: item.id,
+        type: "dynamicToolCall",
+        tool: item.tool,
+        status: item.status,
+        arguments: buildJsonPreviewString(
+          item.arguments,
+          DYNAMIC_TOOL_ARGUMENT_PREVIEW_MAX_CHARS,
+        ),
+        ...(item.contentItems !== undefined
+          ? {
+              contentItems: item.contentItems
+                ? item.contentItems.map((contentItem) =>
+                    contentItem.type === "inputText"
+                      ? { type: "inputText", text: contentItem.text }
+                      : { type: "inputImage", imageUrl: contentItem.imageUrl },
+                  )
+                : null,
+            }
+          : {}),
+        ...(item.success !== undefined ? { success: item.success } : {}),
         ...(item.durationMs !== undefined
           ? { durationMs: item.durationMs }
           : {}),
@@ -1176,6 +1360,24 @@ function mapTurnItem(
 
 function jsonValueFromString(serialized: string): JsonValue {
   return JsonValueSchema.parse(JSON.parse(serialized));
+}
+
+function buildJsonPreviewString(
+  value: ProtocolJsonValue,
+  maxLength: number,
+): string {
+  if (typeof value === "string") {
+    return truncatePreviewText(value, maxLength);
+  }
+  const serialized = JSON.stringify(value);
+  return serialized ? truncatePreviewText(serialized, maxLength) : "";
+}
+
+function truncatePreviewText(value: string, maxLength: number): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  return `${value.slice(0, maxLength)}...`;
 }
 
 function jsonArrayFromString(serialized: string): JsonValue[] {

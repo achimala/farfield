@@ -615,4 +615,361 @@ describe("unified provider adapters", () => {
         : null,
     ).toBe("task-123");
   });
+
+  it("maps dynamicToolCall turn items into unified items", async () => {
+    const adapter = createCodexAdapter();
+    const longQuery = "x".repeat(800);
+    adapter.readThread = async () => ({
+      thread: {
+        ...SAMPLE_THREAD,
+        turns: [
+          {
+            id: "turn-1",
+            status: "completed",
+            items: [
+              {
+                id: "item-dynamic",
+                type: "dynamicToolCall",
+                tool: "web_search",
+                status: "completed",
+                arguments: {
+                  query: longQuery,
+                },
+                contentItems: [
+                  {
+                    type: "inputText",
+                    text: "Search complete",
+                  },
+                  {
+                    type: "inputImage",
+                    imageUrl: "https://example.com/result.png",
+                  },
+                ],
+                success: true,
+                durationMs: 64,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const unified = new AgentUnifiedProviderAdapter("codex", adapter);
+
+    const result = await unified.execute(
+      UnifiedCommandSchema.parse({
+        kind: "readThread",
+        provider: "codex",
+        threadId: SAMPLE_THREAD.id,
+        includeTurns: true,
+      }),
+    );
+
+    expect(result.kind).toBe("readThread");
+    if (result.kind !== "readThread") {
+      return;
+    }
+
+    const dynamicItem = result.thread.turns[0]?.items[0];
+    expect(dynamicItem?.type).toBe("dynamicToolCall");
+    expect(
+      dynamicItem && dynamicItem.type === "dynamicToolCall"
+        ? dynamicItem.tool
+        : null,
+    ).toBe("web_search");
+    expect(
+      dynamicItem && dynamicItem.type === "dynamicToolCall"
+        ? dynamicItem.contentItems?.length
+        : null,
+    ).toBe(2);
+    expect(
+      dynamicItem && dynamicItem.type === "dynamicToolCall"
+        ? dynamicItem.success
+        : null,
+    ).toBe(true);
+    expect(
+      dynamicItem && dynamicItem.type === "dynamicToolCall"
+        ? typeof dynamicItem.arguments
+        : null,
+    ).toBe("string");
+    expect(
+      dynamicItem && dynamicItem.type === "dynamicToolCall"
+        ? String(dynamicItem.arguments).length
+        : 0,
+    ).toBeLessThanOrEqual(603);
+  });
+
+  it("maps mcpToolCall items into lightweight unified previews", async () => {
+    const adapter = createCodexAdapter();
+    const largeText = "y".repeat(800);
+    adapter.readThread = async () => ({
+      thread: {
+        ...SAMPLE_THREAD,
+        turns: [
+          {
+            id: "turn-1",
+            status: "completed",
+            items: [
+              {
+                id: "item-mcp",
+                type: "mcpToolCall",
+                server: "filesystem",
+                tool: "read_file",
+                status: "completed",
+                arguments: {
+                  path: "/tmp/huge.txt",
+                  extra: largeText,
+                },
+                result: {
+                  content: [
+                    {
+                      type: "text",
+                      text: largeText,
+                    },
+                    {
+                      type: "text",
+                      text: "tail",
+                    },
+                  ],
+                  structuredContent: {
+                    body: largeText,
+                  },
+                },
+                durationMs: 41,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const unified = new AgentUnifiedProviderAdapter("codex", adapter);
+
+    const result = await unified.execute(
+      UnifiedCommandSchema.parse({
+        kind: "readThread",
+        provider: "codex",
+        threadId: SAMPLE_THREAD.id,
+        includeTurns: true,
+      }),
+    );
+
+    expect(result.kind).toBe("readThread");
+    if (result.kind !== "readThread") {
+      return;
+    }
+
+    const mcpItem = result.thread.turns[0]?.items[0];
+    expect(mcpItem?.type).toBe("mcpToolCall");
+    expect(
+      mcpItem && mcpItem.type === "mcpToolCall" ? typeof mcpItem.arguments : null,
+    ).toBe("string");
+    expect(
+      mcpItem && mcpItem.type === "mcpToolCall"
+        ? String(mcpItem.arguments).length
+        : 0,
+    ).toBeLessThanOrEqual(603);
+    expect(
+      mcpItem && mcpItem.type === "mcpToolCall" ? mcpItem.result?.content : null,
+    ).toEqual([null, null]);
+    expect(
+      mcpItem && mcpItem.type === "mcpToolCall"
+        ? typeof mcpItem.result?.structuredContent
+        : null,
+    ).toBe("string");
+    expect(
+      mcpItem &&
+        mcpItem.type === "mcpToolCall" &&
+        typeof mcpItem.result?.structuredContent === "string"
+        ? mcpItem.result.structuredContent.length
+        : 0,
+    ).toBeLessThanOrEqual(603);
+  });
+
+  it("trims readThread results to the requested render window", async () => {
+    const adapter = createCodexAdapter();
+    adapter.readThread = async () => ({
+      thread: {
+        ...SAMPLE_THREAD,
+        turns: [
+          {
+            id: "turn-1",
+            status: "completed",
+            items: Array.from({ length: 95 }, (_, index) => ({
+              id: `item-agent-${index}`,
+              type: "agentMessage",
+              text: `agent-message-${index}`,
+            })),
+          },
+        ],
+      },
+    });
+    const unified = new AgentUnifiedProviderAdapter("codex", adapter);
+
+    const result = await unified.execute(
+      UnifiedCommandSchema.parse({
+        kind: "readThread",
+        provider: "codex",
+        threadId: SAMPLE_THREAD.id,
+        includeTurns: true,
+        maxRenderableItems: 90,
+      }),
+    );
+
+    expect(result.kind).toBe("readThread");
+    if (result.kind !== "readThread") {
+      return;
+    }
+
+    expect(result.thread.turns[0]?.items.length).toBe(91);
+    const firstItem = result.thread.turns[0]?.items[0];
+    expect(firstItem?.type).toBe("agentMessage");
+    expect(
+      firstItem && firstItem.type === "agentMessage" ? firstItem.text : null,
+    ).toBe("agent-message-4");
+  });
+
+  it("counts image-only user messages when trimming readThread results", async () => {
+    const adapter = createCodexAdapter();
+    adapter.readThread = async () => ({
+      thread: {
+        ...SAMPLE_THREAD,
+        turns: [
+          {
+            id: "turn-images",
+            status: "completed",
+            items: Array.from({ length: 95 }, (_, index) => ({
+              id: `item-image-${index}`,
+              type: "userMessage",
+              content: [
+                {
+                  type: "image",
+                  url: `https://example.com/image-${index}.png`,
+                },
+              ],
+            })),
+          },
+        ],
+      },
+    });
+    const unified = new AgentUnifiedProviderAdapter("codex", adapter);
+
+    const result = await unified.execute(
+      UnifiedCommandSchema.parse({
+        kind: "readThread",
+        provider: "codex",
+        threadId: SAMPLE_THREAD.id,
+        includeTurns: true,
+        maxRenderableItems: 90,
+      }),
+    );
+
+    expect(result.kind).toBe("readThread");
+    if (result.kind !== "readThread") {
+      return;
+    }
+
+    expect(result.thread.turns[0]?.items.length).toBe(91);
+    const firstItem = result.thread.turns[0]?.items[0];
+    expect(firstItem?.type).toBe("userMessage");
+    expect(
+      firstItem && firstItem.type === "userMessage"
+        ? firstItem.content[0]?.type
+        : null,
+    ).toBe("image");
+  });
+
+  it("trims readLiveState results to the requested render window", async () => {
+    const adapter = createCodexAdapter();
+    adapter.readLiveState = async () => ({
+      ownerClientId: "owner-1",
+      conversationState: {
+        ...SAMPLE_THREAD,
+        turns: [
+          {
+            id: "turn-1",
+            status: "completed",
+            items: Array.from({ length: 95 }, (_, index) => ({
+              id: `item-live-${index}`,
+              type: "agentMessage",
+              text: `live-message-${index}`,
+            })),
+          },
+        ],
+      },
+      liveStateError: null,
+    });
+    const unified = new AgentUnifiedProviderAdapter("codex", adapter);
+
+    const result = await unified.execute(
+      UnifiedCommandSchema.parse({
+        kind: "readLiveState",
+        provider: "codex",
+        threadId: SAMPLE_THREAD.id,
+        maxRenderableItems: 90,
+      }),
+    );
+
+    expect(result.kind).toBe("readLiveState");
+    if (result.kind !== "readLiveState") {
+      return;
+    }
+
+    expect(result.conversationState?.turns[0]?.items.length).toBe(91);
+    const firstItem = result.conversationState?.turns[0]?.items[0];
+    expect(firstItem?.type).toBe("agentMessage");
+    expect(
+      firstItem && firstItem.type === "agentMessage" ? firstItem.text : null,
+    ).toBe("live-message-4");
+  });
+
+  it("normalizes todoList live-state items with null explanation", async () => {
+    const adapter = createCodexAdapter();
+    adapter.readLiveState = async () => ({
+      ownerClientId: "owner-1",
+      conversationState: {
+        ...SAMPLE_THREAD,
+        turns: [
+          {
+            id: "turn-1",
+            status: "inProgress",
+            items: [
+              {
+                id: "item-todo",
+                type: "todoList",
+                explanation: null,
+                plan: [
+                  {
+                    step: "Verify compatibility",
+                    status: "completed",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      liveStateError: null,
+    });
+    const unified = new AgentUnifiedProviderAdapter("codex", adapter);
+
+    const result = await unified.execute(
+      UnifiedCommandSchema.parse({
+        kind: "readLiveState",
+        provider: "codex",
+        threadId: SAMPLE_THREAD.id,
+      }),
+    );
+
+    expect(result.kind).toBe("readLiveState");
+    if (result.kind !== "readLiveState") {
+      return;
+    }
+
+    const todoItem = result.conversationState?.turns[0]?.items[0];
+    expect(todoItem?.type).toBe("todoList");
+    expect(
+      todoItem && todoItem.type === "todoList"
+        ? Object.prototype.hasOwnProperty.call(todoItem, "explanation")
+        : null,
+    ).toBe(false);
+  });
 });

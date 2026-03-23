@@ -32,6 +32,10 @@ const outputPath = path.join(
   "OpenCodeManifest.ts"
 );
 
+function toPosixRelative(filePath) {
+  return path.relative(repoRoot, filePath).split(path.sep).join("/");
+}
+
 function assertSourceFile(filePath) {
   const program = ts.createProgram([filePath], {
     strict: true,
@@ -113,7 +117,7 @@ function renderTupleConstant(constantName, values) {
 function writeManifestFile(manifest) {
   const lines = [
     "// GENERATED FILE. DO NOT EDIT.",
-    `// Source: ${path.relative(repoRoot, sdkTypesPath)}`,
+    `// Source: ${toPosixRelative(sdkTypesPath)}`,
     "",
     renderTupleConstant("OPENCODE_EVENT_TYPES", manifest.eventTypes),
     "export type OpenCodeEventType = typeof OPENCODE_EVENT_TYPES[number];",

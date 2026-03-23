@@ -84,6 +84,7 @@ import { PendingInformationalRequestCard } from "@/components/PendingInformation
 import { PendingRequestCard } from "@/components/PendingRequestCard";
 import { SidebarThreadWaitingIndicators } from "@/components/SidebarThreadWaitingIndicators";
 import { StreamEventCard } from "@/components/StreamEventCard";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -178,6 +179,7 @@ interface NormalizedTokenUsage {
 interface LoadSelectedThreadOptions {
   includeTurns: boolean;
   includeStreamEvents: boolean;
+  chatVisibleItemLimit?: number | null;
 }
 
 interface CachedThreadViewState {
@@ -260,6 +262,25 @@ function threadLabel(thread: Thread): string {
   const text = thread.preview.trim();
   if (!text) return `thread ${thread.id.slice(0, 8)}`;
   return text;
+}
+
+function shouldClearResolvedThreadError(
+  currentError: string,
+  threadId: string,
+): boolean {
+  const normalized = currentError.trim();
+  if (normalized.length === 0) {
+    return false;
+  }
+
+  if (normalized === "Thread provider is still loading") {
+    return true;
+  }
+
+  return (
+    normalized.includes(threadId) &&
+    normalized.includes("is not registered")
+  );
 }
 
 function threadRecencyTimestamp(thread: Thread): number {
@@ -488,13 +509,22 @@ function hasSameThreadListErrors(
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+function hasRenderableUserMessageContent(
+  item: Extract<ConversationTurnItem, { type: "userMessage" | "steeringUserMessage" }>,
+): boolean {
+  return item.content.some((part) => {
+    if (part.type === "text") {
+      return part.text.length > 0;
+    }
+    return part.url.length > 0;
+  });
+}
+
 function shouldRenderConversationItem(item: ConversationTurnItem): boolean {
   switch (item.type) {
     case "userMessage":
     case "steeringUserMessage":
-      return item.content.some(
-        (part) => part.type === "text" && part.text.length > 0,
-      );
+      return hasRenderableUserMessageContent(item);
     case "agentMessage":
       return item.text.length > 0;
     case "reasoning": {
@@ -561,6 +591,9 @@ const AGENT_CACHE_TTL_MS = 30_000;
 const PROVIDER_CATALOG_CACHE_TTL_MS = 20_000;
 const CORE_REFRESH_INTERVAL_MS = 5_000;
 const SELECTED_THREAD_REFRESH_INTERVAL_MS = 1_000;
+const MAX_RETAINED_DEBUG_STREAM_EVENTS = 80;
+const MAX_CACHED_THREAD_VIEW_STATES = 10;
+const MAX_CACHED_HISTORY_DETAILS = 40;
 const DEBUG_UI_ENABLED = import.meta.env.MODE !== "production";
 const MOBILE_SIDEBAR_WIDTH_PX = 256;
 const MOBILE_SWIPE_EDGE_PX = 24;
@@ -605,6 +638,237 @@ function sortEffortOptions(options: string[]): string[] {
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+function setBoundedCacheEntry<K, V>(
+  cache: Map<K, V>,
+  key: K,
+  value: V,
+  maxEntries: number,
+): void {
+  if (cache.has(key)) {
+    cache.delete(key);
+  }
+  cache.set(key, value);
+  while (cache.size > maxEntries) {
+    const oldestKey = cache.keys().next().value as K | undefined;
+    if (oldestKey === undefined) {
+      return;
+    }
+    cache.delete(oldestKey);
+  }
+}
+
+export function pruneMapToRetainedKeys<K, V>(
+  cache: Map<K, V>,
+  retainedKeys: Iterable<K>,
+): void {
+  const retainedKeySet = new Set(retainedKeys);
+  for (const key of [...cache.keys()]) {
+    if (retainedKeySet.has(key)) {
+      continue;
+    }
+    cache.delete(key);
+  }
+}
+
+function trimConversationStateForChatWindow(
+  state: NonNullable<ReadThreadResponse["thread"]>,
+  visibleItemLimit: number,
+): NonNullable<ReadThreadResponse["thread"]> {
+  const turns = state.turns;
+  if (visibleItemLimit <= 0 || turns.length === 0) {
+    return state;
+  }
+
+  // Keep one extra renderable item in memory so the chat view can still show
+  // that there are older messages available without storing the entire thread.
+  const renderableBudget = visibleItemLimit + 1;
+  let renderableCount = 0;
+  let firstTurnIndex = -1;
+  let firstItemIndex = -1;
+
+  for (let turnIndex = turns.length - 1; turnIndex >= 0; turnIndex -= 1) {
+    const turn = turns[turnIndex];
+    if (!turn) {
+      continue;
+    }
+    const items = turn.items ?? [];
+    for (let itemIndex = items.length - 1; itemIndex >= 0; itemIndex -= 1) {
+      const item = items[itemIndex];
+      if (!item || !shouldRenderConversationItem(item)) {
+        continue;
+      }
+      renderableCount += 1;
+      if (renderableCount === renderableBudget) {
+        firstTurnIndex = turnIndex;
+        firstItemIndex = itemIndex;
+      }
+    }
+  }
+
+  if (
+    renderableCount <= renderableBudget ||
+    firstTurnIndex === -1 ||
+    firstItemIndex === -1
+  ) {
+    return state;
+  }
+
+  const trimmedTurns = turns.slice(firstTurnIndex).map((turn, index) => {
+    if (index !== 0) {
+      return turn;
+    }
+    return {
+      ...turn,
+      items: (turn.items ?? []).slice(firstItemIndex),
+    };
+  });
+
+  return {
+    ...state,
+    turns: trimmedTurns,
+  };
+}
+
+function countRenderableConversationItems(
+  state: NonNullable<ReadThreadResponse["thread"]>,
+): number {
+  let renderableCount = 0;
+  for (const turn of state.turns) {
+    if (!turn) {
+      continue;
+    }
+    for (const item of turn.items ?? []) {
+      if (item && shouldRenderConversationItem(item)) {
+        renderableCount += 1;
+      }
+    }
+  }
+  return renderableCount;
+}
+
+export function normalizeReadThreadResponseForChatWindow(
+  state: ReadThreadResponse | null,
+  visibleItemLimit: number | null,
+): ReadThreadResponse | null {
+  if (!state || visibleItemLimit === null || visibleItemLimit <= 0) {
+    return state;
+  }
+
+  const renderableBudget = visibleItemLimit + 1;
+  if (countRenderableConversationItems(state.thread) <= renderableBudget) {
+    return state;
+  }
+
+  return {
+    ...state,
+    thread: trimConversationStateForChatWindow(state.thread, visibleItemLimit),
+  };
+}
+
+export function retainStreamEventsForView<T>(
+  events: readonly T[],
+  activeTab: "chat" | "debug",
+  debugLimit = MAX_RETAINED_DEBUG_STREAM_EVENTS,
+): T[] {
+  if (events.length === 0) {
+    return [];
+  }
+
+  if (activeTab === "debug") {
+    if (!Number.isInteger(debugLimit) || debugLimit <= 0) {
+      return [];
+    }
+    return events.length <= debugLimit
+      ? [...events]
+      : events.slice(-debugLimit);
+  }
+
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event === undefined) {
+      continue;
+    }
+    if (StreamTokenUsageUpdatedEventSchema.safeParse(event).success) {
+      return [event];
+    }
+  }
+
+  return [];
+}
+
+export function normalizeLiveStateResponseForChatWindow(
+  state: LiveStateResponse | null,
+  visibleItemLimit: number | null,
+): LiveStateResponse | null {
+  if (
+    !state ||
+    visibleItemLimit === null ||
+    visibleItemLimit <= 0 ||
+    state.conversationState === null
+  ) {
+    return state;
+  }
+
+  const renderableBudget = visibleItemLimit + 1;
+  if (
+    countRenderableConversationItems(state.conversationState) <= renderableBudget
+  ) {
+    return state;
+  }
+
+  return {
+    ...state,
+    conversationState: trimConversationStateForChatWindow(
+      state.conversationState,
+      visibleItemLimit,
+    ),
+  };
+}
+
+export function normalizeCachedThreadViewStateForStorage(
+  state: CachedThreadViewState,
+  options: {
+    activeTab: "chat" | "debug";
+    chatVisibleItemLimit: number;
+  },
+): CachedThreadViewState {
+  return {
+    readThreadState: normalizeReadThreadResponseForChatWindow(
+      state.readThreadState,
+      options.chatVisibleItemLimit,
+    ),
+    liveState: normalizeLiveStateResponseForChatWindow(
+      state.liveState,
+      options.chatVisibleItemLimit,
+    ),
+    streamEvents: retainStreamEventsForView(state.streamEvents, options.activeTab),
+  };
+}
+
+function normalizeAppViewSnapshotForStorage(
+  snapshot: AppViewSnapshot,
+  chatVisibleItemLimit: number,
+): AppViewSnapshot {
+  const normalizedThreadState = normalizeCachedThreadViewStateForStorage(
+    {
+      readThreadState: snapshot.readThreadState,
+      liveState: snapshot.liveState,
+      streamEvents: snapshot.streamEvents,
+    },
+    {
+      activeTab: snapshot.activeTab,
+      chatVisibleItemLimit,
+    },
+  );
+
+  return {
+    ...snapshot,
+    readThreadState: normalizedThreadState.readThreadState,
+    liveState: normalizedThreadState.liveState,
+    streamEvents: normalizedThreadState.streamEvents,
+  };
 }
 
 function AgentFavicon({
@@ -799,20 +1063,29 @@ function conversationProgressSignature(
     return "";
   }
 
+  const firstTurn = state.turns[0];
   const lastTurn = state.turns[state.turns.length - 1];
-  if (!lastTurn) {
+  if (!firstTurn || !lastTurn) {
     return "no-turns";
   }
 
+  const firstTurnId = firstTurn.id ?? firstTurn.turnId ?? "";
+  const firstItems = firstTurn.items ?? [];
+  const firstItem = firstItems[0];
   const lastTurnId = lastTurn.id ?? lastTurn.turnId ?? "";
-  const items = lastTurn.items ?? [];
-  const lastItem = items[items.length - 1];
+  const lastItems = lastTurn.items ?? [];
+  const lastItem = lastItems[lastItems.length - 1];
 
   return [
     String(state.turns.length),
+    firstTurnId,
+    firstTurn.status,
+    String(firstItems.length),
+    firstItem?.id ?? "",
+    firstItem?.type ?? "",
     lastTurnId,
     lastTurn.status,
-    String(items.length),
+    String(lastItems.length),
     lastItem?.id ?? "",
     lastItem?.type ?? "",
   ].join("|");
@@ -860,6 +1133,50 @@ function basenameFromPath(value: string): string {
   }
   const parts = normalized.split("/").filter((part) => part.length > 0);
   return parts[parts.length - 1] ?? normalized;
+}
+
+function displayPathFromValue(value: string): string {
+  const normalizedSlashes = value.trim().replaceAll("\\", "/");
+  if (normalizedSlashes.length === 0) {
+    return "";
+  }
+
+  const collapsed = normalizedSlashes.startsWith("//")
+    ? `//${normalizedSlashes.replace(/^\/+/, "").replace(/\/+/g, "/")}`
+    : normalizedSlashes.replace(/\/+/g, "/");
+  if (
+    collapsed === "/" ||
+    /^[a-z]:\/$/i.test(collapsed) ||
+    /^\/\/[^/]+\/[^/]+\/?$/i.test(collapsed)
+  ) {
+    return collapsed === "/" || collapsed.endsWith("/")
+      ? collapsed
+      : `${collapsed}/`;
+  }
+
+  return collapsed.replace(/\/+$/, "");
+}
+
+function normalizeProjectPathKey(value: string): string {
+  const displayPath = displayPathFromValue(value);
+  if (!displayPath) {
+    return "";
+  }
+
+  if (/^[a-z]:\//i.test(displayPath) || displayPath.startsWith("//")) {
+    return displayPath.toLowerCase();
+  }
+
+  return displayPath;
+}
+
+function projectPathHint(value: string): string | null {
+  const displayPath = displayPathFromValue(value);
+  if (!displayPath) {
+    return null;
+  }
+
+  return displayPath;
 }
 
 function normalizeManualGroupOrder(
@@ -1071,10 +1388,23 @@ export function App(): React.JSX.Element {
   );
   const initialSnapshot = ENABLE_VIEW_SNAPSHOT_CACHE
     ? appViewSnapshotCache
+      ? normalizeAppViewSnapshotForStorage(
+          appViewSnapshotCache,
+          INITIAL_VISIBLE_CHAT_ITEMS,
+        )
+      : null
     : null;
   const initialTab: "chat" | "debug" = DEBUG_UI_ENABLED
     ? initialSnapshot?.activeTab ?? initialUiState.tab
     : "chat";
+  const initialStreamEvents = useMemo(
+    () =>
+      retainStreamEventsForView(
+        initialSnapshot?.streamEvents ?? [],
+        initialTab,
+      ),
+    [initialSnapshot?.streamEvents, initialTab],
+  );
 
   /* State */
   const [error, setError] = useState("");
@@ -1101,7 +1431,7 @@ export function App(): React.JSX.Element {
     );
   const [streamEvents, setStreamEvents] = useState<
     StreamEventsResponse["events"]
-  >(initialSnapshot?.streamEvents ?? []);
+  >(initialStreamEvents);
   const [modes, setModes] = useState<ModesResponse["data"]>(
     initialSnapshot?.modes ?? [],
   );
@@ -1165,6 +1495,8 @@ export function App(): React.JSX.Element {
   const [projectColors, setProjectColors] = useState<Record<string, GroupColor>>(
     () => readProjectColors(),
   );
+  const [isUnifiedEventsConnected, setIsUnifiedEventsConnected] =
+    useState(false);
   const [rateLimits, setRateLimits] = useState<
     Awaited<ReturnType<typeof getAccountRateLimits>> | null
   >(null);
@@ -1172,7 +1504,11 @@ export function App(): React.JSX.Element {
   const [draggedGroupKey, setDraggedGroupKey] = useState<string | null>(null);
 
   /* Refs */
-  const selectedThreadIdRef = useRef<string | null>(null);
+  const selectedThreadIdRef = useRef<string | null>(
+    initialSnapshot?.selectedThreadId ?? initialUiState.threadId,
+  );
+  const selectedThreadRevisionRef = useRef(0);
+  const visibleChatItemLimitRef = useRef(INITIAL_VISIBLE_CHAT_ITEMS);
   const activeTabRef = useRef<"chat" | "debug">(
     initialTab,
   );
@@ -1191,6 +1527,7 @@ export function App(): React.JSX.Element {
   const lastAppliedModeSignatureRef = useRef("");
   const hasHydratedAgentSelectionRef = useRef(false);
   const threadProviderByIdRef = useRef<Map<string, AgentId>>(new Map());
+  const threadLoadRevisionByIdRef = useRef<Map<string, number>>(new Map());
   const optimisticSelectedThreadIdsRef = useRef<Set<string>>(new Set());
   const loadCoreDataRef = useRef<(() => Promise<void>) | null>(null);
   const loadSelectedThreadRef = useRef<
@@ -1207,7 +1544,7 @@ export function App(): React.JSX.Element {
             {
               readThreadState: initialSnapshot.readThreadState,
               liveState: initialSnapshot.liveState,
-              streamEvents: initialSnapshot.streamEvents,
+              streamEvents: initialStreamEvents,
             },
           ],
         ])
@@ -1222,6 +1559,25 @@ export function App(): React.JSX.Element {
   const modelsSignatureRef = useRef<string[]>([]);
   const historyDetailCacheRef = useRef<Map<string, HistoryDetail>>(new Map());
   const historyDetailRequestIdRef = useRef(0);
+
+  const updateSelectedThreadId = useCallback(
+    (
+      next:
+        | string
+        | null
+        | ((current: string | null) => string | null),
+    ) => {
+      const current = selectedThreadIdRef.current;
+      const resolved = typeof next === "function" ? next(current) : next;
+      if (resolved === current) {
+        return;
+      }
+      selectedThreadIdRef.current = resolved;
+      selectedThreadRevisionRef.current += 1;
+      setSelectedThreadId(resolved);
+    },
+    [],
+  );
 
   /* Derived */
   const selectedThread = useMemo(
@@ -1290,28 +1646,56 @@ export function App(): React.JSX.Element {
       key: string;
       label: string;
       projectPath: string | null;
+      pathHint: string | null;
+      isHistoricalOnly: boolean;
       latestUpdatedAt: number;
       preferredAgentId: AgentId | null;
       threads: Thread[];
       userColor: string | null;
     };
     const groups = new Map<string, Group>();
+    const currentProjectPathKeysByAgent = new Map<AgentId, Set<string>>();
+
+    for (const descriptor of agentDescriptors) {
+      if (!descriptor.capabilities.canListProjectDirectories) {
+        continue;
+      }
+      const projectPathKeys = new Set<string>();
+      for (const directory of descriptor.projectDirectories) {
+        const projectPath = displayPathFromValue(directory);
+        if (!projectPath) {
+          continue;
+        }
+        projectPathKeys.add(normalizeProjectPathKey(projectPath));
+      }
+      currentProjectPathKeysByAgent.set(descriptor.id, projectPathKeys);
+    }
 
     for (const thread of threads) {
       const cwd =
         typeof thread.cwd === "string" && thread.cwd.trim()
           ? thread.cwd.trim()
           : null;
-      const projectPath = cwd;
-      const key = projectPath ? `project:${projectPath}` : "project:unknown";
+      const projectPath = cwd ? displayPathFromValue(cwd) : null;
+      const projectKey = projectPath ? normalizeProjectPathKey(projectPath) : "";
+      const key = projectKey ? `project:${projectKey}` : "project:unknown";
       const label = projectPath ? basenameFromPath(projectPath) : "Unknown";
       const updatedAt = threadRecencyTimestamp(thread);
       const threadAgentId = thread.provider;
       const projectColor = projectColors[key] ?? null;
+      const currentProjectPathKeys = currentProjectPathKeysByAgent.get(
+        threadAgentId,
+      );
 
+      const nextIsHistoricalOnly =
+        projectKey.length > 0 &&
+        currentProjectPathKeys !== undefined &&
+        !currentProjectPathKeys.has(projectKey);
       const existing = groups.get(key);
       if (existing) {
         existing.threads.push(thread);
+        existing.isHistoricalOnly =
+          existing.isHistoricalOnly && nextIsHistoricalOnly;
         if (!existing.preferredAgentId) {
           existing.preferredAgentId = threadAgentId;
         }
@@ -1323,6 +1707,8 @@ export function App(): React.JSX.Element {
           key,
           label,
           projectPath,
+          pathHint: projectPath ? projectPathHint(projectPath) : null,
+          isHistoricalOnly: nextIsHistoricalOnly,
           latestUpdatedAt: updatedAt,
           preferredAgentId: threadAgentId,
           threads: [thread],
@@ -1333,18 +1719,20 @@ export function App(): React.JSX.Element {
 
     for (const descriptor of agentDescriptors) {
       for (const directory of descriptor.projectDirectories) {
-        const normalized = directory.trim();
-        if (!normalized) {
+        const projectPath = displayPathFromValue(directory);
+        if (!projectPath) {
           continue;
         }
-        const key = `project:${normalized}`;
+        const key = `project:${normalizeProjectPathKey(projectPath)}`;
         if (groups.has(key)) {
           continue;
         }
         groups.set(key, {
           key,
-          label: basenameFromPath(normalized),
-          projectPath: normalized,
+          label: basenameFromPath(projectPath),
+          projectPath,
+          pathHint: projectPathHint(projectPath),
+          isHistoricalOnly: false,
           latestUpdatedAt: 0,
           preferredAgentId: descriptor.id,
           threads: [],
@@ -1358,6 +1746,18 @@ export function App(): React.JSX.Element {
     }
 
     const allGroups = Array.from(groups.values());
+    const labelCounts = new Map<string, number>();
+    for (const group of allGroups) {
+      labelCounts.set(group.label, (labelCounts.get(group.label) ?? 0) + 1);
+    }
+    for (const group of allGroups) {
+      if (
+        (labelCounts.get(group.label) ?? 0) < 2 &&
+        !group.isHistoricalOnly
+      ) {
+        group.pathHint = null;
+      }
+    }
     const autoSortedKeys = allGroups
       .slice()
       .sort((left, right) => right.latestUpdatedAt - left.latestUpdatedAt)
@@ -1725,11 +2125,11 @@ export function App(): React.JSX.Element {
       if (window.location.pathname !== nextPath) {
         window.history.pushState(null, "", nextPath);
       }
-      setSelectedThreadId(threadId);
+      updateSelectedThreadId(threadId);
       setActiveTab("chat");
       closeMobileSidebar();
     },
-    [closeMobileSidebar],
+    [closeMobileSidebar, updateSelectedThreadId],
   );
   const mobileSidebarRendered = mobileSidebarOpen || mobileSidebarDragOffset !== null;
   const mobileSidebarOffsetX =
@@ -2008,7 +2408,7 @@ export function App(): React.JSX.Element {
         return enabledAgents.includes(cur) ? cur : nextDefaultAgent;
       });
     }
-    setSelectedThreadId((cur) => {
+    updateSelectedThreadId((cur) => {
       if (cur) {
         return cur;
       }
@@ -2107,18 +2507,41 @@ export function App(): React.JSX.Element {
       threadId: string,
       options?: Partial<LoadSelectedThreadOptions>,
     ) => {
+      const selectedThreadRevision = selectedThreadRevisionRef.current;
+      const nextLoadRevision =
+        (threadLoadRevisionByIdRef.current.get(threadId) ?? 0) + 1;
+      threadLoadRevisionByIdRef.current.set(threadId, nextLoadRevision);
+      const isCurrentLoadRevision = (): boolean =>
+        threadLoadRevisionByIdRef.current.get(threadId) === nextLoadRevision;
+      const isCurrentSelectedThreadRevision = (): boolean =>
+        selectedThreadIdRef.current === threadId &&
+        selectedThreadRevisionRef.current === selectedThreadRevision;
       const includeTurns = options?.includeTurns ?? true;
       const includeStreamEvents = options?.includeStreamEvents ?? includeTurns;
+      const chatVisibleItemLimit =
+        options?.chatVisibleItemLimit ??
+        (activeTabRef.current === "chat"
+          ? visibleChatItemLimitRef.current
+          : null);
       let threadAgentId = threadProviderByIdRef.current.get(threadId) ?? null;
       let read =
         threadAgentId === null
           ? await readThread(threadId, {
               includeTurns,
+              ...(chatVisibleItemLimit !== null
+                ? { maxRenderableItems: chatVisibleItemLimit }
+                : {}),
             })
           : await readThread(threadId, {
               includeTurns,
               provider: threadAgentId,
+              ...(chatVisibleItemLimit !== null
+                ? { maxRenderableItems: chatVisibleItemLimit }
+                : {}),
             });
+      if (!isCurrentLoadRevision()) {
+        return;
+      }
       threadAgentId = read.thread.provider;
       threadProviderByIdRef.current.set(threadId, threadAgentId);
 
@@ -2137,53 +2560,127 @@ export function App(): React.JSX.Element {
         read = await readThread(threadId, {
           includeTurns: true,
           provider: threadAgentId,
+          ...(chatVisibleItemLimit !== null
+            ? { maxRenderableItems: chatVisibleItemLimit }
+            : {}),
         });
+        if (!isCurrentLoadRevision()) {
+          return;
+        }
       }
 
-      const live = canReadLiveState
-        ? await getLiveState(threadId, threadAgentId)
-        : {
-            ok: true as const,
+      let live: LiveStateResponse = {
+        ok: true,
+        threadId,
+        ownerClientId: null,
+        conversationState: null,
+        liveStateError: null,
+      };
+      if (canReadLiveState) {
+        try {
+          if (chatVisibleItemLimit !== null) {
+            live = await getLiveState(threadId, threadAgentId, {
+              maxRenderableItems: chatVisibleItemLimit,
+            });
+          } else {
+            live = await getLiveState(threadId, threadAgentId);
+          }
+          if (!isCurrentLoadRevision()) {
+            return;
+          }
+        } catch (error) {
+          console.error("Failed to load live state", error);
+          live = {
+            ok: true,
             threadId,
             ownerClientId: null,
             conversationState: null,
-            liveStateError: null,
+            liveStateError: {
+              kind: "reductionFailed",
+              message: toErrorMessage(error),
+              eventIndex: null,
+              patchIndex: null,
+            },
           };
+        }
+      }
 
       if (!shouldReadTurns && live.conversationState === null) {
         read = await readThread(threadId, {
           includeTurns: true,
           provider: threadAgentId,
+          ...(chatVisibleItemLimit !== null
+            ? { maxRenderableItems: chatVisibleItemLimit }
+            : {}),
         });
+        if (!isCurrentLoadRevision()) {
+          return;
+        }
         shouldReadTurns = true;
       }
+      const readForView =
+        shouldReadTurns && chatVisibleItemLimit !== null
+          ? normalizeReadThreadResponseForChatWindow(read, chatVisibleItemLimit) ??
+            read
+          : read;
+      const liveForView =
+        live.conversationState !== null && chatVisibleItemLimit !== null
+          ? normalizeLiveStateResponseForChatWindow(live, chatVisibleItemLimit) ??
+            live
+          : live;
       const shouldLoadStreamEvents =
         canReadStreamEvents &&
-        (activeTabRef.current === "debug" ||
-          (threadAgentId === "codex" && selectedThreadIdRef.current === threadId)) &&
+        isCurrentSelectedThreadRevision() &&
+        (activeTabRef.current === "debug" || threadAgentId === "codex") &&
         (includeStreamEvents || threadAgentId === "codex");
       const shouldUpdateSelectedThread =
-        selectedThreadIdRef.current === threadId;
+        isCurrentSelectedThreadRevision();
       const existingCachedState =
         threadViewStateCacheRef.current.get(threadId) ?? null;
-      let nextStreamEvents = existingCachedState?.streamEvents ?? [];
+      let nextStreamEvents = retainStreamEventsForView(
+        existingCachedState?.streamEvents ?? [],
+        activeTabRef.current,
+      );
+      const cacheChatVisibleItemLimit =
+        activeTabRef.current === "chat"
+          ? visibleChatItemLimitRef.current
+          : INITIAL_VISIBLE_CHAT_ITEMS;
+      const buildCachedThreadState = (
+        streamEventsForCache: StreamEventsResponse["events"],
+      ): CachedThreadViewState =>
+        normalizeCachedThreadViewStateForStorage(
+          {
+            readThreadState: shouldReadTurns
+              ? readForView
+              : (existingCachedState?.readThreadState ?? null),
+            liveState: liveForView,
+            streamEvents: streamEventsForCache,
+          },
+          {
+            activeTab: activeTabRef.current,
+            chatVisibleItemLimit: cacheChatVisibleItemLimit,
+          },
+        );
+      if (!isCurrentLoadRevision()) {
+        return;
+      }
       startTransition(() => {
         setThreads((previousThreads) => {
-          const nextIsGenerating = live.conversationState
-            ? isThreadGeneratingState(live.conversationState)
-            : isThreadGeneratingState(read.thread);
+          const nextIsGenerating = liveForView.conversationState
+            ? isThreadGeneratingState(liveForView.conversationState)
+            : isThreadGeneratingState(readForView.thread);
           const nextThreads = previousThreads.map((threadSummary) => {
-            if (threadSummary.id !== read.thread.id) {
+            if (threadSummary.id !== readForView.thread.id) {
               return threadSummary;
             }
 
             const nextUpdatedAt =
-              typeof read.thread.updatedAt === "number"
-                ? Math.max(threadSummary.updatedAt, read.thread.updatedAt)
+              typeof readForView.thread.updatedAt === "number"
+                ? Math.max(threadSummary.updatedAt, readForView.thread.updatedAt)
                 : threadSummary.updatedAt;
             const nextTitle =
-              read.thread.title !== undefined
-                ? read.thread.title
+              readForView.thread.title !== undefined
+                ? readForView.thread.title
                 : threadSummary.title;
             const hadGenerating = threadSummary.isGenerating ?? false;
 
@@ -2217,62 +2714,102 @@ export function App(): React.JSX.Element {
         setLiveState((prev) => {
           if (
             buildLiveStateSyncSignature(prev) ===
-            buildLiveStateSyncSignature(live)
+            buildLiveStateSyncSignature(liveForView)
           ) {
             return prev;
           }
-          return live;
+          return liveForView;
         });
         if (shouldReadTurns) {
           setReadThreadState((prev) => {
             if (
               buildReadThreadSyncSignature(prev) ===
-              buildReadThreadSyncSignature(read)
+              buildReadThreadSyncSignature(readForView)
             ) {
               return prev;
             }
-            return read;
+            return readForView;
           });
         }
       });
 
-      threadViewStateCacheRef.current.set(threadId, {
-        readThreadState: shouldReadTurns
-          ? read
-          : (existingCachedState?.readThreadState ?? null),
-        liveState: live,
-        streamEvents: nextStreamEvents,
-      });
+      setBoundedCacheEntry(
+        threadViewStateCacheRef.current,
+        threadId,
+        buildCachedThreadState(nextStreamEvents),
+        MAX_CACHED_THREAD_VIEW_STATES,
+      );
+      pruneMapToRetainedKeys(threadLoadRevisionByIdRef.current, [
+        ...threadViewStateCacheRef.current.keys(),
+        ...(selectedThreadIdRef.current ? [selectedThreadIdRef.current] : []),
+      ]);
+      if (shouldUpdateSelectedThread) {
+        startTransition(() => {
+          setStreamEvents((prev) => {
+            const prevLast = prev[prev.length - 1];
+            const nextLast = nextStreamEvents[nextStreamEvents.length - 1];
+            const prevLastSignature = prevLast ? JSON.stringify(prevLast) : "";
+            const nextLastSignature = nextLast ? JSON.stringify(nextLast) : "";
+            if (
+              prev.length === nextStreamEvents.length &&
+              prevLastSignature === nextLastSignature
+            ) {
+              return prev;
+            }
+            return nextStreamEvents;
+          });
+        });
+      }
+      if (shouldUpdateSelectedThread) {
+        setError((current) =>
+          shouldClearResolvedThreadError(current, threadId) ? "" : current,
+        );
+      }
 
       if (!shouldLoadStreamEvents) {
         return;
       }
 
-      const stream = await getStreamEvents(threadId, threadAgentId);
-      nextStreamEvents = stream.events;
-      threadViewStateCacheRef.current.set(threadId, {
-        readThreadState: shouldReadTurns
-          ? read
-          : (existingCachedState?.readThreadState ?? null),
-        liveState: live,
-        streamEvents: nextStreamEvents,
-      });
+      let stream: StreamEventsResponse;
+      try {
+        stream = await getStreamEvents(threadId, threadAgentId);
+      } catch (error) {
+        console.error("Failed to load stream events", error);
+        return;
+      }
+      if (!isCurrentLoadRevision()) {
+        return;
+      }
+      nextStreamEvents = retainStreamEventsForView(
+        stream.events,
+        activeTabRef.current,
+      );
+      setBoundedCacheEntry(
+        threadViewStateCacheRef.current,
+        threadId,
+        buildCachedThreadState(nextStreamEvents),
+        MAX_CACHED_THREAD_VIEW_STATES,
+      );
+      pruneMapToRetainedKeys(threadLoadRevisionByIdRef.current, [
+        ...threadViewStateCacheRef.current.keys(),
+        ...(selectedThreadIdRef.current ? [selectedThreadIdRef.current] : []),
+      ]);
       if (selectedThreadIdRef.current !== threadId) {
         return;
       }
       startTransition(() => {
         setStreamEvents((prev) => {
           const prevLast = prev[prev.length - 1];
-          const nextLast = stream.events[stream.events.length - 1];
+          const nextLast = nextStreamEvents[nextStreamEvents.length - 1];
           const prevLastSignature = prevLast ? JSON.stringify(prevLast) : "";
           const nextLastSignature = nextLast ? JSON.stringify(nextLast) : "";
           if (
-            prev.length === stream.events.length &&
+            prev.length === nextStreamEvents.length &&
             prevLastSignature === nextLastSignature
           ) {
             return prev;
           }
-          return stream.events;
+          return nextStreamEvents;
         });
       });
     },
@@ -2349,16 +2886,20 @@ export function App(): React.JSX.Element {
   }, [activeTab]);
 
   useEffect(() => {
+    visibleChatItemLimitRef.current = visibleChatItemLimit;
+  }, [visibleChatItemLimit]);
+
+  useEffect(() => {
     const onPopState = () => {
       const next = parseUiStateFromPath(window.location.pathname);
-      setSelectedThreadId(next.threadId);
+      updateSelectedThreadId(next.threadId);
       setActiveTab(next.tab);
     };
     window.addEventListener("popstate", onPopState);
     return () => {
       window.removeEventListener("popstate", onPopState);
     };
-  }, []);
+  }, [updateSelectedThreadId]);
 
   useEffect(() => {
     const nextPath = buildPathFromUiState(selectedThreadId, activeTab);
@@ -2465,6 +3006,15 @@ export function App(): React.JSX.Element {
       window.clearInterval(selectedThreadRefreshIntervalRef.current);
       selectedThreadRefreshIntervalRef.current = null;
     };
+    const shouldPollSelectedThread = () => {
+      if (activeTabRef.current === "debug") {
+        return false;
+      }
+      if (activeTabRef.current === "chat" && isUnifiedEventsConnected) {
+        return false;
+      }
+      return true;
+    };
 
     if (!selectedThreadId) {
       stopSelectedThreadRefresh();
@@ -2475,18 +3025,28 @@ export function App(): React.JSX.Element {
       if (document.visibilityState === "hidden") {
         return;
       }
+      // Poll full thread snapshots only as a fallback. A healthy SSE stream is
+      // enough to keep the chat view current, while repeated full reloads can
+      // grow expensive on long-running local threads.
+      if (!shouldPollSelectedThread()) {
+        return;
+      }
       const load = loadSelectedThreadRef.current;
       if (!load) {
         return;
       }
       void load(selectedThreadId, {
         includeTurns: true,
-        includeStreamEvents: activeTabRef.current === "debug",
+        includeStreamEvents: false,
       }).catch((e) =>
         setError(toErrorMessage(e)),
       );
     };
     const resumeSelectedThreadRefresh = () => {
+      if (!shouldPollSelectedThread()) {
+        stopSelectedThreadRefresh();
+        return;
+      }
       startSelectedThreadRefresh();
       refreshSelectedThreadData();
     };
@@ -2525,21 +3085,28 @@ export function App(): React.JSX.Element {
       window.removeEventListener("pagehide", onPageHide);
       window.removeEventListener("pageshow", onPageShow);
     };
-  }, [selectedThreadId]);
+  }, [selectedThreadId, activeTab, isUnifiedEventsConnected]);
 
   useEffect(() => {
     if (!selectedThreadId) {
+      pruneMapToRetainedKeys(threadLoadRevisionByIdRef.current, []);
       setLiveState(null);
       setReadThreadState(null);
       setStreamEvents([]);
       return;
     }
+    pruneMapToRetainedKeys(threadLoadRevisionByIdRef.current, [
+      ...threadViewStateCacheRef.current.keys(),
+      selectedThreadId,
+    ]);
     const cachedState =
       threadViewStateCacheRef.current.get(selectedThreadId) ?? null;
     if (cachedState) {
       setLiveState(cachedState.liveState);
       setReadThreadState(cachedState.readThreadState);
-      setStreamEvents(cachedState.streamEvents);
+      setStreamEvents(
+        retainStreamEventsForView(cachedState.streamEvents, activeTabRef.current),
+      );
     } else {
       setLiveState(null);
       setReadThreadState(null);
@@ -2556,11 +3123,26 @@ export function App(): React.JSX.Element {
   }, [selectedThreadId]);
 
   useEffect(() => {
+    if (!selectedThreadId) {
+      return;
+    }
+    const load = loadSelectedThreadRef.current;
+    if (!load) {
+      return;
+    }
+    void load(selectedThreadId, {
+      includeTurns: true,
+      includeStreamEvents: activeTab === "debug",
+      chatVisibleItemLimit:
+        activeTab === "chat" ? visibleChatItemLimitRef.current : null,
+    }).catch((e) => setError(toErrorMessage(e)));
+  }, [activeTab, selectedThreadId]);
+
+  useEffect(() => {
     let disposed = false;
     let source: EventSource | null = null;
     let reconnectTimer: number | null = null;
     let reconnectDelayMs = 1000;
-    let hasOpenedConnection = false;
 
     const scheduleRefresh = (
       refreshCore: boolean,
@@ -2645,11 +3227,8 @@ export function App(): React.JSX.Element {
 
       source = new EventSource(unifiedEventsUrl);
       source.onopen = () => {
+        setIsUnifiedEventsConnected(true);
         reconnectDelayMs = 1000;
-        if (hasOpenedConnection) {
-          return;
-        }
-        hasOpenedConnection = true;
         scheduleRefresh(
           true,
           activeTabRef.current === "debug",
@@ -2711,6 +3290,7 @@ export function App(): React.JSX.Element {
       };
 
       source.onerror = () => {
+        setIsUnifiedEventsConnected(false);
         if (source) {
           source.close();
           source = null;
@@ -2733,6 +3313,7 @@ export function App(): React.JSX.Element {
         refreshHistory: false,
         refreshSelectedThread: false,
       };
+      setIsUnifiedEventsConnected(false);
       if (source) {
         source.close();
         source = null;
@@ -2870,19 +3451,22 @@ export function App(): React.JSX.Element {
     if (!ENABLE_VIEW_SNAPSHOT_CACHE) {
       return;
     }
-    appViewSnapshotCache = {
-      threads,
-      threadListErrors,
-      selectedThreadId,
-      liveState,
-      readThreadState,
-      streamEvents,
-      modes,
-      models,
-      agentDescriptors,
-      selectedAgentId,
-      activeTab,
-    };
+    appViewSnapshotCache = normalizeAppViewSnapshotForStorage(
+      {
+        threads,
+        threadListErrors,
+        selectedThreadId,
+        liveState,
+        readThreadState,
+        streamEvents,
+        modes,
+        models,
+        agentDescriptors,
+        selectedAgentId,
+        activeTab,
+      },
+      activeTab === "chat" ? visibleChatItemLimit : INITIAL_VISIBLE_CHAT_ITEMS,
+    );
   }, [
     activeTab,
     agentDescriptors,
@@ -2895,6 +3479,7 @@ export function App(): React.JSX.Element {
     streamEvents,
     threadListErrors,
     threads,
+    visibleChatItemLimit,
   ]);
 
   useEffect(() => {
@@ -2996,6 +3581,24 @@ export function App(): React.JSX.Element {
     setVisibleChatItemLimit(INITIAL_VISIBLE_CHAT_ITEMS);
   }, [activeTab, scrollChatToBottom, selectedThreadId]);
 
+  const handleShowOlderChatMessages = useCallback(() => {
+    if (!selectedThreadId) {
+      return;
+    }
+    const nextLimit = visibleChatItemLimitRef.current + VISIBLE_CHAT_ITEMS_STEP;
+    visibleChatItemLimitRef.current = nextLimit;
+    setVisibleChatItemLimit(nextLimit);
+    const load = loadSelectedThreadRef.current;
+    if (!load) {
+      return;
+    }
+    void load(selectedThreadId, {
+      includeTurns: true,
+      includeStreamEvents: false,
+      chatVisibleItemLimit: nextLimit,
+    }).catch((e) => setError(toErrorMessage(e)));
+  }, [selectedThreadId]);
+
   /* Actions */
   const submitMessage = useCallback(
     async (draft: string) => {
@@ -3029,8 +3632,7 @@ export function App(): React.JSX.Element {
               created.thread,
             ),
           );
-          setSelectedThreadId(threadId);
-          selectedThreadIdRef.current = threadId;
+          updateSelectedThreadId(threadId);
         }
 
         await sendMessage({
@@ -3056,6 +3658,7 @@ export function App(): React.JSX.Element {
       refreshAll,
       selectedAgentId,
       selectedThreadId,
+      updateSelectedThreadId,
       upsertSidebarThread,
     ],
   );
@@ -3286,7 +3889,12 @@ export function App(): React.JSX.Element {
     const requestId = historyDetailRequestIdRef.current + 1;
     historyDetailRequestIdRef.current = requestId;
     const detail = await getHistoryEntry(id);
-    historyDetailCacheRef.current.set(id, detail);
+    setBoundedCacheEntry(
+      historyDetailCacheRef.current,
+      id,
+      detail,
+      MAX_CACHED_HISTORY_DETAILS,
+    );
     if (historyDetailRequestIdRef.current !== requestId) {
       return;
     }
@@ -3342,8 +3950,7 @@ export function App(): React.JSX.Element {
             created.thread,
           ),
         );
-        setSelectedThreadId(created.threadId);
-        selectedThreadIdRef.current = created.threadId;
+        updateSelectedThreadId(created.threadId);
         closeMobileSidebar();
         await refreshAll();
       } catch (e) {
@@ -3352,7 +3959,14 @@ export function App(): React.JSX.Element {
         setIsBusy(false);
       }
     },
-    [agentsById, closeMobileSidebar, refreshAll, selectedAgentId, upsertSidebarThread],
+    [
+      agentsById,
+      closeMobileSidebar,
+      refreshAll,
+      selectedAgentId,
+      updateSelectedThreadId,
+      upsertSidebarThread,
+    ],
   );
 
   const createThreadForSingleAgent = useCallback(
@@ -3683,13 +4297,28 @@ export function App(): React.JSX.Element {
                       }
                       variant="ghost"
                       className="h-6 flex-1 justify-start gap-1.5 rounded-lg px-1.5 py-1 text-left text-[13px] tracking-tight font-normal text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                      title={group.projectPath ?? group.label}
                     >
                       {isCollapsed ? (
                         <Folder size={13} className="shrink-0" />
                       ) : (
                         <FolderOpen size={13} className="shrink-0" />
                       )}
-                      <span className="min-w-0 truncate">{group.label}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-1.5">
+                          <span className="min-w-0 truncate">{group.label}</span>
+                          {group.isHistoricalOnly && (
+                            <Badge className="h-4 shrink-0 px-1.5 py-0 text-[9px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                              History
+                            </Badge>
+                          )}
+                        </span>
+                        {group.pathHint && (
+                          <span className="block truncate text-[10px] leading-4 text-muted-foreground/70">
+                            {group.pathHint}
+                          </span>
+                        )}
+                      </span>
                     </Button>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -3858,7 +4487,7 @@ export function App(): React.JSX.Element {
                             key={thread.id}
                             type="button"
                             onClick={() => {
-                              setSelectedThreadId(thread.id);
+                              updateSelectedThreadId(thread.id);
                               closeMobileSidebar();
                             }}
                             variant="ghost"
@@ -4378,11 +5007,7 @@ export function App(): React.JSX.Element {
                   visibleConversationItems={visibleConversationItems}
                   isChatAtBottom={isChatAtBottom}
                   onSelectThread={handleSelectReferencedThread}
-                  onShowOlder={() => {
-                    setVisibleChatItemLimit(
-                      (limit) => limit + VISIBLE_CHAT_ITEMS_STEP,
-                    );
-                  }}
+                  onShowOlder={handleShowOlderChatMessages}
                   onScrollToBottom={() => {
                     scrollChatToBottom();
                     isChatAtBottomRef.current = true;
@@ -4688,18 +5313,32 @@ export function App(): React.JSX.Element {
                           {traceStatus?.active ? "recording" : "idle"}
                         </span>
                       </div>
-                      <Input
-                        value={traceLabel}
-                        onChange={(e) => setTraceLabel(e.target.value)}
-                        placeholder="label"
-                        className="h-7 text-base md:text-xs"
-                      />
-                      <Input
-                        value={traceNote}
-                        onChange={(e) => setTraceNote(e.target.value)}
-                        placeholder="marker note"
-                        className="h-7 text-base md:text-xs"
-                      />
+                      <div className="space-y-1">
+                        <Label htmlFor="trace-label" className="sr-only">
+                          Trace label
+                        </Label>
+                        <Input
+                          id="trace-label"
+                          name="traceLabel"
+                          value={traceLabel}
+                          onChange={(e) => setTraceLabel(e.target.value)}
+                          placeholder="label"
+                          className="h-7 text-base md:text-xs"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="trace-note" className="sr-only">
+                          Trace marker note
+                        </Label>
+                        <Input
+                          id="trace-note"
+                          name="traceNote"
+                          value={traceNote}
+                          onChange={(e) => setTraceNote(e.target.value)}
+                          placeholder="marker note"
+                          className="h-7 text-base md:text-xs"
+                        />
+                      </div>
                       <div className="flex gap-1.5">
                         {(["Start", "Mark", "Stop"] as const).map((btn) => (
                           <Button

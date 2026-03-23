@@ -103,6 +103,10 @@ const methodManifestSources = {
   ]
 };
 
+function toPosixRelative(filePath) {
+  return path.relative(root, filePath).split(path.sep).join("/");
+}
+
 function ensureSchemaFilesExist() {
   const missing = schemaTargets.filter((target) => !fs.existsSync(target.source));
   const missingManifestSources = Object.entries(methodManifestSources)
@@ -144,7 +148,7 @@ async function writeSchemaModule(target) {
 
   const withHeader = [
     "// GENERATED FILE. DO NOT EDIT.",
-    `// Source: ${path.relative(root, target.source)}`,
+    `// Source: ${toPosixRelative(target.source)}`,
     generated.trim(),
     ""
   ].join("\n");
@@ -194,10 +198,10 @@ function writeMethodManifestModule() {
 
   const lines = [
     "// GENERATED FILE. DO NOT EDIT.",
-    ...methodManifestSources.clientRequest.map((source) => `// Source: ${path.relative(root, source)}`),
-    ...methodManifestSources.clientNotification.map((source) => `// Source: ${path.relative(root, source)}`),
-    ...methodManifestSources.serverRequest.map((source) => `// Source: ${path.relative(root, source)}`),
-    ...methodManifestSources.serverNotification.map((source) => `// Source: ${path.relative(root, source)}`),
+    ...methodManifestSources.clientRequest.map((source) => `// Source: ${toPosixRelative(source)}`),
+    ...methodManifestSources.clientNotification.map((source) => `// Source: ${toPosixRelative(source)}`),
+    ...methodManifestSources.serverRequest.map((source) => `// Source: ${toPosixRelative(source)}`),
+    ...methodManifestSources.serverNotification.map((source) => `// Source: ${toPosixRelative(source)}`),
     "",
     renderStringTuple("APP_SERVER_CLIENT_REQUEST_METHODS", clientRequestMethods),
     "export type AppServerClientRequestMethod =",
