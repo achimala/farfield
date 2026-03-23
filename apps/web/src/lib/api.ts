@@ -654,6 +654,19 @@ export async function listSidebarThreads(options: {
   });
 }
 
+function normalizePositiveIntegerOption(
+  value: number | undefined,
+  name: string,
+): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new RangeError(`${name} must be a positive integer`);
+  }
+  return value;
+}
+
 export async function readThread(
   threadId: string,
   options?: {
@@ -662,6 +675,10 @@ export async function readThread(
     maxRenderableItems?: number;
   },
 ): Promise<z.infer<typeof ReadThreadResponseSchema>> {
+  const maxRenderableItems = normalizePositiveIntegerOption(
+    options?.maxRenderableItems,
+    "maxRenderableItems",
+  );
   const params = new URLSearchParams();
   if (typeof options?.provider === "string") {
     params.set("provider", options.provider);
@@ -669,12 +686,8 @@ export async function readThread(
   if (typeof options?.includeTurns === "boolean") {
     params.set("includeTurns", options.includeTurns ? "1" : "0");
   }
-  if (
-    typeof options?.maxRenderableItems === "number" &&
-    Number.isInteger(options.maxRenderableItems) &&
-    options.maxRenderableItems > 0
-  ) {
-    params.set("maxRenderableItems", String(options.maxRenderableItems));
+  if (maxRenderableItems !== undefined) {
+    params.set("maxRenderableItems", String(maxRenderableItems));
   }
 
   const query = params.toString();
@@ -763,15 +776,15 @@ export async function getLiveState(
   provider: AgentId,
   options?: { maxRenderableItems?: number },
 ): Promise<z.infer<typeof LiveStateResponseSchema>> {
+  const maxRenderableItems = normalizePositiveIntegerOption(
+    options?.maxRenderableItems,
+    "maxRenderableItems",
+  );
   const result = await runUnifiedCommand({
     kind: "readLiveState",
     provider,
     threadId,
-    ...(typeof options?.maxRenderableItems === "number" &&
-    Number.isInteger(options.maxRenderableItems) &&
-    options.maxRenderableItems > 0
-      ? { maxRenderableItems: options.maxRenderableItems }
-      : {}),
+    ...(maxRenderableItems !== undefined ? { maxRenderableItems } : {}),
   });
 
   if (result.kind !== "readLiveState") {

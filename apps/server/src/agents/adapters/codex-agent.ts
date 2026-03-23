@@ -112,7 +112,7 @@ export class CodexAgentAdapter implements AgentAdapter {
     canReadRateLimits: true,
   };
 
-  private readonly appClient: AppServerClient;
+  protected readonly appClient: AppServerClient;
   private readonly ipcClient: DesktopIpcClient;
   private readonly service: CodexMonitorService;
   private readonly onStateChange: (() => void) | null;
@@ -1061,7 +1061,7 @@ export class CodexAgentAdapter implements AgentAdapter {
     this.notifyStateChanged();
   }
 
-  private patchRuntimeState(patch: Partial<CodexAgentRuntimeState>): void {
+  protected patchRuntimeState(patch: Partial<CodexAgentRuntimeState>): void {
     this.setRuntimeState({
       ...this.runtimeState,
       ...patch,
@@ -1222,7 +1222,7 @@ export class CodexAgentAdapter implements AgentAdapter {
     );
   }
 
-  private async restoreArchivedThreadState(
+  protected async restoreArchivedThreadState(
     threadId: string,
     includeTurns: boolean,
   ): Promise<ThreadConversationState | null> {
@@ -1244,14 +1244,19 @@ export class CodexAgentAdapter implements AgentAdapter {
         return null;
       }
 
+      const validated = parseThreadConversationState(restored);
       const normalized = includeTurns
-        ? restored
+        ? validated
         : {
-            ...restored,
+            ...validated,
             turns: [],
           };
-      if (restored.turns.length > 0) {
-        this.setTrackedThreadSnapshot(threadId, restored, "readThreadWithTurns");
+      if (validated.turns.length > 0) {
+        this.setTrackedThreadSnapshot(
+          threadId,
+          validated,
+          "readThreadWithTurns",
+        );
       }
       this.setThreadTitle(threadId, normalized.title);
       this.archivedRestoreHitCount += 1;
@@ -1396,12 +1401,12 @@ export class CodexAgentAdapter implements AgentAdapter {
     this.updateRuntimeHighWaterMarks();
   }
 
-  private setTrackedThreadOwner(threadId: string, ownerClientId: string): void {
+  protected setTrackedThreadOwner(threadId: string, ownerClientId: string): void {
     this.touchTrackedThread(threadId);
     this.threadOwnerById.set(threadId, ownerClientId);
   }
 
-  private setTrackedThreadEvents(threadId: string, events: IpcFrame[]): void {
+  protected setTrackedThreadEvents(threadId: string, events: IpcFrame[]): void {
     this.touchTrackedThread(threadId);
     this.streamEventsByThreadId.set(
       threadId,
@@ -1410,7 +1415,7 @@ export class CodexAgentAdapter implements AgentAdapter {
     this.updateRuntimeHighWaterMarks();
   }
 
-  private setTrackedThreadSnapshot(
+  protected setTrackedThreadSnapshot(
     threadId: string,
     snapshot: ThreadConversationState,
     origin: StreamSnapshotOrigin,
@@ -1420,7 +1425,7 @@ export class CodexAgentAdapter implements AgentAdapter {
     this.streamSnapshotOriginByThreadId.set(threadId, origin);
   }
 
-  private setThreadTitle(
+  protected setThreadTitle(
     threadId: string,
     title: string | null | undefined,
   ): void {
@@ -1535,7 +1540,7 @@ interface ArchivedThreadIndexMetadata {
 interface ArchivedSessionEntry {
   timestamp?: string;
   type?: string;
-  payload?: Record<string, unknown>;
+  payload?: Record<string, ArchivedJsonValue>;
 }
 
 export function buildArchivedThreadConversationStateFromJsonl(
@@ -1874,8 +1879,7 @@ export function buildArchivedThreadConversationStateFromJsonl(
       case "token_count": {
         const payloadInfo = payload["info"];
         if (payloadInfo !== undefined) {
-          latestTokenUsageInfo =
-            payloadInfo as ThreadConversationState["latestTokenUsageInfo"];
+          latestTokenUsageInfo = payloadInfo;
         }
         break;
       }

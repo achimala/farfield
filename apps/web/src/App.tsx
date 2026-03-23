@@ -1127,7 +1127,25 @@ function basenameFromPath(value: string): string {
 }
 
 function displayPathFromValue(value: string): string {
-  return value.trim().replaceAll("\\", "/").replace(/\/+/g, "/").replace(/\/+$/, "");
+  const normalizedSlashes = value.trim().replaceAll("\\", "/");
+  if (normalizedSlashes.length === 0) {
+    return "";
+  }
+
+  const collapsed = normalizedSlashes.startsWith("//")
+    ? `//${normalizedSlashes.replace(/^\/+/, "").replace(/\/+/g, "/")}`
+    : normalizedSlashes.replace(/\/+/g, "/");
+  if (
+    collapsed === "/" ||
+    /^[a-z]:\/$/i.test(collapsed) ||
+    /^\/\/[^/]+\/[^/]+\/?$/i.test(collapsed)
+  ) {
+    return collapsed === "/" || collapsed.endsWith("/")
+      ? collapsed
+      : `${collapsed}/`;
+  }
+
+  return collapsed.replace(/\/+$/, "");
 }
 
 function normalizeProjectPathKey(value: string): string {
@@ -1477,7 +1495,10 @@ export function App(): React.JSX.Element {
   const [draggedGroupKey, setDraggedGroupKey] = useState<string | null>(null);
 
   /* Refs */
-  const selectedThreadIdRef = useRef<string | null>(null);
+  const selectedThreadIdRef = useRef<string | null>(
+    initialSnapshot?.selectedThreadId ?? initialUiState.threadId,
+  );
+  const selectedThreadRevisionRef = useRef(0);
   const visibleChatItemLimitRef = useRef(INITIAL_VISIBLE_CHAT_ITEMS);
   const activeTabRef = useRef<"chat" | "debug">(
     initialTab,
@@ -1529,6 +1550,25 @@ export function App(): React.JSX.Element {
   const modelsSignatureRef = useRef<string[]>([]);
   const historyDetailCacheRef = useRef<Map<string, HistoryDetail>>(new Map());
   const historyDetailRequestIdRef = useRef(0);
+
+  const updateSelectedThreadId = useCallback(
+    (
+      next:
+        | string
+        | null
+        | ((current: string | null) => string | null),
+    ) => {
+      const current = selectedThreadIdRef.current;
+      const resolved = typeof next === "function" ? next(current) : next;
+      if (resolved === current) {
+        return;
+      }
+      selectedThreadIdRef.current = resolved;
+      selectedThreadRevisionRef.current += 1;
+      setSelectedThreadId(resolved);
+    },
+    [],
+  );
 
   /* Derived */
   const selectedThread = useMemo(
@@ -1638,9 +1678,15 @@ export function App(): React.JSX.Element {
         threadAgentId,
       );
 
+      const nextIsHistoricalOnly =
+        projectKey.length > 0 &&
+        currentProjectPathKeys !== undefined &&
+        !currentProjectPathKeys.has(projectKey);
       const existing = groups.get(key);
       if (existing) {
         existing.threads.push(thread);
+        existing.isHistoricalOnly =
+          existing.isHistoricalOnly && nextIsHistoricalOnly;
         if (!existing.preferredAgentId) {
           existing.preferredAgentId = threadAgentId;
         }
@@ -1653,10 +1699,7 @@ export function App(): React.JSX.Element {
           label,
           projectPath,
           pathHint: projectPath ? projectPathHint(projectPath) : null,
-          isHistoricalOnly:
-            projectKey.length > 0 &&
-            currentProjectPathKeys !== undefined &&
-            !currentProjectPathKeys.has(projectKey),
+          isHistoricalOnly: nextIsHistoricalOnly,
           latestUpdatedAt: updatedAt,
           preferredAgentId: threadAgentId,
           threads: [thread],
@@ -2073,11 +2116,11 @@ export function App(): React.JSX.Element {
       if (window.location.pathname !== nextPath) {
         window.history.pushState(null, "", nextPath);
       }
-      setSelectedThreadId(threadId);
+      updateSelectedThreadId(threadId);
       setActiveTab("chat");
       closeMobileSidebar();
     },
-    [closeMobileSidebar],
+    [closeMobileSidebar, updateSelectedThreadId],
   );
   const mobileSidebarRendered = mobileSidebarOpen || mobileSidebarDragOffset !== null;
   const mobileSidebarOffsetX =
@@ -2356,7 +2399,7 @@ export function App(): React.JSX.Element {
         return enabledAgents.includes(cur) ? cur : nextDefaultAgent;
       });
     }
-    setSelectedThreadId((cur) => {
+    updateSelectedThreadId((cur) => {
       if (cur) {
         return cur;
       }
@@ -2455,11 +2498,15 @@ export function App(): React.JSX.Element {
       threadId: string,
       options?: Partial<LoadSelectedThreadOptions>,
     ) => {
+      const selectedThreadRevision = selectedThreadRevisionRef.current;
       const nextLoadRevision =
         (threadLoadRevisionByIdRef.current.get(threadId) ?? 0) + 1;
       threadLoadRevisionByIdRef.current.set(threadId, nextLoadRevision);
       const isCurrentLoadRevision = (): boolean =>
         threadLoadRevisionByIdRef.current.get(threadId) === nextLoadRevision;
+      const isCurrentSelectedThreadRevision = (): boolean =>
+        selectedThreadIdRef.current === threadId &&
+        selectedThreadRevisionRef.current === selectedThreadRevision;
       const includeTurns = options?.includeTurns ?? true;
       const includeStreamEvents = options?.includeStreamEvents ?? includeTurns;
       const chatVisibleItemLimit =
@@ -2574,11 +2621,11 @@ export function App(): React.JSX.Element {
           : live;
       const shouldLoadStreamEvents =
         canReadStreamEvents &&
-        (activeTabRef.current === "debug" ||
-          (threadAgentId === "codex" && selectedThreadIdRef.current === threadId)) &&
+        isCurrentSelectedThreadRevision() &&
+        (activeTabRef.current === "debug" || threadAgentId === "codex") &&
         (includeStreamEvents || threadAgentId === "codex");
       const shouldUpdateSelectedThread =
-        selectedThreadIdRef.current === threadId;
+        isCurrentSelectedThreadRevision();
       const existingCachedState =
         threadViewStateCacheRef.current.get(threadId) ?? null;
       let nextStreamEvents = retainStreamEventsForView(
@@ -2836,14 +2883,14 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     const onPopState = () => {
       const next = parseUiStateFromPath(window.location.pathname);
-      setSelectedThreadId(next.threadId);
+      updateSelectedThreadId(next.threadId);
       setActiveTab(next.tab);
     };
     window.addEventListener("popstate", onPopState);
     return () => {
       window.removeEventListener("popstate", onPopState);
     };
-  }, []);
+  }, [updateSelectedThreadId]);
 
   useEffect(() => {
     const nextPath = buildPathFromUiState(selectedThreadId, activeTab);
@@ -3581,8 +3628,7 @@ export function App(): React.JSX.Element {
               created.thread,
             ),
           );
-          setSelectedThreadId(threadId);
-          selectedThreadIdRef.current = threadId;
+          updateSelectedThreadId(threadId);
         }
 
         await sendMessage({
@@ -3608,6 +3654,7 @@ export function App(): React.JSX.Element {
       refreshAll,
       selectedAgentId,
       selectedThreadId,
+      updateSelectedThreadId,
       upsertSidebarThread,
     ],
   );
@@ -3899,8 +3946,7 @@ export function App(): React.JSX.Element {
             created.thread,
           ),
         );
-        setSelectedThreadId(created.threadId);
-        selectedThreadIdRef.current = created.threadId;
+        updateSelectedThreadId(created.threadId);
         closeMobileSidebar();
         await refreshAll();
       } catch (e) {
@@ -3909,7 +3955,14 @@ export function App(): React.JSX.Element {
         setIsBusy(false);
       }
     },
-    [agentsById, closeMobileSidebar, refreshAll, selectedAgentId, upsertSidebarThread],
+    [
+      agentsById,
+      closeMobileSidebar,
+      refreshAll,
+      selectedAgentId,
+      updateSelectedThreadId,
+      upsertSidebarThread,
+    ],
   );
 
   const createThreadForSingleAgent = useCallback(
@@ -4430,7 +4483,7 @@ export function App(): React.JSX.Element {
                             key={thread.id}
                             type="button"
                             onClick={() => {
-                              setSelectedThreadId(thread.id);
+                              updateSelectedThreadId(thread.id);
                               closeMobileSidebar();
                             }}
                             variant="ghost"

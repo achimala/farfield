@@ -26,7 +26,6 @@ import {
   ChildProcessAppServerTransport,
   type ChildProcessAppServerTransportOptions
 } from "./app-server-transport.js";
-import { AppServerRpcError } from "./errors.js";
 
 function parseWithSchema<T>(
   schema: z.ZodType<T, z.ZodTypeDef, unknown>,
@@ -40,16 +39,40 @@ function parseWithSchema<T>(
   return parsed.data;
 }
 
-function isUnsupportedThreadReadRpcError(error: unknown): error is AppServerRpcError {
-  if (!(error instanceof AppServerRpcError)) {
+const ThreadReadRpcErrorDataSchema = z
+  .object({
+    action: z.string().optional(),
+    method: z.string().optional(),
+    variant: z.string().optional()
+  })
+  .passthrough();
+
+const AppServerRpcErrorLikeSchema = z
+  .object({
+    code: z.number(),
+    data: z.unknown().optional(),
+    message: z.string()
+  })
+  .passthrough();
+
+function isUnsupportedThreadReadRpcError(error: unknown): boolean {
+  const parsedError = AppServerRpcErrorLikeSchema.safeParse(error);
+  if (!parsedError.success || parsedError.data.code !== -32600) {
     return false;
   }
 
-  if (error.code !== -32600) {
-    return false;
+  const parsedData = ThreadReadRpcErrorDataSchema.safeParse(parsedError.data.data);
+  if (parsedData.success) {
+    const method = parsedData.data.method ?? parsedData.data.action;
+    if (
+      method === "thread/read" &&
+      parsedData.data.variant?.toLowerCase() === "unknown"
+    ) {
+      return true;
+    }
   }
 
-  const normalized = error.message.toLowerCase();
+  const normalized = parsedError.data.message.toLowerCase();
   return normalized.includes("unknown variant") && normalized.includes("thread/read");
 }
 

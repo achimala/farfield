@@ -1,6 +1,10 @@
 import { memo } from "react";
 import { GitBranch } from "lucide-react";
-import type { UnifiedItem, UnifiedItemKind } from "@farfield/unified-surface";
+import type {
+  JsonValue,
+  UnifiedItem,
+  UnifiedItemKind,
+} from "@farfield/unified-surface";
 import { ReasoningBlock } from "./ReasoningBlock";
 import { CommandBlock } from "./CommandBlock";
 import { DiffBlock } from "./DiffBlock";
@@ -60,7 +64,7 @@ function readImageContent(content: UserMessageLikeItem["content"]): string[] {
     .filter((url) => url.length > 0);
 }
 
-function stringifyPreview(value: unknown, maxLength = 600): string {
+function stringifyPreview(value: JsonValue, maxLength = 600): string {
   if (typeof value === "string") {
     if (value.length <= maxLength) {
       return value;
@@ -86,7 +90,9 @@ function summarizeDynamicToolContent(
   }
 
   const firstTextItem = contentItems.find(
-    (contentItem) => contentItem.type === "inputText" && contentItem.text.length > 0,
+    (contentItem) =>
+      contentItem.type === "inputText" &&
+      contentItem.text.trim().length > 0,
   );
   if (firstTextItem?.type === "inputText") {
     const text = firstTextItem.text.trim();

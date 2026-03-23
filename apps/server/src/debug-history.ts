@@ -4,6 +4,7 @@ const MAX_HISTORY_OBJECT_KEYS = 24;
 const MAX_HISTORY_TURN_PREVIEW_COUNT = 16;
 const MAX_HISTORY_ITEM_PREVIEW_COUNT = 20;
 const MAX_HISTORY_PATCH_PREVIEW_COUNT = 24;
+const MAX_HISTORY_COMPACT_DEPTH = 6;
 
 export interface StoredHistoryPayload {
   json: string;
@@ -120,7 +121,7 @@ function compactConversationState(
     turns: retainedTurns.map((turn, index) =>
       compactTurn(turn, retainedTurns.length - 1 - index),
     ),
-    requests: compactArray(requests, 1),
+    requests: compactArray(requests, 1, new WeakSet<object>()),
     ...(turns.length > MAX_HISTORY_TURN_PREVIEW_COUNT
       ? {
           truncatedTurnCount:
@@ -253,7 +254,11 @@ function compactPatch(patch: unknown, index: number): unknown {
   };
 }
 
-function compactJsonValue(value: unknown, depth: number): unknown {
+function compactJsonValue(
+  value: unknown,
+  depth: number,
+  seen = new WeakSet<object>(),
+): unknown {
   if (value === null || value === undefined) {
     return value;
   }
@@ -274,11 +279,27 @@ function compactJsonValue(value: unknown, depth: number): unknown {
   }
 
   if (Array.isArray(value)) {
-    return compactArray(value, depth + 1);
+    if (seen.has(value)) {
+      return "[Circular]";
+    }
+    seen.add(value);
+    if (depth >= MAX_HISTORY_COMPACT_DEPTH) {
+      return [{ __truncatedDepth: true }];
+    }
+    return compactArray(value, depth + 1, seen);
   }
 
   if (!isRecord(value)) {
     return value;
+  }
+
+  if (seen.has(value)) {
+    return "[Circular]";
+  }
+  seen.add(value);
+
+  if (depth >= MAX_HISTORY_COMPACT_DEPTH) {
+    return { __truncatedDepth: true };
   }
 
   const entries = Object.entries(value);
@@ -286,7 +307,7 @@ function compactJsonValue(value: unknown, depth: number): unknown {
   const result: Record<string, unknown> = {};
 
   for (const [key, nestedValue] of limitedEntries) {
-    result[key] = compactJsonValue(nestedValue, depth + 1);
+    result[key] = compactJsonValue(nestedValue, depth + 1, seen);
   }
 
   if (entries.length > MAX_HISTORY_OBJECT_KEYS) {
@@ -294,16 +315,21 @@ function compactJsonValue(value: unknown, depth: number): unknown {
       entries.length - MAX_HISTORY_OBJECT_KEYS;
   }
 
-  if (depth >= 6) {
-    result["__truncatedDepth"] = true;
-  }
-
   return result;
 }
 
-function compactArray(values: unknown[], depth: number): unknown[] {
+function compactArray(
+  values: unknown[],
+  depth: number,
+  seen: WeakSet<object>,
+): unknown[] {
+  if (depth >= MAX_HISTORY_COMPACT_DEPTH) {
+    return [{ __truncatedDepth: true }];
+  }
   const limitedValues = values.slice(0, MAX_HISTORY_ARRAY_ITEMS);
-  const result = limitedValues.map((value) => compactJsonValue(value, depth + 1));
+  const result = limitedValues.map((value) =>
+    compactJsonValue(value, depth + 1, seen),
+  );
 
   if (values.length > MAX_HISTORY_ARRAY_ITEMS) {
     result.push({

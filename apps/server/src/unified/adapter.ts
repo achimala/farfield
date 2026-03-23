@@ -1,5 +1,6 @@
 import {
   assertNever,
+  JsonValueSchema as ProtocolJsonValueSchema,
   type ThreadConversationState,
   UserInputRequestSchema,
 } from "@farfield/protocol";
@@ -36,6 +37,7 @@ type UnifiedCommandResultByKind<K extends UnifiedCommandKind> = Extract<
 type UnifiedCommandHandler<K extends UnifiedCommandKind> = (
   command: UnifiedCommandByKind<K>,
 ) => Promise<UnifiedCommandResultByKind<K>>;
+type ProtocolJsonValue = z.infer<typeof ProtocolJsonValueSchema>;
 
 export type UnifiedCommandHandlerTable = {
   [K in UnifiedCommandKind]: UnifiedCommandHandler<K>;
@@ -133,8 +135,26 @@ function shouldCountRenderableUnifiedItem(item: UnifiedItem): boolean {
       return (item.summary?.length ?? 0) > 0 || Boolean(item.text);
     case "userInputResponse":
       return Object.values(item.answers).some((answers) => answers.length > 0);
-    default:
+    case "error":
+    case "plan":
+    case "todoList":
+    case "planImplementation":
+    case "commandExecution":
+    case "fileChange":
+    case "contextCompaction":
+    case "webSearch":
+    case "mcpToolCall":
+    case "dynamicToolCall":
+    case "collabAgentToolCall":
+    case "imageView":
+    case "enteredReviewMode":
+    case "exitedReviewMode":
+    case "remoteTaskCreated":
+    case "modelChanged":
+    case "forkedFromConversation":
       return true;
+    default:
+      return assertNever(item);
   }
 }
 
@@ -1342,20 +1362,15 @@ function jsonValueFromString(serialized: string): JsonValue {
   return JsonValueSchema.parse(JSON.parse(serialized));
 }
 
-function buildJsonPreviewString(value: unknown, maxLength: number): string {
+function buildJsonPreviewString(
+  value: ProtocolJsonValue,
+  maxLength: number,
+): string {
   if (typeof value === "string") {
     return truncatePreviewText(value, maxLength);
   }
-
-  try {
-    const serialized = JSON.stringify(value);
-    if (!serialized) {
-      return "";
-    }
-    return truncatePreviewText(serialized, maxLength);
-  } catch {
-    return truncatePreviewText(String(value), maxLength);
-  }
+  const serialized = JSON.stringify(value);
+  return serialized ? truncatePreviewText(serialized, maxLength) : "";
 }
 
 function truncatePreviewText(value: string, maxLength: number): string {

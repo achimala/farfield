@@ -348,6 +348,9 @@ let readThreadResolver: (
 let liveStateResolver: (
   threadId: string,
   provider: ProviderId,
+  options?: {
+    maxRenderableItems?: number;
+  },
 ) => MaybePromise<{
   kind: "readLiveState";
   threadId: string;
@@ -530,13 +533,17 @@ beforeEach(() => {
 
   readThreadResolver = (_threadId: string, _provider: ProviderId | null) =>
     null;
-  liveStateResolver = (threadId: string, _provider: ProviderId) => ({
-    kind: "readLiveState",
-    threadId,
-    ownerClientId: null,
-    conversationState: null,
-    liveStateError: null,
-  });
+  liveStateResolver = (
+    threadId: string,
+    _provider: ProviderId,
+    _options?: { maxRenderableItems?: number },
+  ) => ({
+      kind: "readLiveState" as const,
+      threadId,
+      ownerClientId: null,
+      conversationState: null,
+      liveStateError: null,
+    });
 });
 
 afterEach(() => {
@@ -657,9 +664,21 @@ vi.stubGlobal(
       }
 
       if (body.kind === "readLiveState") {
+        const maxRenderableItems =
+          "maxRenderableItems" in body &&
+          typeof body.maxRenderableItems === "number" &&
+          Number.isFinite(body.maxRenderableItems)
+            ? body.maxRenderableItems
+            : undefined;
         return jsonResponse({
           ok: true,
-          result: await liveStateResolver(body.threadId ?? "", body.provider),
+          result: await liveStateResolver(
+            body.threadId ?? "",
+            body.provider,
+            maxRenderableItems !== undefined
+              ? { maxRenderableItems }
+              : undefined,
+          ),
         });
       }
 
@@ -1349,8 +1368,8 @@ describe("App", () => {
   it("normalizes windows project paths and disambiguates duplicate basenames", async () => {
     projectDirectoriesFixture = {
       codex: [
-        "c:\\Users\\magon\\Documents\\Code\\Projects\\AgentWorkingHome_P",
-        "c:\\Users\\magon\\Documents\\Code\\Projects\\P_AgentTools",
+        "c:\\Users\\testuser\\Documents\\Code\\Projects\\AgentWorkingHome_P",
+        "c:\\Users\\testuser\\Documents\\Code\\Projects\\P_AgentTools",
       ],
       opencode: [],
     };
@@ -1364,7 +1383,7 @@ describe("App", () => {
           preview: "first agent home thread",
           createdAt: 1700000000,
           updatedAt: 1700000030,
-          cwd: "C:\\Users\\magon\\Documents\\Code\\Projects\\AgentWorkingHome_P",
+          cwd: "C:\\Users\\testuser\\Documents\\Code\\Projects\\AgentWorkingHome_P",
           source: "vscode",
         },
         {
@@ -1373,7 +1392,7 @@ describe("App", () => {
           preview: "second agent home thread",
           createdAt: 1700000001,
           updatedAt: 1700000031,
-          cwd: "c:\\Users\\magon\\Documents\\Code\\Projects\\AgentWorkingHome_P",
+          cwd: "c:\\Users\\testuser\\Documents\\Code\\Projects\\AgentWorkingHome_P",
           source: "vscode",
         },
         {
@@ -1382,7 +1401,7 @@ describe("App", () => {
           preview: "worktree tools thread",
           createdAt: 1700000002,
           updatedAt: 1700000032,
-          cwd: "C:\\Users\\magon\\.codex\\worktrees\\79d7\\P_AgentTools",
+          cwd: "C:\\Users\\testuser\\.codex\\worktrees\\79d7\\P_AgentTools",
           source: "vscode",
         },
         {
@@ -1391,7 +1410,7 @@ describe("App", () => {
           preview: "project tools thread",
           createdAt: 1700000003,
           updatedAt: 1700000033,
-          cwd: "c:\\Users\\magon\\Documents\\Code\\Projects\\P_AgentTools",
+          cwd: "c:\\Users\\testuser\\Documents\\Code\\Projects\\P_AgentTools",
           source: "vscode",
         },
       ],
@@ -1411,10 +1430,10 @@ describe("App", () => {
     expect(screen.getAllByText("AgentWorkingHome_P").length).toBe(1);
     expect(screen.getAllByText("P_AgentTools").length).toBe(2);
     expect(
-      screen.getByText("C:/Users/magon/.codex/worktrees/79d7/P_AgentTools"),
+      screen.getByText("C:/Users/testuser/.codex/worktrees/79d7/P_AgentTools"),
     ).toBeTruthy();
     expect(
-      screen.getByText("c:/Users/magon/Documents/Code/Projects/P_AgentTools"),
+      screen.getByText("c:/Users/testuser/Documents/Code/Projects/P_AgentTools"),
     ).toBeTruthy();
     expect(screen.getByText("History")).toBeTruthy();
   });
@@ -1454,7 +1473,7 @@ describe("App", () => {
           preview: "current project thread",
           createdAt: 1700000000,
           updatedAt: 1700000030,
-          cwd: "C:\\Users\\magon\\Documents\\Code\\Projects\\AgentWorkingHome_P",
+          cwd: "C:\\Users\\testuser\\Documents\\Code\\Projects\\AgentWorkingHome_P",
           source: "vscode",
         },
       ],
@@ -1477,6 +1496,64 @@ describe("App", () => {
     expect(screen.queryByText("History")).toBeNull();
   });
 
+  it("clears the History badge when a merged project group includes a current thread", async () => {
+    featureMatrixFixture = {
+      ok: true,
+      features: {
+        codex: buildFeatureSet(codexCapabilities, {
+          enabled: true,
+          connected: true,
+        }),
+        opencode: buildFeatureSet(opencodeCapabilities, {
+          enabled: true,
+          connected: true,
+        }),
+      },
+    };
+
+    projectDirectoriesFixture = {
+      codex: [],
+      opencode: ["c:\\Users\\testuser\\Documents\\Code\\Projects\\P_AgentTools"],
+    };
+
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: "thread-tools-history",
+          provider: "codex",
+          preview: "historical tools thread",
+          createdAt: 1700000000,
+          updatedAt: 1700000030,
+          cwd: "C:\\Users\\testuser\\Documents\\Code\\Projects\\P_AgentTools",
+          source: "vscode",
+        },
+        {
+          id: "thread-tools-current",
+          provider: "opencode",
+          preview: "current tools thread",
+          createdAt: 1700000001,
+          updatedAt: 1700000031,
+          cwd: "C:\\Users\\testuser\\Documents\\Code\\Projects\\P_AgentTools",
+          source: "vscode",
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    render(<App />);
+
+    expect((await screen.findAllByText("P_AgentTools")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("History")).toBeNull();
+  });
+
   it("uses selected thread polling only as an SSE fallback in chat view", async () => {
     const threadId = "thread-live-fallback";
     window.history.replaceState(null, "", `/threads/${threadId}`);
@@ -1489,7 +1566,7 @@ describe("App", () => {
           preview: "live fallback thread",
           createdAt: 1700000000,
           updatedAt: 1700000030,
-          cwd: "C:\\Users\\magon\\Documents\\Code\\Projects\\AgentWorkingHome_P",
+          cwd: "C:\\Users\\testuser\\Documents\\Code\\Projects\\AgentWorkingHome_P",
           source: "vscode",
         },
       ],
@@ -1592,7 +1669,7 @@ describe("App", () => {
           preview: "windowed thread",
           createdAt: 1700000000,
           updatedAt: 1700000030,
-          cwd: "C:\\Users\\magon\\Documents\\Code\\Projects\\AgentWorkingHome_P",
+          cwd: "C:\\Users\\testuser\\Documents\\Code\\Projects\\AgentWorkingHome_P",
           source: "vscode",
         },
       ],
@@ -1671,7 +1748,7 @@ describe("App", () => {
           preview: "race thread",
           createdAt: 1700000000,
           updatedAt: 1700000030,
-          cwd: "C:\\Users\\magon\\Documents\\Code\\Projects\\AgentWorkingHome_P",
+          cwd: "C:\\Users\\testuser\\Documents\\Code\\Projects\\AgentWorkingHome_P",
           source: "vscode",
         },
       ],

@@ -76,7 +76,7 @@ function quoteCmdArg(value: string): string {
   if (value.length === 0) {
     return '""';
   }
-  if (!/[\s"]/.test(value)) {
+  if (!/[\s"&|^<>()]/.test(value)) {
     return value;
   }
   return `"${value.replace(/"/g, '""')}"`;

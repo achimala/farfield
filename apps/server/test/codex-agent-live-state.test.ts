@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import type { AppServerClient } from "@farfield/api";
 import type {
   IpcFrame,
   ThreadConversationState,
@@ -526,8 +527,56 @@ describe("buildArchivedThreadConversationStateFromJsonl", () => {
 });
 
 describe("CodexAgentAdapter runtime retention", () => {
-  function createAdapterForTest(): CodexAgentAdapter {
-    return new CodexAgentAdapter({
+  class TestCodexAgentAdapter extends CodexAgentAdapter {
+    public override patchRuntimeState(
+      next: Partial<ReturnType<CodexAgentAdapter["getRuntimeState"]>>,
+    ): void {
+      super.patchRuntimeState(next);
+    }
+
+    public override async restoreArchivedThreadState(
+      threadId: string,
+      includeTurns: boolean,
+    ): Promise<ThreadConversationState | null> {
+      return super.restoreArchivedThreadState(threadId, includeTurns);
+    }
+
+    public override setTrackedThreadOwner(
+      threadId: string,
+      ownerClientId: string,
+    ): void {
+      super.setTrackedThreadOwner(threadId, ownerClientId);
+    }
+
+    public override setTrackedThreadEvents(
+      threadId: string,
+      events: IpcFrame[],
+    ): void {
+      super.setTrackedThreadEvents(threadId, events);
+    }
+
+    public override setTrackedThreadSnapshot(
+      threadId: string,
+      snapshot: ThreadConversationState,
+      origin: "stream" | "readThreadWithTurns" | "readThread",
+    ): void {
+      super.setTrackedThreadSnapshot(threadId, snapshot, origin);
+    }
+
+    public override setThreadTitle(
+      threadId: string,
+      title: string | null | undefined,
+    ): void {
+      super.setThreadTitle(threadId, title);
+    }
+
+    public get appClientForTest(): AppServerClient {
+      return this.appClient;
+    }
+  }
+
+  function createAdapterForTest(): TestCodexAgentAdapter {
+    return new TestCodexAgentAdapter({
       appExecutable: "codex",
       socketPath: "\\\\.\\pipe\\farfield-test",
       workspaceDir: process.cwd(),
@@ -537,18 +586,7 @@ describe("CodexAgentAdapter runtime retention", () => {
   }
 
   it("evicts the oldest tracked thread state after the runtime cap", () => {
-    const adapter = createAdapterForTest() as unknown as {
-      setTrackedThreadOwner: (threadId: string, ownerClientId: string) => void;
-      setTrackedThreadSnapshot: (
-        threadId: string,
-        snapshot: ThreadConversationState,
-        origin: "stream" | "readThreadWithTurns" | "readThread",
-      ) => void;
-      setTrackedThreadEvents: (threadId: string, events: IpcFrame[]) => void;
-      setThreadTitle: (threadId: string, title: string | null) => void;
-      getTrackedThreadRuntimeCounts: CodexAgentAdapter["getTrackedThreadRuntimeCounts"];
-      readStreamEvents: CodexAgentAdapter["readStreamEvents"];
-    };
+    const adapter = createAdapterForTest();
 
     for (let index = 0; index < 82; index += 1) {
       const threadId = `thread-${String(index)}`;
@@ -570,14 +608,36 @@ describe("CodexAgentAdapter runtime retention", () => {
     expect(counts.trackedThreadCount).toBe(80);
     expect(counts.maxTrackedThreadCountSeen).toBe(80);
     expect(counts.streamEventThreadCount).toBe(80);
+
+    return Promise.all([
+      adapter.readStreamEvents("thread-0", 500),
+      adapter.readStreamEvents("thread-1", 500),
+      adapter.readStreamEvents("thread-80", 500),
+      adapter.readStreamEvents("thread-81", 500),
+      adapter.readLiveState("thread-0"),
+      adapter.readLiveState("thread-81"),
+    ]).then(
+      ([
+        oldestEvents,
+        secondOldestEvents,
+        newestEventsMinusOne,
+        newestEvents,
+        oldestLiveState,
+        newestLiveState,
+      ]) => {
+        expect(oldestEvents.events).toEqual([]);
+        expect(secondOldestEvents.events).toEqual([]);
+        expect(newestEventsMinusOne.events).toHaveLength(1);
+        expect(newestEvents.events).toHaveLength(1);
+        expect(oldestLiveState.conversationState).toBeNull();
+        expect(newestLiveState.conversationState?.id).toBe("thread-81");
+        expect(newestLiveState.conversationState?.title).toBe("Thread 81");
+      },
+    );
   });
 
   it("truncates buffered stream events per thread to the configured cap", async () => {
-    const adapter = createAdapterForTest() as unknown as {
-      setTrackedThreadEvents: (threadId: string, events: IpcFrame[]) => void;
-      getTrackedThreadRuntimeCounts: CodexAgentAdapter["getTrackedThreadRuntimeCounts"];
-      readStreamEvents: CodexAgentAdapter["readStreamEvents"];
-    };
+    const adapter = createAdapterForTest();
     const events: IpcFrame[] = Array.from({ length: 160 }, (_, index) => ({
       type: "broadcast",
       method: "thread-stream-state-changed",
@@ -607,11 +667,7 @@ describe("CodexAgentAdapter runtime retention", () => {
   });
 
   it("increments the parse failure counter only for malformed stream-state frames", async () => {
-    const adapter = createAdapterForTest() as unknown as {
-      setTrackedThreadEvents: (threadId: string, events: IpcFrame[]) => void;
-      getTrackedThreadRuntimeCounts: CodexAgentAdapter["getTrackedThreadRuntimeCounts"];
-      readLiveState: CodexAgentAdapter["readLiveState"];
-    };
+    const adapter = createAdapterForTest();
 
     adapter.setTrackedThreadEvents("thread-parse", [
       {
@@ -650,13 +706,7 @@ describe("CodexAgentAdapter runtime retention", () => {
   });
 
   it("restores full archived live state after a metadata-only archived read", async () => {
-    const adapter = createAdapterForTest() as unknown as {
-      restoreArchivedThreadState: (
-        threadId: string,
-        includeTurns: boolean,
-      ) => Promise<ThreadConversationState | null>;
-      readLiveState: CodexAgentAdapter["readLiveState"];
-    };
+    const adapter = createAdapterForTest();
     const threadId = "thread-archived-live-state";
     const previousCodexHome = process.env["CODEX_HOME"];
     const temporaryCodexHome = await mkdtemp(
@@ -734,15 +784,7 @@ describe("CodexAgentAdapter runtime retention", () => {
   });
 
   it("clears runtime lastError after archived readThread fallback succeeds", async () => {
-    const adapter = createAdapterForTest() as unknown as {
-      appClient: {
-        readThread: (threadId: string, includeTurns: boolean) => Promise<never>;
-        resumeThread: (threadId: string) => Promise<never>;
-      };
-      patchRuntimeState: (next: Partial<{ lastError: string | null }>) => void;
-      getRuntimeState: CodexAgentAdapter["getRuntimeState"];
-      readThread: CodexAgentAdapter["readThread"];
-    };
+    const adapter = createAdapterForTest();
     const threadId = "thread-archived-read-thread";
     const previousCodexHome = process.env["CODEX_HOME"];
     const temporaryCodexHome = await mkdtemp(
@@ -801,10 +843,10 @@ describe("CodexAgentAdapter runtime retention", () => {
       adapter.patchRuntimeState({
         lastError: noRolloutError.message,
       });
-      adapter.appClient.readThread = async () => {
+      adapter.appClientForTest.readThread = async () => {
         throw noRolloutError;
       };
-      adapter.appClient.resumeThread = async () => {
+      adapter.appClientForTest.resumeThread = async () => {
         throw noRolloutError;
       };
 

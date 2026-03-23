@@ -40,6 +40,38 @@ const AppServerModelReasoningEffortItemSchema = z
   })
   .passthrough();
 
+const AppServerThreadStatusActiveFlagSchema = z.enum([
+  "waitingOnApproval",
+  "waitingOnUserInput"
+]);
+
+const AppServerThreadStatusSchema = z.union([
+  z
+    .object({
+      type: z.literal("active"),
+      activeFlags: z.array(AppServerThreadStatusActiveFlagSchema)
+    })
+    .passthrough(),
+  z.object({ type: z.literal("idle") }).passthrough(),
+  z.object({ type: z.literal("notLoaded") }).passthrough(),
+  z.object({ type: z.literal("systemError") }).passthrough()
+]);
+
+const AppServerModelInputModalitySchema = z.enum(["text", "image"]);
+const AppServerModelUpgradeInfoSchema = z
+  .object({
+    migrationMarkdown: z.union([z.string(), z.null()]).optional(),
+    model: z.string(),
+    modelLink: z.union([z.string(), z.null()]).optional(),
+    upgradeCopy: z.union([z.string(), z.null()]).optional()
+  })
+  .passthrough();
+const AppServerModelAvailabilityNuxSchema = z
+  .object({
+    message: z.string()
+  })
+  .passthrough();
+
 const AppServerGeneratedThreadListItemSchema = z
   .object({
     id: z.string().min(1),
@@ -50,13 +82,13 @@ const AppServerGeneratedThreadListItemSchema = z
     createdAt: z.number().int().nonnegative(),
     updatedAt: z.number().int().nonnegative(),
     cwd: z.string().optional(),
-    source: z.any().optional(),
+    source: ThreadConversationStateSchema.shape.source,
     modelProvider: z.string().optional(),
     cliVersion: z.string().optional(),
     path: z.union([z.string(), z.null()]).optional(),
-    gitInfo: z.any().optional(),
-    status: z.any().optional(),
-    turns: z.array(z.any()).optional()
+    gitInfo: ThreadConversationStateSchema.shape.gitInfo,
+    status: AppServerThreadStatusSchema.optional(),
+    turns: ThreadConversationStateSchema.shape.turns.optional()
   })
   .passthrough();
 
@@ -78,7 +110,15 @@ export const AppServerThreadListItemSchema = z.union([
   OpenCodeThreadListItemSchema
 ]);
 
-export const AppServerListThreadsResponseSchema = z
+export const AppServerListThreadsResponseSchema: z.ZodObject<
+  {
+    data: z.ZodArray<typeof AppServerThreadListItemSchema>;
+    nextCursor: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodNull]>>;
+    pages: z.ZodOptional<z.ZodNumber>;
+    truncated: z.ZodOptional<z.ZodBoolean>;
+  },
+  "passthrough"
+> = z
   .object({
     data: z.array(AppServerThreadListItemSchema),
     nextCursor: z.union([z.string(), z.null()]).optional(),
@@ -107,12 +147,12 @@ export const AppServerModelSchema = z
     hidden: z.boolean().optional(),
     supportedReasoningEfforts: z.array(AppServerModelReasoningEffortItemSchema).default([]),
     defaultReasoningEffort: z.string().optional(),
-    inputModalities: z.array(z.any()).optional(),
+    inputModalities: z.array(AppServerModelInputModalitySchema).optional(),
     supportsPersonality: z.boolean().optional(),
     isDefault: z.boolean().optional(),
     upgrade: z.union([z.string(), z.null()]).optional(),
-    upgradeInfo: z.any().optional(),
-    availabilityNux: z.any().optional()
+    upgradeInfo: z.union([AppServerModelUpgradeInfoSchema, z.null()]).optional(),
+    availabilityNux: z.union([AppServerModelAvailabilityNuxSchema, z.null()]).optional()
   })
   .passthrough();
 
@@ -153,7 +193,18 @@ export const AppServerCollaborationModeListResponseSchema = z
 
 export const AppServerStartThreadRequestSchema = AppServerStartThreadRequestBaseSchema;
 
-export const AppServerStartThreadResponseSchema = z
+export const AppServerStartThreadResponseSchema: z.ZodObject<
+  {
+    thread: typeof AppServerThreadListItemSchema;
+    model: z.ZodOptional<z.ZodString>;
+    modelProvider: z.ZodOptional<z.ZodString>;
+    cwd: z.ZodOptional<z.ZodString>;
+    approvalPolicy: z.ZodOptional<z.ZodString>;
+    sandbox: z.ZodOptional<z.ZodAny>;
+    reasoningEffort: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodNull]>>;
+  },
+  "passthrough"
+> = z
   .object({
     thread: AppServerThreadListItemSchema,
     model: z.string().optional(),
