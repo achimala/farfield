@@ -1063,20 +1063,29 @@ function conversationProgressSignature(
     return "";
   }
 
+  const firstTurn = state.turns[0];
   const lastTurn = state.turns[state.turns.length - 1];
-  if (!lastTurn) {
+  if (!firstTurn || !lastTurn) {
     return "no-turns";
   }
 
+  const firstTurnId = firstTurn.id ?? firstTurn.turnId ?? "";
+  const firstItems = firstTurn.items ?? [];
+  const firstItem = firstItems[0];
   const lastTurnId = lastTurn.id ?? lastTurn.turnId ?? "";
-  const items = lastTurn.items ?? [];
-  const lastItem = items[items.length - 1];
+  const lastItems = lastTurn.items ?? [];
+  const lastItem = lastItems[lastItems.length - 1];
 
   return [
     String(state.turns.length),
+    firstTurnId,
+    firstTurn.status,
+    String(firstItems.length),
+    firstItem?.id ?? "",
+    firstItem?.type ?? "",
     lastTurnId,
     lastTurn.status,
-    String(items.length),
+    String(lastItems.length),
     lastItem?.id ?? "",
     lastItem?.type ?? "",
   ].join("|");
@@ -3134,7 +3143,6 @@ export function App(): React.JSX.Element {
     let source: EventSource | null = null;
     let reconnectTimer: number | null = null;
     let reconnectDelayMs = 1000;
-    let hasOpenedConnection = false;
 
     const scheduleRefresh = (
       refreshCore: boolean,
@@ -3221,10 +3229,6 @@ export function App(): React.JSX.Element {
       source.onopen = () => {
         setIsUnifiedEventsConnected(true);
         reconnectDelayMs = 1000;
-        if (hasOpenedConnection) {
-          return;
-        }
-        hasOpenedConnection = true;
         scheduleRefresh(
           true,
           activeTabRef.current === "debug",

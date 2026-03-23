@@ -1,4 +1,8 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import {
+  execFileSync,
+  spawn,
+  type ChildProcessWithoutNullStreams
+} from "node:child_process";
 import readline from "node:readline";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -38,21 +42,71 @@ interface SpawnSpec {
   args: string[];
 }
 
-function buildCodexNpmShimSpawnSpec(
-  executablePath: string,
-  args: string[]
-): SpawnSpec | null {
+function resolveWindowsCommandOnPath(command: string): string | null {
+  try {
+    return (
+      execFileSync("where.exe", [command], {
+        encoding: "utf8"
+      })
+        .split(/\r?\n/)
+        .map((entry) => entry.trim())
+        .find((entry) => entry.length > 0) ?? null
+    );
+  } catch {
+    return null;
+  }
+}
+
+function resolveWindowsCodexExecutablePath(executablePath: string): string | null {
   if (process.platform !== "win32") {
     return null;
   }
 
   const ext = path.extname(executablePath).toLowerCase();
   const baseName = path.basename(executablePath, ext).toLowerCase();
-  if (baseName !== "codex" || (ext !== ".cmd" && ext !== ".ps1")) {
+  if (baseName !== "codex") {
     return null;
   }
 
-  const shimDir = path.dirname(executablePath);
+  if (ext === ".cmd" || ext === ".ps1" || ext === ".bat") {
+    return executablePath;
+  }
+  if (ext.length > 0) {
+    return null;
+  }
+
+  const siblingCandidates = [`${executablePath}.cmd`, `${executablePath}.ps1`];
+  for (const candidate of siblingCandidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  if (!/[\\/]/.test(executablePath)) {
+    return (
+      resolveWindowsCommandOnPath("codex.cmd") ??
+      resolveWindowsCommandOnPath("codex.ps1")
+    );
+  }
+
+  return null;
+}
+
+export function buildCodexNpmShimSpawnSpec(
+  executablePath: string,
+  args: string[]
+): SpawnSpec | null {
+  const resolvedExecutablePath = resolveWindowsCodexExecutablePath(executablePath);
+  if (!resolvedExecutablePath) {
+    return null;
+  }
+
+  const ext = path.extname(resolvedExecutablePath).toLowerCase();
+  if (ext !== ".cmd" && ext !== ".ps1") {
+    return null;
+  }
+
+  const shimDir = path.dirname(resolvedExecutablePath);
   const scriptPath = path.join(
     shimDir,
     "node_modules",
@@ -82,7 +136,7 @@ function quoteCmdArg(value: string): string {
   return `"${value.replace(/"/g, '""')}"`;
 }
 
-function buildSpawnSpec(executablePath: string, args: string[]): SpawnSpec {
+export function buildSpawnSpec(executablePath: string, args: string[]): SpawnSpec {
   const codexShimSpec = buildCodexNpmShimSpawnSpec(executablePath, args);
   if (codexShimSpec) {
     return codexShimSpec;
@@ -95,7 +149,9 @@ function buildSpawnSpec(executablePath: string, args: string[]): SpawnSpec {
     };
   }
 
-  const ext = path.extname(executablePath).toLowerCase();
+  const resolvedExecutablePath =
+    resolveWindowsCodexExecutablePath(executablePath) ?? executablePath;
+  const ext = path.extname(resolvedExecutablePath).toLowerCase();
   if (ext === ".ps1") {
     return {
       command: "powershell.exe",
@@ -104,7 +160,7 @@ function buildSpawnSpec(executablePath: string, args: string[]): SpawnSpec {
         "-ExecutionPolicy",
         "Bypass",
         "-File",
-        executablePath,
+        resolvedExecutablePath,
         ...args
       ]
     };
@@ -112,7 +168,7 @@ function buildSpawnSpec(executablePath: string, args: string[]): SpawnSpec {
 
   if (ext === ".cmd" || ext === ".bat") {
     const comspec = process.env["ComSpec"] || "cmd.exe";
-    const commandLine = [quoteCmdArg(executablePath), ...args.map(quoteCmdArg)].join(" ");
+    const commandLine = [quoteCmdArg(resolvedExecutablePath), ...args.map(quoteCmdArg)].join(" ");
     return {
       command: comspec,
       args: ["/d", "/s", "/c", commandLine]

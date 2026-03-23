@@ -490,11 +490,10 @@ export class CodexAgentAdapter implements AgentAdapter {
         result = await readThreadWithOption(input.includeTurns);
       } catch (error) {
         const typedError = error instanceof Error ? error : null;
-        const shouldTryResume =
-          isThreadNotLoadedAppServerRpcError(typedError) ||
-          (input.includeTurns &&
-            (isThreadNotMaterializedIncludeTurnsAppServerRpcError(typedError) ||
-              isThreadNoRolloutIncludeTurnsAppServerRpcError(typedError)));
+        const shouldTryResume = shouldAttemptArchivedThreadRestoreForReadError(
+          typedError,
+          input.includeTurns,
+        );
         if (!shouldTryResume) {
           throw error;
         }
@@ -520,6 +519,15 @@ export class CodexAgentAdapter implements AgentAdapter {
         }
       }
     } catch (error) {
+      const typedError = error instanceof Error ? error : null;
+      if (
+        !shouldAttemptArchivedThreadRestoreForReadError(
+          typedError,
+          input.includeTurns,
+        )
+      ) {
+        throw error;
+      }
       const restoredThread = await this.restoreArchivedThreadState(
         input.threadId,
         input.includeTurns,
@@ -2605,6 +2613,18 @@ export function isThreadNoRolloutIncludeTurnsAppServerRpcError(
   );
 }
 
+function shouldAttemptArchivedThreadRestoreForReadError(
+  error: Error | null,
+  includeTurns: boolean,
+): boolean {
+  return (
+    isThreadNotLoadedAppServerRpcError(error) ||
+    (includeTurns &&
+      (isThreadNotMaterializedIncludeTurnsAppServerRpcError(error) ||
+        isThreadNoRolloutIncludeTurnsAppServerRpcError(error)))
+  );
+}
+
 export function isIpcNoClientFoundError(error: Error | null): boolean {
   if (!(error instanceof DesktopIpcError)) {
     return false;
@@ -2847,7 +2867,7 @@ async function findRolloutPathInDirectory(
     if (!entry.isFile()) {
       continue;
     }
-    if (!entry.name.endsWith(".jsonl") || !entry.name.includes(threadId)) {
+    if (entry.name !== `${threadId}.jsonl`) {
       continue;
     }
     return path.join(directory, entry.name);

@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import type { AppServerClient } from "@farfield/api";
+import { AppServerRpcError, type AppServerClient } from "@farfield/api";
 import type {
   IpcFrame,
   ThreadConversationState,
@@ -827,7 +827,8 @@ describe("CodexAgentAdapter runtime retention", () => {
         },
       }),
     ].join("\n");
-    const noRolloutError = new Error(
+    const noRolloutError = new AppServerRpcError(
+      -32600,
       `app-server error -32600: no rollout found for thread id ${threadId}`,
     );
 
@@ -857,6 +858,114 @@ describe("CodexAgentAdapter runtime retention", () => {
 
       expect(result.thread.turns).toHaveLength(1);
       expect(adapter.getRuntimeState().lastError).toBeNull();
+    } finally {
+      if (previousCodexHome === undefined) {
+        delete process.env["CODEX_HOME"];
+      } else {
+        process.env["CODEX_HOME"] = previousCodexHome;
+      }
+      await rm(temporaryCodexHome, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves unrelated readThread errors even when an archived copy exists", async () => {
+    const adapter = createAdapterForTest();
+    const threadId = "thread-read-thread-transport-error";
+    const previousCodexHome = process.env["CODEX_HOME"];
+    const temporaryCodexHome = await mkdtemp(
+      path.join(os.tmpdir(), "farfield-codex-home-"),
+    );
+    const archivedSessionsDir = path.join(temporaryCodexHome, "archived_sessions");
+    const archivedJsonl = [
+      JSON.stringify({
+        timestamp: "2026-03-19T10:41:10.772Z",
+        type: "session_meta",
+        payload: {
+          type: "session_meta",
+          id: threadId,
+          cwd: "C:\\repo",
+          source: "vscode",
+        },
+      }),
+      JSON.stringify({
+        timestamp: "2026-03-19T10:41:23.000Z",
+        type: "event_msg",
+        payload: {
+          type: "agent_message",
+          message: "archived copy should stay unused",
+        },
+      }),
+    ].join("\n");
+    const transportError = new Error("app-server transport unavailable");
+
+    try {
+      process.env["CODEX_HOME"] = temporaryCodexHome;
+      await mkdir(archivedSessionsDir, { recursive: true });
+      await writeFile(
+        path.join(archivedSessionsDir, `${threadId}.jsonl`),
+        archivedJsonl,
+        "utf8",
+      );
+
+      adapter.patchRuntimeState({
+        lastError: null,
+      });
+      adapter.appClientForTest.readThread = async () => {
+        throw transportError;
+      };
+
+      await expect(
+        adapter.readThread({
+          threadId,
+          includeTurns: true,
+        }),
+      ).rejects.toThrow("app-server transport unavailable");
+      expect(adapter.getRuntimeState().lastError).toBe(
+        "app-server transport unavailable",
+      );
+    } finally {
+      if (previousCodexHome === undefined) {
+        delete process.env["CODEX_HOME"];
+      } else {
+        process.env["CODEX_HOME"] = previousCodexHome;
+      }
+      await rm(temporaryCodexHome, { recursive: true, force: true });
+    }
+  });
+
+  it("does not match archived rollout files by thread id substring", async () => {
+    const adapter = createAdapterForTest();
+    const previousCodexHome = process.env["CODEX_HOME"];
+    const temporaryCodexHome = await mkdtemp(
+      path.join(os.tmpdir(), "farfield-codex-home-"),
+    );
+    const archivedSessionsDir = path.join(temporaryCodexHome, "archived_sessions");
+    const requestedThreadId = "thread-1";
+    const otherThreadId = "thread-12";
+
+    try {
+      process.env["CODEX_HOME"] = temporaryCodexHome;
+      await mkdir(archivedSessionsDir, { recursive: true });
+      await writeFile(
+        path.join(archivedSessionsDir, `${otherThreadId}.jsonl`),
+        [
+          JSON.stringify({
+            timestamp: "2026-03-19T10:41:10.772Z",
+            type: "session_meta",
+            payload: {
+              type: "session_meta",
+              id: otherThreadId,
+              cwd: "C:\\repo",
+              source: "vscode",
+            },
+          }),
+        ].join("\n"),
+        "utf8",
+      );
+
+      await expect(
+        adapter.restoreArchivedThreadState(requestedThreadId, true),
+      ).resolves.toBeNull();
     } finally {
       if (previousCodexHome === undefined) {
         delete process.env["CODEX_HOME"];

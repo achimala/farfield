@@ -1651,6 +1651,74 @@ describe("App", () => {
     );
   });
 
+  it("refreshes core thread data when unified events reconnect", async () => {
+    const threadId = "thread-reconnect-core";
+
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: threadId,
+          provider: "codex",
+          preview: "preview-before-reconnect",
+          createdAt: 1700000000,
+          updatedAt: 1700000030,
+          cwd: "/tmp/project",
+          source: "codex",
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    render(<App />);
+
+    expect(
+      (await screen.findAllByText("preview-before-reconnect")).length,
+    ).toBeGreaterThan(0);
+
+    await act(async () => {
+      MockEventSource.emitOpen();
+      await new Promise((resolve) => window.setTimeout(resolve, 300));
+    });
+
+    threadsFixture = {
+      ...threadsFixture,
+      data: [
+        {
+          id: threadId,
+          provider: "codex",
+          preview: "preview-after-reconnect",
+          createdAt: 1700000000,
+          updatedAt: 1700001030,
+          cwd: "/tmp/project",
+          source: "codex",
+        },
+      ],
+    };
+
+    await act(async () => {
+      MockEventSource.emitError();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 1100));
+      MockEventSource.emitOpen();
+      await new Promise((resolve) => window.setTimeout(resolve, 300));
+    });
+
+    expect(
+      (await screen.findAllByText("preview-after-reconnect")).length,
+    ).toBeGreaterThan(0);
+  });
+
   it("reloads a larger chat window when showing older messages", async () => {
     const threadId = "thread-windowed-chat";
     const turnItems: UnifiedItem[] = Array.from({ length: 95 }, (_, index) => ({
@@ -1725,6 +1793,92 @@ describe("App", () => {
 
     expect(await screen.findByText("windowed-message-0")).toBeTruthy();
     expect(readThreadCallCount).toBeGreaterThan(initialReadThreadCallCount);
+  });
+
+  it("does not dedupe a larger chat window when the retained head boundary moves", async () => {
+    const threadId = "thread-windowed-chat-head";
+    const olderItems: UnifiedItem[] = Array.from({ length: 95 }, (_, index) => ({
+      id: `agent-windowed-head-${index}`,
+      type: "agentMessage",
+      text: `windowed-head-message-${index}`,
+    }));
+
+    window.history.replaceState(null, "", `/threads/${threadId}`);
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: threadId,
+          provider: "codex",
+          preview: "windowed head thread",
+          createdAt: 1700000000,
+          updatedAt: 1700000030,
+          cwd: "C:\\Users\\testuser\\Documents\\Code\\Projects\\AgentWorkingHome_P",
+          source: "vscode",
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    const buildThreadState = (provider: ProviderId): UnifiedThreadFixture => ({
+      ...buildConversationStateFixture(threadId, "gpt-old-codex", {
+        provider,
+      }),
+      turns: [
+        {
+          id: "turn-older",
+          status: "completed",
+          items: olderItems,
+        },
+        {
+          id: "turn-newest",
+          status: "completed",
+          items: [
+            {
+              id: "agent-windowed-tail",
+              type: "agentMessage",
+              text: "windowed-head-tail",
+            },
+          ],
+        },
+      ],
+    });
+
+    readThreadResolver = (
+      targetThreadId: string,
+      provider: ProviderId | null,
+    ) => {
+      if (targetThreadId !== threadId) {
+        return null;
+      }
+      return {
+        ok: true,
+        thread: buildThreadState(provider ?? "codex"),
+      };
+    };
+    liveStateResolver = (targetThreadId: string, provider: ProviderId) => ({
+      kind: "readLiveState",
+      threadId: targetThreadId,
+      ownerClientId: "client-1",
+      conversationState: buildThreadState(provider),
+      liveStateError: null,
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("windowed-head-tail")).toBeTruthy();
+    expect(screen.queryByText("windowed-head-message-0")).toBeNull();
+
+    fireEvent.click(await screen.findByRole("button", { name: /show older messages/i }));
+
+    expect(await screen.findByText("windowed-head-message-0")).toBeTruthy();
   });
 
   it("ignores stale chat-window loads after a newer debug load finishes first", async () => {
