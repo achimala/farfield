@@ -150,6 +150,8 @@ const FEATURE_IDS: UnifiedFeatureId[] = [
 
 type ProviderId = "codex" | "opencode";
 
+// Zod preprocess helpers intentionally accept `unknown` because they normalize
+// raw query-string input before schema validation runs.
 function normalizeOptionalPositiveIntInput(value: unknown): unknown {
   if (value === null || value === undefined || value === "") {
     return undefined;
