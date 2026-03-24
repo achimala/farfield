@@ -78,6 +78,8 @@ const MAX_TRACKED_THREAD_RUNTIME_STATES = 80;
 const MAX_STREAM_EVENTS_PER_THREAD = 120;
 const ARCHIVED_TOOL_ARGUMENT_PREVIEW_MAX_CHARS = 600;
 const ARCHIVED_TOOL_TEXT_PREVIEW_MAX_CHARS = 240;
+const MAX_LOGGED_ARCHIVED_UNKNOWN_PAYLOAD_TYPES = 64;
+const MAX_LOGGED_ARCHIVED_MALFORMED_JSONL_LINES = 512;
 const loggedArchivedUnknownPayloadTypes = new Set<string>();
 const loggedArchivedMalformedJsonlLineKeys = new Set<string>();
 
@@ -919,12 +921,12 @@ export class CodexAgentAdapter implements AgentAdapter {
       };
     }
 
-    const reductionInput = canUseSyntheticSnapshot
+    const reductionInput = canUseSyntheticSnapshot && snapshotState !== null
       ? [
           buildSyntheticSnapshotEvent(
             threadId,
             ownerClientId ?? "farfield",
-            snapshotState!,
+            snapshotState,
           ),
           ...reductionEvents,
         ]
@@ -2130,10 +2132,15 @@ function logArchivedUnknownPayloadType(
   threadId: string,
   payloadType: string,
 ): void {
-  if (loggedArchivedUnknownPayloadTypes.has(payloadType)) {
+  if (
+    !rememberBoundedLoggedArchivedKey(
+      loggedArchivedUnknownPayloadTypes,
+      payloadType,
+      MAX_LOGGED_ARCHIVED_UNKNOWN_PAYLOAD_TYPES,
+    )
+  ) {
     return;
   }
-  loggedArchivedUnknownPayloadTypes.add(payloadType);
   logger.warn(
     {
       threadId,
@@ -2150,10 +2157,15 @@ function logArchivedMalformedJsonlLine(
   truncatedTailCandidate: boolean,
 ): void {
   const key = `${threadId}:${String(lineIndex)}`;
-  if (loggedArchivedMalformedJsonlLineKeys.has(key)) {
+  if (
+    !rememberBoundedLoggedArchivedKey(
+      loggedArchivedMalformedJsonlLineKeys,
+      key,
+      MAX_LOGGED_ARCHIVED_MALFORMED_JSONL_LINES,
+    )
+  ) {
     return;
   }
-  loggedArchivedMalformedJsonlLineKeys.add(key);
   logger.warn(
     {
       threadId,
@@ -2163,6 +2175,25 @@ function logArchivedMalformedJsonlLine(
     },
     "archived-thread-jsonl-line-parse-failed",
   );
+}
+
+function rememberBoundedLoggedArchivedKey(
+  cache: Set<string>,
+  key: string,
+  maxEntries: number,
+): boolean {
+  if (cache.has(key)) {
+    return false;
+  }
+  cache.add(key);
+  if (cache.size <= maxEntries) {
+    return true;
+  }
+  const oldestKey = cache.values().next().value;
+  if (typeof oldestKey === "string") {
+    cache.delete(oldestKey);
+  }
+  return true;
 }
 
 function normalizeArchivedMessageContent(

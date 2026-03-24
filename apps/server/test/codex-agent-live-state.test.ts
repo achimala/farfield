@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AppServerRpcError, type AppServerClient } from "@farfield/api";
 import type {
   IpcFrame,
@@ -844,20 +844,25 @@ describe("CodexAgentAdapter runtime retention", () => {
       adapter.patchRuntimeState({
         lastError: noRolloutError.message,
       });
-      adapter.appClientForTest.readThread = async () => {
-        throw noRolloutError;
-      };
-      adapter.appClientForTest.resumeThread = async () => {
-        throw noRolloutError;
-      };
+      const readThreadSpy = vi
+        .spyOn(adapter.appClientForTest, "readThread")
+        .mockRejectedValue(noRolloutError);
+      const resumeThreadSpy = vi
+        .spyOn(adapter.appClientForTest, "resumeThread")
+        .mockRejectedValue(noRolloutError);
 
-      const result = await adapter.readThread({
-        threadId,
-        includeTurns: true,
-      });
+      try {
+        const result = await adapter.readThread({
+          threadId,
+          includeTurns: true,
+        });
 
-      expect(result.thread.turns).toHaveLength(1);
-      expect(adapter.getRuntimeState().lastError).toBeNull();
+        expect(result.thread.turns).toHaveLength(1);
+        expect(adapter.getRuntimeState().lastError).toBeNull();
+      } finally {
+        readThreadSpy.mockRestore();
+        resumeThreadSpy.mockRestore();
+      }
     } finally {
       if (previousCodexHome === undefined) {
         delete process.env["CODEX_HOME"];
@@ -910,19 +915,23 @@ describe("CodexAgentAdapter runtime retention", () => {
       adapter.patchRuntimeState({
         lastError: null,
       });
-      adapter.appClientForTest.readThread = async () => {
-        throw transportError;
-      };
+      const readThreadSpy = vi
+        .spyOn(adapter.appClientForTest, "readThread")
+        .mockRejectedValue(transportError);
 
-      await expect(
-        adapter.readThread({
-          threadId,
-          includeTurns: true,
-        }),
-      ).rejects.toThrow("app-server transport unavailable");
-      expect(adapter.getRuntimeState().lastError).toBe(
-        "app-server transport unavailable",
-      );
+      try {
+        await expect(
+          adapter.readThread({
+            threadId,
+            includeTurns: true,
+          }),
+        ).rejects.toThrow("app-server transport unavailable");
+        expect(adapter.getRuntimeState().lastError).toBe(
+          "app-server transport unavailable",
+        );
+      } finally {
+        readThreadSpy.mockRestore();
+      }
     } finally {
       if (previousCodexHome === undefined) {
         delete process.env["CODEX_HOME"];

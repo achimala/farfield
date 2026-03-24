@@ -1,5 +1,10 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  UnifiedCommandReadLiveStateSchema,
+  UnifiedCommandReadThreadSchema,
+  UnifiedProviderIdSchema,
+} from "@farfield/unified-surface";
 import type {
   JsonValue,
   UnifiedFeatureAvailability,
@@ -7,6 +12,7 @@ import type {
   UnifiedItem,
   UnifiedThread,
 } from "@farfield/unified-surface";
+import { z } from "zod";
 import {
   App,
   normalizeCachedThreadViewStateForStorage,
@@ -143,6 +149,58 @@ const FEATURE_IDS: UnifiedFeatureId[] = [
 ];
 
 type ProviderId = "codex" | "opencode";
+
+function normalizeOptionalPositiveIntInput(value: unknown): unknown {
+  if (value === null || value === undefined || value === "") {
+    return undefined;
+  }
+  if (typeof value === "string") {
+    return Number(value);
+  }
+  return value;
+}
+
+function normalizeOptionalBooleanInput(value: unknown): unknown {
+  if (value === null || value === undefined || value === "") {
+    return undefined;
+  }
+  if (typeof value === "string") {
+    if (value === "0" || value === "false") {
+      return false;
+    }
+    if (value === "1" || value === "true") {
+      return true;
+    }
+  }
+  return value;
+}
+
+const MockReadThreadRequestSchema = UnifiedCommandReadThreadSchema.extend({
+  provider: UnifiedProviderIdSchema.optional(),
+  includeTurns: z.preprocess(
+    normalizeOptionalBooleanInput,
+    z.boolean().optional().default(true),
+  ),
+  maxRenderableItems: z.preprocess(
+    normalizeOptionalPositiveIntInput,
+    z.number().int().positive().optional(),
+  ),
+}).strict();
+
+const MockUnifiedCommandEnvelopeSchema = z
+  .object({
+    kind: z.string(),
+    provider: UnifiedProviderIdSchema.default("codex"),
+    threadId: z.string().optional(),
+  })
+  .passthrough();
+
+const MockReadLiveStateCommandSchema = UnifiedCommandReadLiveStateSchema.extend({
+  maxRenderableItems: z.preprocess(
+    normalizeOptionalPositiveIntInput,
+    z.number().int().positive().optional(),
+  ),
+}).strict();
 
 type CapabilityFixture = {
   canListModels: boolean;
@@ -548,6 +606,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.clearAllTimers();
   vi.useRealTimers();
 });
 
@@ -593,25 +652,21 @@ vi.stubGlobal(
         .split("/")
         .filter((segment) => segment.length > 0);
       const threadId = segments[3] ? decodeURIComponent(segments[3]) : "";
-      const providerParam = parsedUrl.searchParams.get("provider");
-      const provider =
-        providerParam === "opencode" || providerParam === "codex"
-          ? providerParam
-          : null;
-      const maxRenderableItemsParam =
-        parsedUrl.searchParams.get("maxRenderableItems");
-      const maxRenderableItems =
-        maxRenderableItemsParam !== null
-          ? Number(maxRenderableItemsParam)
-          : null;
-      const readThread = await readThreadResolver(threadId, provider, {
-        includeTurns: parsedUrl.searchParams.get("includeTurns") !== "false",
-        maxRenderableItems:
-          typeof maxRenderableItems === "number" &&
-          Number.isFinite(maxRenderableItems)
-            ? maxRenderableItems
-            : null,
+      const readThreadRequest = MockReadThreadRequestSchema.parse({
+        kind: "readThread",
+        provider: parsedUrl.searchParams.get("provider") ?? undefined,
+        threadId,
+        includeTurns: parsedUrl.searchParams.get("includeTurns"),
+        maxRenderableItems: parsedUrl.searchParams.get("maxRenderableItems"),
       });
+      const readThread = await readThreadResolver(
+        readThreadRequest.threadId,
+        readThreadRequest.provider ?? null,
+        {
+          includeTurns: readThreadRequest.includeTurns,
+          maxRenderableItems: readThreadRequest.maxRenderableItems ?? null,
+        },
+      );
       if (readThread) {
         return jsonResponse(readThread);
       }
@@ -625,13 +680,10 @@ vi.stubGlobal(
     }
 
     if (pathname === "/api/unified/command") {
-      const body = init?.body
-        ? (JSON.parse(String(init.body)) as {
-            kind: string;
-            provider: ProviderId;
-            threadId?: string;
-          })
+      const rawBody = init?.body
+        ? JSON.parse(String(init.body))
         : { kind: "unknown", provider: "codex" as const };
+      const body = MockUnifiedCommandEnvelopeSchema.parse(rawBody);
 
       if (body.kind === "listProjectDirectories") {
         return jsonResponse({
@@ -664,19 +716,18 @@ vi.stubGlobal(
       }
 
       if (body.kind === "readLiveState") {
-        const maxRenderableItems =
-          "maxRenderableItems" in body &&
-          typeof body.maxRenderableItems === "number" &&
-          Number.isFinite(body.maxRenderableItems)
-            ? body.maxRenderableItems
-            : undefined;
+        const readLiveStateCommand =
+          MockReadLiveStateCommandSchema.parse(rawBody);
         return jsonResponse({
           ok: true,
           result: await liveStateResolver(
-            body.threadId ?? "",
-            body.provider,
-            maxRenderableItems !== undefined
-              ? { maxRenderableItems }
+            readLiveStateCommand.threadId,
+            readLiveStateCommand.provider,
+            readLiveStateCommand.maxRenderableItems !== undefined
+              ? {
+                  maxRenderableItems:
+                    readLiveStateCommand.maxRenderableItems,
+                }
               : undefined,
           ),
         });
@@ -1627,16 +1678,17 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByText("live-fallback-ready")).toBeTruthy();
+    vi.useFakeTimers();
 
     await act(async () => {
       MockEventSource.emitOpen();
-      await new Promise((resolve) => window.setTimeout(resolve, 300));
+      await vi.advanceTimersByTimeAsync(300);
     });
 
     const connectedCallCount = readThreadCallCount;
 
     await act(async () => {
-      await new Promise((resolve) => window.setTimeout(resolve, 1400));
+      await vi.advanceTimersByTimeAsync(1400);
     });
 
     expect(readThreadCallCount).toBe(connectedCallCount);
@@ -1644,11 +1696,12 @@ describe("App", () => {
     await act(async () => {
       MockEventSource.emitError();
       await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(1100);
     });
 
-    await waitFor(() =>
-      expect(readThreadCallCount).toBeGreaterThan(connectedCallCount),
-    );
+    expect(readThreadCallCount).toBeGreaterThan(connectedCallCount);
+    vi.clearAllTimers();
+    vi.useRealTimers();
   });
 
   it("refreshes core thread data when unified events reconnect", async () => {

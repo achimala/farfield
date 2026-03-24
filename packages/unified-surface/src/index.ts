@@ -932,7 +932,7 @@ const UnifiedCommandCreateThreadSchema = z
   })
   .strict();
 
-const UnifiedCommandReadThreadSchema = z
+export const UnifiedCommandReadThreadSchema = z
   .object({
     kind: z.literal("readThread"),
     provider: UnifiedProviderIdSchema,
@@ -1010,7 +1010,7 @@ const UnifiedCommandSubmitUserInputSchema = z
   })
   .strict();
 
-const UnifiedCommandReadLiveStateSchema = z
+export const UnifiedCommandReadLiveStateSchema = z
   .object({
     kind: z.literal("readLiveState"),
     provider: UnifiedProviderIdSchema,
