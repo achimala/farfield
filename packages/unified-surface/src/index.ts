@@ -689,6 +689,37 @@ const UnifiedMcpToolCallItemSchema = z
   })
   .strict();
 
+const UnifiedDynamicToolCallContentItemSchema = z
+  .discriminatedUnion("type", [
+    z
+      .object({
+        type: z.literal("inputText"),
+        text: z.string()
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("inputImage"),
+        imageUrl: z.string()
+      })
+      .strict()
+  ]);
+
+const UnifiedDynamicToolCallItemSchema = z
+  .object({
+    id: NonEmptyStringSchema,
+    type: z.literal("dynamicToolCall"),
+    tool: z.string(),
+    status: z.enum(["inProgress", "completed", "failed"]),
+    arguments: JsonValueSchema,
+    contentItems: z
+      .union([z.array(UnifiedDynamicToolCallContentItemSchema), z.null()])
+      .optional(),
+    success: z.union([z.boolean(), z.null()]).optional(),
+    durationMs: z.union([NonNegativeIntSchema, z.null()]).optional()
+  })
+  .strict();
+
 const UnifiedCollabAgentToolCallItemSchema = z
   .object({
     id: NonEmptyStringSchema,
@@ -774,6 +805,7 @@ export const UnifiedItemSchema = z.discriminatedUnion("type", [
   UnifiedContextCompactionItemSchema,
   UnifiedWebSearchItemSchema,
   UnifiedMcpToolCallItemSchema,
+  UnifiedDynamicToolCallItemSchema,
   UnifiedCollabAgentToolCallItemSchema,
   UnifiedImageViewItemSchema,
   UnifiedEnteredReviewModeItemSchema,
@@ -801,6 +833,7 @@ export const UNIFIED_ITEM_KINDS = [
   "contextCompaction",
   "webSearch",
   "mcpToolCall",
+  "dynamicToolCall",
   "collabAgentToolCall",
   "imageView",
   "enteredReviewMode",
@@ -899,12 +932,13 @@ const UnifiedCommandCreateThreadSchema = z
   })
   .strict();
 
-const UnifiedCommandReadThreadSchema = z
+export const UnifiedCommandReadThreadSchema = z
   .object({
     kind: z.literal("readThread"),
     provider: UnifiedProviderIdSchema,
     threadId: NonEmptyStringSchema,
-    includeTurns: z.boolean().optional().default(true)
+    includeTurns: z.boolean().optional().default(true),
+    maxRenderableItems: z.number().int().positive().optional()
   })
   .strict();
 
@@ -976,11 +1010,12 @@ const UnifiedCommandSubmitUserInputSchema = z
   })
   .strict();
 
-const UnifiedCommandReadLiveStateSchema = z
+export const UnifiedCommandReadLiveStateSchema = z
   .object({
     kind: z.literal("readLiveState"),
     provider: UnifiedProviderIdSchema,
-    threadId: NonEmptyStringSchema
+    threadId: NonEmptyStringSchema,
+    maxRenderableItems: z.number().int().positive().optional()
   })
   .strict();
 
@@ -1298,6 +1333,7 @@ const ITEM_KIND_COVERAGE: Record<UnifiedItemKind, true> = {
   contextCompaction: true,
   webSearch: true,
   mcpToolCall: true,
+  dynamicToolCall: true,
   collabAgentToolCall: true,
   imageView: true,
   enteredReviewMode: true,

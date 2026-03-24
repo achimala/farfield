@@ -23,8 +23,6 @@ import {
 const AppServerThreadListResponseBaseSchema = GeneratedThreadListResponseSchema.passthrough();
 const AppServerThreadReadResponseBaseSchema = GeneratedThreadReadResponseSchema.passthrough();
 const AppServerModelListResponseBaseSchema = GeneratedModelListResponseSchema.passthrough();
-const AppServerCollaborationModeListResponseBaseSchema =
-  GeneratedCollaborationModeListResponseSchema.passthrough();
 const AppServerGetAccountRateLimitsResponseBaseSchema =
   GeneratedGetAccountRateLimitsResponseSchema.passthrough();
 const AppServerStartThreadRequestBaseSchema = GeneratedThreadStartParamsSchema.passthrough();
@@ -35,11 +33,64 @@ const AppServerServerRequestBaseSchema = z.union([
 
 const ThreadTitleSchema = z.union([z.string(), z.null()]).optional();
 const ThreadIsGeneratingSchema = z.boolean().optional();
+const AppServerModelReasoningEffortItemSchema = z
+  .object({
+    reasoningEffort: z.string(),
+    description: z.string().optional()
+  })
+  .passthrough();
 
-const AppServerGeneratedThreadListItemSchema = AppServerThreadListResponseBaseSchema.shape.data.element.extend({
-  title: ThreadTitleSchema,
-  isGenerating: ThreadIsGeneratingSchema
-});
+const AppServerThreadStatusActiveFlagSchema = z.enum([
+  "waitingOnApproval",
+  "waitingOnUserInput"
+]);
+
+const AppServerThreadStatusSchema = z.union([
+  z
+    .object({
+      type: z.literal("active"),
+      activeFlags: z.array(AppServerThreadStatusActiveFlagSchema)
+    })
+    .passthrough(),
+  z.object({ type: z.literal("idle") }).passthrough(),
+  z.object({ type: z.literal("notLoaded") }).passthrough(),
+  z.object({ type: z.literal("systemError") }).passthrough()
+]);
+
+const AppServerModelInputModalitySchema = z.enum(["text", "image"]);
+const AppServerModelUpgradeInfoSchema = z
+  .object({
+    migrationMarkdown: z.union([z.string(), z.null()]).optional(),
+    model: z.string(),
+    modelLink: z.union([z.string(), z.null()]).optional(),
+    upgradeCopy: z.union([z.string(), z.null()]).optional()
+  })
+  .passthrough();
+const AppServerModelAvailabilityNuxSchema = z
+  .object({
+    message: z.string()
+  })
+  .passthrough();
+
+const AppServerGeneratedThreadListItemSchema = z
+  .object({
+    id: z.string().min(1),
+    preview: z.string(),
+    title: ThreadTitleSchema,
+    name: z.union([z.string(), z.null()]).optional(),
+    isGenerating: ThreadIsGeneratingSchema,
+    createdAt: z.number().int().nonnegative(),
+    updatedAt: z.number().int().nonnegative(),
+    cwd: z.string().optional(),
+    source: ThreadConversationStateSchema.shape.source,
+    modelProvider: z.string().optional(),
+    cliVersion: z.string().optional(),
+    path: z.union([z.string(), z.null()]).optional(),
+    gitInfo: ThreadConversationStateSchema.shape.gitInfo,
+    status: AppServerThreadStatusSchema.optional(),
+    turns: ThreadConversationStateSchema.shape.turns.optional()
+  })
+  .passthrough();
 
 const OpenCodeThreadListItemSchema = z
   .object({
@@ -59,7 +110,15 @@ export const AppServerThreadListItemSchema = z.union([
   OpenCodeThreadListItemSchema
 ]);
 
-export const AppServerListThreadsResponseSchema = z
+export const AppServerListThreadsResponseSchema: z.ZodObject<
+  {
+    data: z.ZodArray<typeof AppServerThreadListItemSchema>;
+    nextCursor: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodNull]>>;
+    pages: z.ZodOptional<z.ZodNumber>;
+    truncated: z.ZodOptional<z.ZodBoolean>;
+  },
+  "passthrough"
+> = z
   .object({
     data: z.array(AppServerThreadListItemSchema),
     nextCursor: z.union([z.string(), z.null()]).optional(),
@@ -79,22 +138,73 @@ export const AppServerReadThreadResponseSchema: z.ZodObject<
   })
   .passthrough();
 
-export const AppServerModelSchema = AppServerModelListResponseBaseSchema.shape.data.element;
+export const AppServerModelSchema = z
+  .object({
+    id: z.string().min(1),
+    model: z.string().min(1),
+    displayName: z.string().optional(),
+    description: z.string().optional(),
+    hidden: z.boolean().optional(),
+    supportedReasoningEfforts: z.array(AppServerModelReasoningEffortItemSchema).default([]),
+    defaultReasoningEffort: z.string().optional(),
+    inputModalities: z.array(AppServerModelInputModalitySchema).optional(),
+    supportsPersonality: z.boolean().optional(),
+    isDefault: z.boolean().optional(),
+    upgrade: z.union([z.string(), z.null()]).optional(),
+    upgradeInfo: z.union([AppServerModelUpgradeInfoSchema, z.null()]).optional(),
+    availabilityNux: z.union([AppServerModelAvailabilityNuxSchema, z.null()]).optional()
+  })
+  .passthrough();
 
 export const AppServerModelReasoningEffortSchema =
-  AppServerModelSchema.shape.supportedReasoningEfforts.element;
+  AppServerModelReasoningEffortItemSchema;
 
-export const AppServerListModelsResponseSchema = AppServerModelListResponseBaseSchema;
+export const AppServerListModelsResponseSchema = z
+  .object({
+    data: z.array(AppServerModelSchema),
+    nextCursor: z.union([z.string(), z.null()]).optional()
+  })
+  .passthrough();
 
-export const AppServerCollaborationModeListItemSchema =
-  AppServerCollaborationModeListResponseBaseSchema.shape.data.element;
+export const AppServerCollaborationModeListItemSchema = z
+  .object({
+    name: z.string().optional(),
+    mode: z.string().optional(),
+    model: z.union([z.string(), z.null()]).optional(),
+    reasoning_effort: z.union([z.string(), z.null()]).optional(),
+    developer_instructions: z.union([z.string(), z.null()]).optional(),
+    settings: z
+      .object({
+        model: z.union([z.string(), z.null()]).optional(),
+        reasoning_effort: z.union([z.string(), z.null()]).optional(),
+        developer_instructions: z.union([z.string(), z.null()]).optional()
+      })
+      .passthrough()
+      .optional()
+  })
+  .passthrough();
 
-export const AppServerCollaborationModeListResponseSchema =
-  AppServerCollaborationModeListResponseBaseSchema;
+export const AppServerCollaborationModeListResponseSchema = z
+  .object({
+    data: z.array(AppServerCollaborationModeListItemSchema),
+    nextCursor: z.union([z.string(), z.null()]).optional()
+  })
+  .passthrough();
 
 export const AppServerStartThreadRequestSchema = AppServerStartThreadRequestBaseSchema;
 
-export const AppServerStartThreadResponseSchema = z
+export const AppServerStartThreadResponseSchema: z.ZodObject<
+  {
+    thread: typeof AppServerThreadListItemSchema;
+    model: z.ZodOptional<z.ZodString>;
+    modelProvider: z.ZodOptional<z.ZodString>;
+    cwd: z.ZodOptional<z.ZodString>;
+    approvalPolicy: z.ZodOptional<z.ZodString>;
+    sandbox: z.ZodOptional<z.ZodAny>;
+    reasoningEffort: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodNull]>>;
+  },
+  "passthrough"
+> = z
   .object({
     thread: AppServerThreadListItemSchema,
     model: z.string().optional(),

@@ -269,6 +269,49 @@ describe("codex-protocol schemas", () => {
     expect(todoItem?.type).toBe("todo-list");
   });
 
+  it("parses snapshot broadcast when turn includes todoList item", () => {
+    const parsed = parseThreadStreamStateChangedBroadcast({
+      type: "broadcast",
+      method: "thread-stream-state-changed",
+      sourceClientId: "client-123",
+      version: 4,
+      params: {
+        conversationId: "thread-123",
+        type: "thread-stream-state-changed",
+        version: 4,
+        change: {
+          type: "snapshot",
+          conversationState: {
+            id: "thread-123",
+            turns: [
+              {
+                status: "inProgress",
+                items: [
+                  {
+                    id: "todo-1",
+                    type: "todoList",
+                    explanation: null,
+                    plan: [
+                      { step: "Gather context", status: "completed" },
+                      { step: "Implement fix", status: "inProgress" }
+                    ]
+                  }
+                ]
+              }
+            ],
+            requests: []
+          }
+        }
+      }
+    });
+
+    expect(parsed.params.change.type).toBe("snapshot");
+    const todoItem = parsed.params.change.type === "snapshot"
+      ? parsed.params.change.conversationState.turns[0]?.items[0]
+      : null;
+    expect(todoItem?.type).toBe("todoList");
+  });
+
   it("parses snapshot broadcast when turn includes remoteTaskCreated item", () => {
     const parsed = parseThreadStreamStateChangedBroadcast({
       type: "broadcast",
@@ -655,7 +698,7 @@ describe("codex-protocol schemas", () => {
     expect(parsed.turns[0]?.items[1]?.type).toBe("webSearch");
   });
 
-  it("parses thread conversation state with mcp and collab tool call items", () => {
+  it("parses thread conversation state with mcp, dynamic, and collab tool call items", () => {
     const parsed = parseThreadConversationState({
       id: "thread-123",
       turns: [
@@ -675,6 +718,27 @@ describe("codex-protocol schemas", () => {
               },
               error: null,
               durationMs: 18
+            },
+            {
+              id: "item-dynamic",
+              type: "dynamicToolCall",
+              tool: "web_search",
+              status: "completed",
+              arguments: {
+                query: "farfield dynamic tool call"
+              },
+              contentItems: [
+                {
+                  type: "inputText",
+                  text: "Search complete"
+                },
+                {
+                  type: "inputImage",
+                  imageUrl: "https://example.com/image.png"
+                }
+              ],
+              success: true,
+              durationMs: 42
             },
             {
               id: "item-collab",
@@ -713,10 +777,11 @@ describe("codex-protocol schemas", () => {
     });
 
     expect(parsed.turns[0]?.items[0]?.type).toBe("mcpToolCall");
-    expect(parsed.turns[0]?.items[1]?.type).toBe("collabAgentToolCall");
-    expect(parsed.turns[0]?.items[2]?.type).toBe("imageView");
-    expect(parsed.turns[0]?.items[3]?.type).toBe("enteredReviewMode");
-    expect(parsed.turns[0]?.items[4]?.type).toBe("exitedReviewMode");
+    expect(parsed.turns[0]?.items[1]?.type).toBe("dynamicToolCall");
+    expect(parsed.turns[0]?.items[2]?.type).toBe("collabAgentToolCall");
+    expect(parsed.turns[0]?.items[3]?.type).toBe("imageView");
+    expect(parsed.turns[0]?.items[4]?.type).toBe("enteredReviewMode");
+    expect(parsed.turns[0]?.items[5]?.type).toBe("exitedReviewMode");
   });
 
   it("parses contextCompaction item when completed is omitted", () => {

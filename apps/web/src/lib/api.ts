@@ -654,16 +654,40 @@ export async function listSidebarThreads(options: {
   });
 }
 
+function normalizePositiveIntegerOption(
+  value: number | undefined,
+  name: string,
+): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new RangeError(`${name} must be a positive integer`);
+  }
+  return value;
+}
+
 export async function readThread(
   threadId: string,
-  options?: { includeTurns?: boolean; provider?: AgentId },
+  options?: {
+    includeTurns?: boolean;
+    provider?: AgentId;
+    maxRenderableItems?: number;
+  },
 ): Promise<z.infer<typeof ReadThreadResponseSchema>> {
+  const maxRenderableItems = normalizePositiveIntegerOption(
+    options?.maxRenderableItems,
+    "maxRenderableItems",
+  );
   const params = new URLSearchParams();
   if (typeof options?.provider === "string") {
     params.set("provider", options.provider);
   }
   if (typeof options?.includeTurns === "boolean") {
     params.set("includeTurns", options.includeTurns ? "1" : "0");
+  }
+  if (maxRenderableItems !== undefined) {
+    params.set("maxRenderableItems", String(maxRenderableItems));
   }
 
   const query = params.toString();
@@ -750,11 +774,17 @@ export async function listModels(
 export async function getLiveState(
   threadId: string,
   provider: AgentId,
+  options?: { maxRenderableItems?: number },
 ): Promise<z.infer<typeof LiveStateResponseSchema>> {
+  const maxRenderableItems = normalizePositiveIntegerOption(
+    options?.maxRenderableItems,
+    "maxRenderableItems",
+  );
   const result = await runUnifiedCommand({
     kind: "readLiveState",
     provider,
     threadId,
+    ...(maxRenderableItems !== undefined ? { maxRenderableItems } : {}),
   });
 
   if (result.kind !== "readLiveState") {
