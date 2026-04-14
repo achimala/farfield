@@ -439,6 +439,7 @@ describe("CodexAgentAdapter live state", () => {
         1,
       ),
     );
+    emitFrame(createMalformedStreamBroadcast(threadId));
     emitFrame(createInformationalBroadcast(threadId));
     emitFrame(createApprovalPatchEvent(threadId, 7, 2));
 
@@ -462,11 +463,14 @@ describe("CodexAgentAdapter live state", () => {
     await adapter.start();
     emitFrame(createSnapshotEvent(threadId, createThreadState(threadId), 1));
     emitFrame(createMalformedStreamBroadcast(threadId));
+    emitFrame(createApprovalPatchEvent(threadId, 17, 2));
 
     const liveState = await adapter.readLiveState(threadId);
 
     expect(liveState.liveStateError?.kind).toBe("parseFailed");
     expect(liveState.liveStateError?.eventIndex).toBe(1);
+    expect(liveState.conversationState?.requests).toHaveLength(1);
+    expect(liveState.conversationState?.requests[0]?.id).toBe(17);
 
     await adapter.stop();
   });

@@ -597,6 +597,9 @@ export class CodexAgentAdapter implements AgentAdapter {
           threadId: input.threadId,
           expectedTurnId: activeTurnId,
           input: [{ type: "text", text }],
+          ...(input.approvalPolicy
+            ? { approvalPolicy: input.approvalPolicy }
+            : {}),
         });
         return;
       }
@@ -626,6 +629,9 @@ export class CodexAgentAdapter implements AgentAdapter {
         ...(input.effort ? { effort: input.effort } : {}),
         ...(pendingCollaborationMode !== undefined
           ? { collaborationMode: pendingCollaborationMode }
+          : {}),
+        ...(input.approvalPolicy
+          ? { approvalPolicy: input.approvalPolicy }
           : {}),
         attachments: [],
       });

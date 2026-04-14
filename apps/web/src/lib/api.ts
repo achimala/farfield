@@ -852,6 +852,7 @@ export async function sendMessage(input: {
     };
   };
   isSteering?: boolean;
+  approvalPolicy?: string;
 }): Promise<void> {
   const result = await runUnifiedCommand({
     kind: "sendMessage",
@@ -888,6 +889,9 @@ export async function sendMessage(input: {
       : {}),
     ...(typeof input.isSteering === "boolean"
       ? { isSteering: input.isSteering }
+      : {}),
+    ...(input.approvalPolicy
+      ? { approvalPolicy: input.approvalPolicy }
       : {}),
   });
 

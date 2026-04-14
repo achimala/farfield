@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   UnifiedCommandSchema,
   UNIFIED_COMMAND_KINDS,
@@ -303,6 +303,33 @@ function createCommand(
 }
 
 describe("unified provider adapters", () => {
+  it("passes approvalPolicy through sendMessage", async () => {
+    const sendMessage = vi.fn(
+      async (_input: Parameters<AgentAdapter["sendMessage"]>[0]) => undefined,
+    );
+    const adapter: AgentAdapter = {
+      ...createCodexAdapter(),
+      sendMessage,
+    };
+    const unified = new AgentUnifiedProviderAdapter("codex", adapter);
+
+    await unified.execute(
+      UnifiedCommandSchema.parse({
+        kind: "sendMessage",
+        provider: "codex",
+        threadId: SAMPLE_THREAD.id,
+        text: "open calculator",
+        approvalPolicy: "untrusted",
+      }),
+    );
+
+    expect(sendMessage).toHaveBeenCalledWith({
+      threadId: SAMPLE_THREAD.id,
+      text: "open calculator",
+      approvalPolicy: "untrusted",
+    });
+  });
+
   it("has full command handler coverage for both providers", () => {
     const codexUnified = new AgentUnifiedProviderAdapter(
       "codex",

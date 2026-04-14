@@ -1022,7 +1022,8 @@ const UnifiedCommandSendMessageSchema = z
       })
       .strict()
       .optional(),
-    isSteering: z.boolean().optional()
+    isSteering: z.boolean().optional(),
+    approvalPolicy: z.string().optional()
   })
   .strict();
 

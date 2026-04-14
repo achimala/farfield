@@ -79,6 +79,7 @@ export interface AgentSendMessageInput {
   effort?: string;
   collaborationMode?: AgentTurnCollaborationMode | null;
   isSteering?: boolean;
+  approvalPolicy?: string;
 }
 
 export interface AgentSetCollaborationModeInput {

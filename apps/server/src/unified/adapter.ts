@@ -310,6 +310,9 @@ function createHandlerTable(
         ...(typeof command.isSteering === "boolean"
           ? { isSteering: command.isSteering }
           : {}),
+        ...(command.approvalPolicy
+          ? { approvalPolicy: command.approvalPolicy }
+          : {}),
       });
 
       return {
