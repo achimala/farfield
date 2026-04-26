@@ -352,6 +352,61 @@ describe("codex-protocol schemas", () => {
     expect(item?.type).toBe("remoteTaskCreated");
   });
 
+  it("parses snapshot broadcast when turn includes dynamicToolCall item", () => {
+    const parsed = parseThreadStreamStateChangedBroadcast({
+      type: "broadcast",
+      method: "thread-stream-state-changed",
+      sourceClientId: "client-123",
+      version: 4,
+      params: {
+        conversationId: "thread-123",
+        type: "thread-stream-state-changed",
+        version: 4,
+        change: {
+          type: "snapshot",
+          conversationState: {
+            id: "thread-123",
+            turns: [
+              {
+                status: "inProgress",
+                items: [
+                  {
+                    id: "dynamic-tool-call-1",
+                    type: "dynamicToolCall",
+                    tool: "imagegen",
+                    arguments: {
+                      prompt: "draw a chart"
+                    },
+                    status: "completed",
+                    contentItems: [
+                      {
+                        type: "inputText",
+                        text: "created image"
+                      },
+                      {
+                        type: "inputImage",
+                        imageUrl: "file:///tmp/chart.png"
+                      }
+                    ],
+                    success: true,
+                    durationMs: 42
+                  }
+                ]
+              }
+            ],
+            requests: []
+          }
+        }
+      }
+    });
+
+    expect(parsed.params.change.type).toBe("snapshot");
+    const item = parsed.params.change.type === "snapshot"
+      ? parsed.params.change.conversationState.turns[0]?.items[0]
+      : null;
+    expect(item?.type).toBe("dynamicToolCall");
+  });
+
   it("rejects invalid patch value for remove operation", () => {
     expect(() =>
       parseThreadStreamStateChangedBroadcast({
