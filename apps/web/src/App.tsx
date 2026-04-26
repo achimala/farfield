@@ -2573,6 +2573,9 @@ export function App(): React.JSX.Element {
       });
 
       if (!shouldLoadStreamEvents) {
+        if (selectedThreadIdRef.current === threadId) {
+          setError("");
+        }
         return;
       }
 
@@ -2588,18 +2591,21 @@ export function App(): React.JSX.Element {
       if (selectedThreadIdRef.current !== threadId) {
         return;
       }
-      setStreamEvents((prev) => {
-        const prevLast = prev[prev.length - 1];
-        const nextLast = stream.events[stream.events.length - 1];
-        const prevLastSignature = prevLast ? JSON.stringify(prevLast) : "";
-        const nextLastSignature = nextLast ? JSON.stringify(nextLast) : "";
-        if (
-          prev.length === stream.events.length &&
-          prevLastSignature === nextLastSignature
-        ) {
-          return prev;
-        }
-        return stream.events;
+      startTransition(() => {
+        setStreamEvents((prev) => {
+          const prevLast = prev[prev.length - 1];
+          const nextLast = stream.events[stream.events.length - 1];
+          const prevLastSignature = prevLast ? JSON.stringify(prevLast) : "";
+          const nextLastSignature = nextLast ? JSON.stringify(nextLast) : "";
+          if (
+            prev.length === stream.events.length &&
+            prevLastSignature === nextLastSignature
+          ) {
+            return prev;
+          }
+          return stream.events;
+        });
+        setError("");
       });
     },
     [

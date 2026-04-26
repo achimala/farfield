@@ -1209,6 +1209,65 @@ describe("App", () => {
     expect(screen.queryByText("listed-thread-loaded")).toBeNull();
   });
 
+  it("clears a transient direct-route registration error after the thread loads", async () => {
+    const threadId = "thread-direct-route-transient";
+    window.history.replaceState(null, "", `/threads/${threadId}`);
+
+    threadsFixture = {
+      ok: true,
+      data: [],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    let readAttempts = 0;
+    readThreadResolver = (
+      targetThreadId: string,
+      provider: ProviderId | null,
+    ) => {
+      if (targetThreadId !== threadId) {
+        return null;
+      }
+      readAttempts += 1;
+      if (readAttempts === 1) {
+        return null;
+      }
+      return {
+        ok: true,
+        thread: buildConversationStateFixture(targetThreadId, "gpt-old-codex", {
+          provider: provider ?? "codex",
+          turnItems: [
+            {
+              id: "agent-transient-loaded-1",
+              type: "agentMessage",
+              text: "transient-route-loaded",
+            },
+          ],
+        }),
+      };
+    };
+
+    render(<App />);
+
+    expect(
+      await screen.findByText(`Thread ${threadId} is not registered`),
+    ).toBeTruthy();
+    expect(
+      await screen.findByText("transient-route-loaded", {}, { timeout: 4000 }),
+    ).toBeTruthy();
+    await waitFor(() =>
+      expect(
+        screen.queryByText(`Thread ${threadId} is not registered`),
+      ).toBeNull(),
+    );
+  });
+
   it("does not auto-switch to another listed thread when route thread is missing", async () => {
     const missingThreadId = "thread-missing-route";
     const listedThreadId = "thread-listed";
