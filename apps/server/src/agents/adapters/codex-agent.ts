@@ -20,6 +20,7 @@ import {
   parseCommandExecutionRequestApprovalResponse,
   parseFileChangeRequestApprovalResponse,
   parseUserInputResponsePayload,
+  TurnStartParamsSchema,
   type IpcFrame,
   type IpcRequestFrame,
   type IpcResponseFrame,
@@ -28,6 +29,7 @@ import {
   ThreadTurnSchema,
   TodoListItemSchema,
   TurnItemSchema,
+  type TurnStartParams,
   type ThreadConversationRequest,
   type ThreadConversationState,
   type ThreadStreamStateChangedBroadcast,
@@ -596,6 +598,26 @@ export class CodexAgentAdapter implements AgentAdapter {
 
     const sendTurn = async (): Promise<void> => {
       if (input.isSteering === true) {
+        if (visibleOwnerClientId) {
+          await this.startTurnThroughOwnerClient(
+            input.threadId,
+            visibleOwnerClientId,
+            {
+              threadId: input.threadId,
+              input: [{ type: "text", text }],
+              ...(input.cwd ? { cwd: input.cwd } : {}),
+              ...(input.model ? { model: input.model } : {}),
+              ...(input.effort ? { effort: input.effort } : {}),
+              ...(input.approvalPolicy
+                ? { approvalPolicy: input.approvalPolicy }
+                : {}),
+              attachments: [],
+            },
+            true,
+          );
+          return;
+        }
+
         const activeTurnId = await this.getActiveTurnId(input.threadId);
         if (!activeTurnId) {
           throw new Error("Cannot steer because there is no active turn");
@@ -629,7 +651,7 @@ export class CodexAgentAdapter implements AgentAdapter {
         input.model,
         pendingCollaborationMode,
       );
-      await this.appClient.startTurn({
+      const turnStartParams = TurnStartParamsSchema.parse({
         threadId: input.threadId,
         input: [{ type: "text", text }],
         ...(input.cwd ? { cwd: input.cwd } : {}),
@@ -643,6 +665,16 @@ export class CodexAgentAdapter implements AgentAdapter {
           : {}),
         attachments: [],
       });
+      if (visibleOwnerClientId) {
+        await this.startTurnThroughOwnerClient(
+          input.threadId,
+          visibleOwnerClientId,
+          turnStartParams,
+          false,
+        );
+        return;
+      }
+      await this.appClient.startTurn(turnStartParams);
     };
     await this.runThreadOperationWithResumeRetry(input.threadId, sendTurn);
     this.scheduleThreadRefresh(
@@ -830,6 +862,26 @@ export class CodexAgentAdapter implements AgentAdapter {
         null,
       events: (this.streamEventsByThreadId.get(threadId) ?? []).slice(-limit),
     };
+  }
+
+  private async startTurnThroughOwnerClient(
+    threadId: string,
+    ownerClientId: string,
+    turnStartParams: TurnStartParams,
+    isSteering: boolean,
+  ): Promise<void> {
+    await this.replayRequest(
+      "thread-follower-start-turn",
+      {
+        conversationId: threadId,
+        turnStartParams: TurnStartParamsSchema.parse(turnStartParams),
+        isSteering,
+      },
+      {
+        targetClientId: ownerClientId,
+        version: 1,
+      },
+    );
   }
 
   public async replayRequest(

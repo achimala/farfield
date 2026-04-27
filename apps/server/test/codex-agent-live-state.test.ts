@@ -10,6 +10,7 @@ import {
   type IpcFrame,
   type ThreadConversationRequest,
   type ThreadConversationState,
+  type TurnStartParams,
   type UserInputRequestId,
 } from "@farfield/protocol";
 import type {
@@ -25,6 +26,7 @@ const connectionListeners: Array<
 const serverRequestListeners: AppServerRequestListener[] = [];
 const serverNotificationListeners: AppServerNotificationListener[] = [];
 const submitUserInputCalls: UserInputRequestId[] = [];
+const startTurnCalls: TurnStartParams[] = [];
 const ipcRequestCalls: Array<{
   method: string;
   params: object;
@@ -106,6 +108,10 @@ vi.mock("@farfield/api", async (importOriginal) => {
       _response: object,
     ): Promise<void> {
       submitUserInputCalls.push(requestId);
+    }
+
+    public async startTurn(params: TurnStartParams): Promise<void> {
+      startTurnCalls.push(params);
     }
   }
 
@@ -267,6 +273,7 @@ describe("CodexAgentAdapter app-server pending requests", () => {
     serverRequestListeners.splice(0, serverRequestListeners.length);
     serverNotificationListeners.splice(0, serverNotificationListeners.length);
     submitUserInputCalls.splice(0, submitUserInputCalls.length);
+    startTurnCalls.splice(0, startTurnCalls.length);
     ipcRequestCalls.splice(0, ipcRequestCalls.length);
     readThreadCalls.splice(0, readThreadCalls.length);
 
@@ -277,6 +284,66 @@ describe("CodexAgentAdapter app-server pending requests", () => {
     readThreadResponse = {
       thread: createThreadState("thread-default"),
     };
+  });
+
+  it("routes owned thread sends through the desktop follower client", async () => {
+    const threadId = "thread-owned-send";
+    const adapter = createAdapter();
+    readThreadResponse = {
+      thread: createThreadState(threadId),
+    };
+    await adapter.start();
+
+    await adapter.sendMessage({
+      threadId,
+      ownerClientId: "client-1",
+      text: "hello from Farfield",
+      model: "gpt-5.5",
+    });
+
+    expect(startTurnCalls).toEqual([]);
+    expect(ipcRequestCalls).toContainEqual({
+      method: "thread-follower-start-turn",
+      params: {
+        conversationId: threadId,
+        turnStartParams: {
+          threadId,
+          input: [{ type: "text", text: "hello from Farfield" }],
+          model: "gpt-5.5",
+          attachments: [],
+        },
+        isSteering: false,
+      },
+      options: {
+        targetClientId: "client-1",
+        version: 1,
+      },
+    });
+  });
+
+  it("uses app-server turn start when no owner client is known", async () => {
+    const threadId = "thread-unowned-send";
+    const adapter = createAdapter();
+    readThreadResponse = {
+      thread: createThreadState(threadId),
+    };
+    await adapter.start();
+
+    await adapter.sendMessage({
+      threadId,
+      text: "hello from Farfield",
+      model: "gpt-5.5",
+    });
+
+    expect(ipcRequestCalls).toEqual([]);
+    expect(startTurnCalls).toEqual([
+      {
+        threadId,
+        input: [{ type: "text", text: "hello from Farfield" }],
+        model: "gpt-5.5",
+        attachments: [],
+      },
+    ]);
   });
 
   it("merges pending app-server requests into readThread results", async () => {
