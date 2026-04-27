@@ -2704,7 +2704,24 @@ function mergeThreadTurns(
     }
   }
 
-  return mergedTurns;
+  return orderThreadTurnsByStartTime(mergedTurns);
+}
+
+function orderThreadTurnsByStartTime(turns: ThreadTurn[]): ThreadTurn[] {
+  return turns
+    .map((turn, index) => ({ turn, index }))
+    .sort((left, right) => {
+      const leftStartedAtMs = left.turn.turnStartedAtMs ?? null;
+      const rightStartedAtMs = right.turn.turnStartedAtMs ?? null;
+      if (leftStartedAtMs === null || rightStartedAtMs === null) {
+        return left.index - right.index;
+      }
+      if (leftStartedAtMs === rightStartedAtMs) {
+        return left.index - right.index;
+      }
+      return leftStartedAtMs - rightStartedAtMs;
+    })
+    .map((entry) => entry.turn);
 }
 
 function mergeThreadTurn(

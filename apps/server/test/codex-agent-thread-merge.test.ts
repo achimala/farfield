@@ -210,4 +210,64 @@ describe("mergeThreadConversationStates", () => {
       "real-agent-1",
     ]);
   });
+
+  it("orders unmatched read-thread turns by start time", () => {
+    const currentThread = parseThreadConversationState({
+      id: "thread-1",
+      turns: [
+        {
+          id: "turn-a",
+          turnStartedAtMs: 1000,
+          status: "completed",
+          items: [
+            {
+              id: "item-a",
+              type: "userMessage",
+              content: [{ type: "text", text: "First" }],
+            },
+          ],
+        },
+        {
+          id: "turn-c",
+          turnStartedAtMs: 3000,
+          status: "completed",
+          items: [
+            {
+              id: "item-c",
+              type: "userMessage",
+              content: [{ type: "text", text: "Third" }],
+            },
+          ],
+        },
+      ],
+      requests: [],
+    });
+
+    const nextReadThread = parseThreadConversationState({
+      id: "thread-1",
+      turns: [
+        {
+          id: "turn-b",
+          turnStartedAtMs: 2000,
+          status: "completed",
+          items: [
+            {
+              id: "item-b",
+              type: "userMessage",
+              content: [{ type: "text", text: "Second" }],
+            },
+          ],
+        },
+      ],
+      requests: [],
+    });
+
+    const merged = mergeThreadConversationStates(currentThread, nextReadThread);
+
+    expect(merged.turns.map((turn) => turn.id)).toEqual([
+      "turn-a",
+      "turn-b",
+      "turn-c",
+    ]);
+  });
 });
