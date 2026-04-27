@@ -317,6 +317,23 @@ describe("CodexAgentAdapter app-server pending requests", () => {
     expect(result.thread.requests).toHaveLength(0);
   });
 
+  it("submits app-server request ids even when readThread omits the request", async () => {
+    const threadId = "thread-submit-request-id-directly";
+    const adapter = createAdapter();
+    readThreadResponse = {
+      thread: createThreadState(threadId),
+    };
+
+    await adapter.submitUserInput({
+      threadId,
+      requestId: 11,
+      response: { decision: "decline" },
+    });
+
+    expect(submitUserInputCalls).toEqual([11]);
+    expect(readThreadCalls).toEqual([]);
+  });
+
   it("removes cached pending requests when app-server marks them complete", async () => {
     const threadId = "thread-completed-app-server-request";
     const adapter = createAdapter();

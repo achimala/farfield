@@ -114,7 +114,7 @@ export const UserMessageItemSchema = z
   .object({
     id: NonEmptyStringSchema,
     type: z.literal("userMessage"),
-    content: z.array(UserMessagePartSchema)
+    content: z.array(UserMessagePartSchema).default([])
   })
   .passthrough();
 
@@ -122,7 +122,7 @@ export const SteeringUserMessageItemSchema = z
   .object({
     id: NonEmptyStringSchema,
     type: z.literal("steeringUserMessage"),
-    content: z.array(UserMessagePartSchema),
+    content: z.array(UserMessagePartSchema).default([]),
     attachments: z.array(JsonValueSchema).optional()
   })
   .passthrough();
@@ -352,6 +352,32 @@ export const DynamicToolCallItemSchema = z
   })
   .passthrough();
 
+export const CustomToolCallStatusSchema = z.enum([
+  "in_progress",
+  "completed",
+  "failed"
+]);
+
+export const CustomToolCallItemSchema = z
+  .object({
+    type: z.literal("custom_tool_call"),
+    id: NonEmptyStringSchema.optional(),
+    call_id: NonEmptyStringSchema,
+    name: z.string(),
+    input: z.string(),
+    status: CustomToolCallStatusSchema
+  })
+  .passthrough();
+
+export const CustomToolCallOutputItemSchema = z
+  .object({
+    type: z.literal("custom_tool_call_output"),
+    id: NonEmptyStringSchema.optional(),
+    call_id: NonEmptyStringSchema,
+    output: z.string()
+  })
+  .passthrough();
+
 export const RemoteTaskCreatedItemSchema = z
   .object({
     type: z.literal("remoteTaskCreated"),
@@ -486,6 +512,8 @@ export const TurnItemSchema = z.discriminatedUnion("type", [
   WebSearchItemSchema,
   McpToolCallItemSchema,
   DynamicToolCallItemSchema,
+  CustomToolCallItemSchema,
+  CustomToolCallOutputItemSchema,
   CollabAgentToolCallItemSchema,
   ImageViewItemSchema,
   EnteredReviewModeItemSchema,

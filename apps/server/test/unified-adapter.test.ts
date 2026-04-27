@@ -725,6 +725,18 @@ describe("unified provider adapters", () => {
                 success: true,
                 durationMs: 17,
               },
+              {
+                type: "custom_tool_call",
+                call_id: "call-custom-1",
+                name: "apply_patch",
+                input: "*** Begin Patch",
+                status: "completed",
+              },
+              {
+                type: "custom_tool_call_output",
+                call_id: "call-custom-1",
+                output: "{\"output\":\"ok\"}",
+              },
             ],
           },
         ],
@@ -761,5 +773,21 @@ describe("unified provider adapters", () => {
         ? dynamicToolItem.tool
         : null,
     ).toBe("browser.open");
+
+    const customToolItem = result.thread.turns[0]?.items[2];
+    expect(customToolItem?.type).toBe("dynamicToolCall");
+    expect(
+      customToolItem && customToolItem.type === "dynamicToolCall"
+        ? customToolItem.tool
+        : null,
+    ).toBe("apply_patch");
+
+    const customToolOutputItem = result.thread.turns[0]?.items[3];
+    expect(customToolOutputItem?.type).toBe("dynamicToolCall");
+    expect(
+      customToolOutputItem && customToolOutputItem.type === "dynamicToolCall"
+        ? customToolOutputItem.contentItems?.[0]?.type
+        : null,
+    ).toBe("inputText");
   });
 });

@@ -722,32 +722,12 @@ export class CodexAgentAdapter implements AgentAdapter {
       this.resolveVisibleOwnerClientId(input.threadId, input.ownerClientId) ??
       "app-server";
 
-    const threadForRequest = await this.runThreadOperationWithResumeRetry(
-      input.threadId,
-      () => this.appClient.readThread(input.threadId, false),
-    );
-    const parsedThreadForRequest = this.applyPendingCollaborationMode(
-      this.mergePendingAppServerRequests(
-        parseThreadConversationState(threadForRequest.thread),
-        { authoritativeRead: true },
-      ),
-    );
-    const pendingRequest = findPendingRequestWithId(
-      parsedThreadForRequest,
-      input.requestId,
-    );
-
-    if (!pendingRequest) {
-      throw new Error(
-        `Pending request ${String(input.requestId)} is not present in app-server thread state for thread ${input.threadId}`,
-      );
-    }
-
     await this.runAppServerCall(() =>
       this.appClient.submitUserInput(input.requestId, parsedResponse),
     );
     this.removePendingAppServerRequest(input.threadId, input.requestId);
-    await this.refreshThreadFromAppServer(
+    this.notifyThreadStateChanged(input.threadId);
+    this.scheduleThreadRefresh(
       input.threadId,
       ownerClientIdForResult,
       "readThreadWithTurns",
@@ -2440,21 +2420,6 @@ function findActiveTurnId(state: ThreadConversationState): string | null {
   return null;
 }
 
-function findPendingRequestWithId(
-  state: ThreadConversationState,
-  requestId: UserInputRequestId,
-): ThreadConversationRequest | null {
-  for (const request of state.requests) {
-    if (request.completed === true) {
-      continue;
-    }
-    if (requestIdsMatch(request.id, requestId)) {
-      return request;
-    }
-  }
-  return null;
-}
-
 export function mergeThreadConversationStates(
   currentThread: ThreadConversationState,
   nextReadThread: ThreadConversationState,
@@ -2542,29 +2507,40 @@ function mergeTurnItems(
   currentItems: TurnItem[],
   nextItems: TurnItem[],
 ): TurnItem[] {
-  const nextItemsById = new Map(nextItems.map((item) => [item.id, item]));
+  const nextItemsById = new Map(nextItems.map((item) => [turnItemKey(item), item]));
   const mergedItems: TurnItem[] = [];
   const seenIds = new Set<string>();
 
   for (const currentItem of currentItems) {
-    const nextItem = nextItemsById.get(currentItem.id);
+    const currentItemId = turnItemKey(currentItem);
+    const nextItem = nextItemsById.get(currentItemId);
     if (!nextItem) {
       mergedItems.push(currentItem);
       continue;
     }
 
     mergedItems.push(mergeTurnItem(currentItem, nextItem));
-    seenIds.add(currentItem.id);
+    seenIds.add(currentItemId);
   }
 
   for (const nextItem of nextItems) {
-    if (seenIds.has(nextItem.id)) {
+    if (seenIds.has(turnItemKey(nextItem))) {
       continue;
     }
     mergedItems.push(nextItem);
   }
 
   return mergedItems;
+}
+
+function turnItemKey(item: TurnItem): string {
+  switch (item.type) {
+    case "custom_tool_call":
+    case "custom_tool_call_output":
+      return item.id ?? item.call_id;
+    default:
+      return item.id;
+  }
 }
 
 function mergeTurnItem(currentItem: TurnItem, nextItem: TurnItem): TurnItem {
@@ -3012,7 +2988,7 @@ function updateThreadItem(
   }
 
   const nextItems = [...turn.items];
-  const itemIndex = nextItems.findIndex((item) => item.id === itemId);
+  const itemIndex = nextItems.findIndex((item) => turnItemKey(item) === itemId);
   if (itemIndex === -1) {
     return null;
   }
@@ -3050,7 +3026,10 @@ function upsertTurnItem(
   }
 
   const nextItems = [...turn.items];
-  const itemIndex = nextItems.findIndex((item) => item.id === nextItem.id);
+  const nextItemId = turnItemKey(nextItem);
+  const itemIndex = nextItems.findIndex(
+    (item) => turnItemKey(item) === nextItemId,
+  );
   if (itemIndex === -1) {
     nextItems.push(nextItem);
   } else {

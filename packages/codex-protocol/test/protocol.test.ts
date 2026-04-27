@@ -407,6 +407,58 @@ describe("codex-protocol schemas", () => {
     expect(item?.type).toBe("dynamicToolCall");
   });
 
+  it("parses snapshot broadcast with response custom tool call items", () => {
+    const parsed = parseThreadStreamStateChangedBroadcast({
+      type: "broadcast",
+      method: "thread-stream-state-changed",
+      sourceClientId: "client-123",
+      version: 4,
+      params: {
+        conversationId: "thread-123",
+        type: "thread-stream-state-changed",
+        version: 4,
+        change: {
+          type: "snapshot",
+          conversationState: {
+            id: "thread-123",
+            turns: [
+              {
+                status: "inProgress",
+                items: [
+                  {
+                    id: "empty-user-message",
+                    type: "userMessage"
+                  },
+                  {
+                    type: "custom_tool_call",
+                    call_id: "call-1",
+                    name: "apply_patch",
+                    input: "*** Begin Patch",
+                    status: "completed"
+                  },
+                  {
+                    type: "custom_tool_call_output",
+                    call_id: "call-1",
+                    output: "{\"output\":\"ok\"}"
+                  }
+                ]
+              }
+            ],
+            requests: []
+          }
+        }
+      }
+    });
+
+    expect(parsed.params.change.type).toBe("snapshot");
+    const items = parsed.params.change.type === "snapshot"
+      ? parsed.params.change.conversationState.turns[0]?.items
+      : [];
+    expect(items?.[0]?.type).toBe("userMessage");
+    expect(items?.[1]?.type).toBe("custom_tool_call");
+    expect(items?.[2]?.type).toBe("custom_tool_call_output");
+  });
+
   it("rejects invalid patch value for remove operation", () => {
     expect(() =>
       parseThreadStreamStateChangedBroadcast({

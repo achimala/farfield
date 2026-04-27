@@ -1240,6 +1240,38 @@ function mapTurnItem(
           : {}),
       };
 
+    case "custom_tool_call":
+      return {
+        id: item.id ?? item.call_id,
+        type: "dynamicToolCall",
+        tool: item.name,
+        arguments: jsonValueFromString(
+          JSON.stringify({
+            input: item.input,
+          }),
+        ),
+        status: item.status === "in_progress" ? "inProgress" : item.status,
+      };
+
+    case "custom_tool_call_output":
+      return {
+        id: item.id ?? item.call_id,
+        type: "dynamicToolCall",
+        tool: "custom_tool_call_output",
+        arguments: jsonValueFromString(
+          JSON.stringify({
+            callId: item.call_id,
+          }),
+        ),
+        status: "completed",
+        contentItems: [
+          {
+            type: "inputText",
+            text: item.output,
+          },
+        ],
+      };
+
     case "collabAgentToolCall":
       return {
         id: item.id,
