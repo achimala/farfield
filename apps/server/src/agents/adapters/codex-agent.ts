@@ -1012,10 +1012,7 @@ export class CodexAgentAdapter implements AgentAdapter {
     const startedAt = performance.now();
     try {
       return {
-        ownerClientId:
-          this.threadOwnerById.get(threadId) ??
-          this.lastKnownOwnerClientId ??
-          null,
+        ownerClientId: this.threadOwnerById.get(threadId) ?? null,
         conversationState: this.readCanonicalThreadState(threadId),
         liveStateError: this.canonicalThreadStateErrorById.get(threadId) ?? null,
       };
@@ -1029,10 +1026,7 @@ export class CodexAgentAdapter implements AgentAdapter {
     limit: number,
   ): Promise<AgentThreadStreamEvents> {
     return {
-      ownerClientId:
-        this.threadOwnerById.get(threadId) ??
-        this.lastKnownOwnerClientId ??
-        null,
+      ownerClientId: this.threadOwnerById.get(threadId) ?? null,
       events: (this.streamEventsByThreadId.get(threadId) ?? []).slice(-limit),
     };
   }
@@ -2334,9 +2328,6 @@ export class CodexAgentAdapter implements AgentAdapter {
     const mapped = this.threadOwnerById.get(threadId);
     if (mapped && mapped.trim().length > 0) {
       return mapped.trim();
-    }
-    if (this.lastKnownOwnerClientId && this.lastKnownOwnerClientId.trim()) {
-      return this.lastKnownOwnerClientId.trim();
     }
     return null;
   }

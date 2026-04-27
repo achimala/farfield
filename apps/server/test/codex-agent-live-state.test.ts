@@ -447,6 +447,50 @@ describe("CodexAgentAdapter app-server pending requests", () => {
     ]);
   });
 
+  it("does not route unowned sends to another thread's last stream owner", async () => {
+    const ownedThreadId = "thread-with-stream-owner";
+    const unownedThreadId = "thread-without-stream-owner";
+    const adapter = createAdapter();
+    readThreadResponse = {
+      thread: createThreadState(unownedThreadId),
+    };
+    await adapter.start();
+
+    emitIpcFrame({
+      type: "broadcast",
+      method: "thread-stream-state-changed",
+      sourceClientId: "other-thread-owner",
+      version: 6,
+      params: {
+        conversationId: ownedThreadId,
+        type: "thread-stream-state-changed",
+        version: 6,
+        change: {
+          type: "snapshot",
+          conversationState: createThreadState(ownedThreadId),
+        },
+      },
+    });
+
+    const liveState = await adapter.readLiveState(unownedThreadId);
+    await adapter.sendMessage({
+      threadId: unownedThreadId,
+      text: "hello from Farfield",
+      model: "gpt-5.5",
+    });
+
+    expect(liveState.ownerClientId).toBeNull();
+    expect(ipcRequestCalls).toEqual([]);
+    expect(startTurnCalls).toEqual([
+      {
+        threadId: unownedThreadId,
+        input: [{ type: "text", text: "hello from Farfield" }],
+        model: "gpt-5.5",
+        attachments: [],
+      },
+    ]);
+  });
+
   it("returns canonical thread state for sparse readThread results", async () => {
     const threadId = "thread-canonical-read";
     const adapter = createAdapter();

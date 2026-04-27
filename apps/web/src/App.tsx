@@ -1890,8 +1890,11 @@ export function App(): React.JSX.Element {
   const canUseComposer = isGenerating
     ? canInterruptForActiveAgent
     : selectedThreadId
-      ? hasResolvedSelectedThreadProvider && canSendMessageForActiveAgent
+      ? !isModeSyncing &&
+        hasResolvedSelectedThreadProvider &&
+        canSendMessageForActiveAgent
       : availableAgentIds.length > 0 &&
+        !isModeSyncing &&
         canCreateThreadForSelectedAgent &&
         canSendMessageForActiveAgent;
   const conversationWindow = useMemo(() => {
@@ -3407,6 +3410,7 @@ export function App(): React.JSX.Element {
     async (draft: string) => {
       if (!draft.trim()) return;
       if (!canSendMessageForActiveAgent) return;
+      if (isModeSyncing) return;
       if (selectedThreadId && !hasResolvedSelectedThreadProvider) {
         setError("Thread provider is still loading");
         return;
@@ -3499,6 +3503,7 @@ export function App(): React.JSX.Element {
       canSendMessageForActiveAgent,
       conversationState,
       hasResolvedSelectedThreadProvider,
+      isModeSyncing,
       models,
       modes,
       refreshAll,
