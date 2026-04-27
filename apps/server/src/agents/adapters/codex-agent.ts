@@ -577,6 +577,14 @@ export class CodexAgentAdapter implements AgentAdapter {
   ): Promise<AgentReadThreadResult> {
     this.ensureCodexAvailable();
     const startedAt = performance.now();
+    const canonicalThread = this.readCanonicalThreadState(input.threadId);
+    if (canonicalThread && this.desktopOwnedThreadIds.has(input.threadId)) {
+      this.onTiming?.("codexThreadRead", performance.now() - startedAt);
+      return {
+        thread: canonicalThread,
+      };
+    }
+
     const readThreadWithOption = async (includeTurns: boolean) => {
       return this.runAppServerCall(() =>
         this.appClient.readThread(input.threadId, includeTurns),
@@ -767,9 +775,12 @@ export class CodexAgentAdapter implements AgentAdapter {
       await this.appClient.startTurn(turnStartParams);
     };
     await this.runThreadOperationWithResumeRetry(input.threadId, sendTurn);
+    if (route.kind === "desktop-owner") {
+      return;
+    }
     this.scheduleThreadRefresh(
       input.threadId,
-      route.kind === "desktop-owner" ? route.ownerClientId : null,
+      null,
       "readThreadWithTurns",
       APP_SERVER_THREAD_REFRESH_DEBOUNCE_MS,
     );

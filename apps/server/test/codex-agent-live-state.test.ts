@@ -441,6 +441,25 @@ describe("CodexAgentAdapter app-server pending requests", () => {
     });
   });
 
+  it("does not schedule app-server reads after desktop-owned sends", async () => {
+    const threadId = "thread-owned-send-no-read-refresh";
+    const adapter = createAdapter();
+    readThreadResponse = {
+      thread: createThreadState(threadId),
+    };
+    await adapter.start();
+
+    await adapter.sendMessage({
+      threadId,
+      ownerClientId: "client-1",
+      text: "hello from Farfield",
+      model: "gpt-5.5",
+    });
+
+    expect(startTurnCalls).toEqual([]);
+    expect(readThreadCalls).toEqual([]);
+  });
+
   it("uses app-server turn start when desktop IPC is unavailable", async () => {
     const threadId = "thread-unowned-send";
     const adapter = createAdapter();
@@ -632,6 +651,7 @@ describe("CodexAgentAdapter app-server pending requests", () => {
     expect(result.thread.turns.map((turn) => turn.id)).toEqual([
       "019dcd42-5591-7100-bfe7-3d14f7d22182",
     ]);
+    expect(readThreadCalls).toEqual([]);
   });
 
   it("retries ephemeral thread reads without turns", async () => {
