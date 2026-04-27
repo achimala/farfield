@@ -9,10 +9,11 @@ Pushing to `main` runs `.github/workflows/deploy-cloudflare-pages.yml`.
 The workflow:
 
 1. Installs dependencies with Bun `1.3.6`.
-2. Typechecks the web app.
-3. Runs the web tests.
-4. Builds `@farfield/web`.
-5. Uploads `apps/web/dist` to Cloudflare Pages with Wrangler.
+2. Builds the local workspace packages that the web app imports.
+3. Typechecks the web app.
+4. Runs the web tests.
+5. Builds `@farfield/web`.
+6. Uploads `apps/web/dist` to Cloudflare Pages with Wrangler.
 
 ## Cloudflare Setup
 
