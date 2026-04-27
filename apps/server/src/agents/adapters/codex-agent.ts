@@ -2709,19 +2709,80 @@ function mergeThreadTurns(
 
 function orderThreadTurnsByStartTime(turns: ThreadTurn[]): ThreadTurn[] {
   return turns
-    .map((turn, index) => ({ turn, index }))
+    .map((turn, index) => ({
+      turn,
+      index,
+      sortTimeMs: readTurnSortTimeMs(turn),
+    }))
     .sort((left, right) => {
-      const leftStartedAtMs = left.turn.turnStartedAtMs ?? null;
-      const rightStartedAtMs = right.turn.turnStartedAtMs ?? null;
-      if (leftStartedAtMs === null || rightStartedAtMs === null) {
+      if (left.sortTimeMs === null || right.sortTimeMs === null) {
         return left.index - right.index;
       }
-      if (leftStartedAtMs === rightStartedAtMs) {
+      if (left.sortTimeMs === right.sortTimeMs) {
         return left.index - right.index;
       }
-      return leftStartedAtMs - rightStartedAtMs;
+      return left.sortTimeMs - right.sortTimeMs;
     })
     .map((entry) => entry.turn);
+}
+
+function readTurnSortTimeMs(turn: ThreadTurn): number | null {
+  return (
+    turn.turnStartedAtMs ??
+    readUuidV7TimestampMs(turn.turnId) ??
+    readUuidV7TimestampMs(turn.id) ??
+    readUlidTimestampMs(turn.turnId) ??
+    readUlidTimestampMs(turn.id)
+  );
+}
+
+const UUID_V7_TIMESTAMP_ALPHABET = "0123456789ABCDEF";
+const ULID_TIMESTAMP_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+function readUuidV7TimestampMs(value: string | null | undefined): number | null {
+  const normalized = normalizeNonEmptyString(value);
+  if (!normalized) {
+    return null;
+  }
+
+  let timestampMs = 0;
+  let digitCount = 0;
+  for (let index = 0; index < normalized.length; index += 1) {
+    const char = normalized[index] ?? "";
+    if (char === "-") {
+      continue;
+    }
+    const digit = UUID_V7_TIMESTAMP_ALPHABET.indexOf(char.toUpperCase());
+    if (digit < 0) {
+      return null;
+    }
+    timestampMs = timestampMs * 16 + digit;
+    digitCount += 1;
+    if (digitCount === 12) {
+      return timestampMs;
+    }
+  }
+
+  return null;
+}
+
+function readUlidTimestampMs(value: string | null | undefined): number | null {
+  const normalized = normalizeNonEmptyString(value);
+  if (!normalized || normalized.length < 10) {
+    return null;
+  }
+
+  let timestampMs = 0;
+  for (let index = 0; index < 10; index += 1) {
+    const digit = ULID_TIMESTAMP_ALPHABET.indexOf(
+      normalized[index]?.toUpperCase() ?? "",
+    );
+    if (digit < 0) {
+      return null;
+    }
+    timestampMs = timestampMs * 32 + digit;
+  }
+  return timestampMs;
 }
 
 function mergeThreadTurn(

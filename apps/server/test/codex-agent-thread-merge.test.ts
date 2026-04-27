@@ -270,4 +270,49 @@ describe("mergeThreadConversationStates", () => {
       "turn-c",
     ]);
   });
+
+  it("orders unmatched read-thread turns by UUIDv7 time when start time is missing", () => {
+    const currentThread = parseThreadConversationState({
+      id: "thread-1",
+      turns: [
+        {
+          id: "019dcd5c-f191-76d1-b45b-59a0d21a1de2",
+          status: "completed",
+          items: [
+            {
+              id: "item-later",
+              type: "userMessage",
+              content: [{ type: "text", text: "Later" }],
+            },
+          ],
+        },
+      ],
+      requests: [],
+    });
+
+    const nextReadThread = parseThreadConversationState({
+      id: "thread-1",
+      turns: [
+        {
+          id: "019dcd42-5591-7100-bfe7-3d14f7d22182",
+          status: "completed",
+          items: [
+            {
+              id: "item-earlier",
+              type: "userMessage",
+              content: [{ type: "text", text: "Earlier" }],
+            },
+          ],
+        },
+      ],
+      requests: [],
+    });
+
+    const merged = mergeThreadConversationStates(currentThread, nextReadThread);
+
+    expect(merged.turns.map((turn) => turn.id)).toEqual([
+      "019dcd42-5591-7100-bfe7-3d14f7d22182",
+      "019dcd5c-f191-76d1-b45b-59a0d21a1de2",
+    ]);
+  });
 });
