@@ -1272,6 +1272,34 @@ function mapTurnItem(
         ],
       };
 
+    case "function_call":
+      return {
+        id: item.id ?? item.call_id,
+        type: "dynamicToolCall",
+        tool: item.name,
+        arguments: jsonValueFromString(item.arguments),
+        status: "completed",
+      };
+
+    case "function_call_output":
+      return {
+        id: item.id ?? item.call_id,
+        type: "dynamicToolCall",
+        tool: "function_call_output",
+        arguments: jsonValueFromString(
+          JSON.stringify({
+            callId: item.call_id,
+          }),
+        ),
+        status: "completed",
+        contentItems: [
+          {
+            type: "inputText",
+            text: item.output,
+          },
+        ],
+      };
+
     case "collabAgentToolCall":
       return {
         id: item.id,

@@ -25,6 +25,11 @@ const connectionListeners: Array<
 const serverRequestListeners: AppServerRequestListener[] = [];
 const serverNotificationListeners: AppServerNotificationListener[] = [];
 const submitUserInputCalls: UserInputRequestId[] = [];
+const ipcRequestCalls: Array<{
+  method: string;
+  params: object;
+  options: SendRequestOptions;
+}> = [];
 const readThreadCalls: string[] = [];
 
 let readThreadResponse: AppServerReadThreadResponse;
@@ -162,10 +167,11 @@ vi.mock("@farfield/api", async (importOriginal) => {
     }
 
     public async sendRequestAndWait(
-      _method: string,
-      _params: object,
-      _options: SendRequestOptions = {},
+      method: string,
+      params: object,
+      options: SendRequestOptions = {},
     ) {
+      ipcRequestCalls.push({ method, params, options });
       return IpcResponseFrameSchema.parse({
         type: "response",
         requestId: "request-1",
@@ -261,6 +267,7 @@ describe("CodexAgentAdapter app-server pending requests", () => {
     serverRequestListeners.splice(0, serverRequestListeners.length);
     serverNotificationListeners.splice(0, serverNotificationListeners.length);
     submitUserInputCalls.splice(0, submitUserInputCalls.length);
+    ipcRequestCalls.splice(0, ipcRequestCalls.length);
     readThreadCalls.splice(0, readThreadCalls.length);
 
     listThreadsResponse = {
@@ -308,7 +315,20 @@ describe("CodexAgentAdapter app-server pending requests", () => {
       response: { decision: "accept" },
     });
 
-    expect(submitUserInputCalls).toEqual([7]);
+    expect(submitUserInputCalls).toEqual([]);
+    expect(ipcRequestCalls).toEqual([
+      {
+        method: "thread-follower-command-approval-decision",
+        params: {
+          conversationId: threadId,
+          requestId: 7,
+          decision: "accept",
+        },
+        options: {
+          version: 1,
+        },
+      },
+    ]);
 
     const result = await adapter.readThread({
       threadId,

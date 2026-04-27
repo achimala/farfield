@@ -737,6 +737,17 @@ describe("unified provider adapters", () => {
                 call_id: "call-custom-1",
                 output: "{\"output\":\"ok\"}",
               },
+              {
+                type: "function_call",
+                call_id: "call-function-1",
+                name: "exec_command",
+                arguments: "{\"cmd\":\"date\"}",
+              },
+              {
+                type: "function_call_output",
+                call_id: "call-function-1",
+                output: "today",
+              },
             ],
           },
         ],
@@ -787,6 +798,22 @@ describe("unified provider adapters", () => {
     expect(
       customToolOutputItem && customToolOutputItem.type === "dynamicToolCall"
         ? customToolOutputItem.contentItems?.[0]?.type
+        : null,
+    ).toBe("inputText");
+
+    const functionCallItem = result.thread.turns[0]?.items[4];
+    expect(functionCallItem?.type).toBe("dynamicToolCall");
+    expect(
+      functionCallItem && functionCallItem.type === "dynamicToolCall"
+        ? functionCallItem.tool
+        : null,
+    ).toBe("exec_command");
+
+    const functionCallOutputItem = result.thread.turns[0]?.items[5];
+    expect(functionCallOutputItem?.type).toBe("dynamicToolCall");
+    expect(
+      functionCallOutputItem && functionCallOutputItem.type === "dynamicToolCall"
+        ? functionCallOutputItem.contentItems?.[0]?.type
         : null,
     ).toBe("inputText");
   });

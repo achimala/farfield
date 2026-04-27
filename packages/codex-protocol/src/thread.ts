@@ -378,6 +378,25 @@ export const CustomToolCallOutputItemSchema = z
   })
   .passthrough();
 
+export const FunctionCallItemSchema = z
+  .object({
+    type: z.literal("function_call"),
+    id: NonEmptyStringSchema.optional(),
+    call_id: NonEmptyStringSchema,
+    name: z.string(),
+    arguments: z.string()
+  })
+  .passthrough();
+
+export const FunctionCallOutputItemSchema = z
+  .object({
+    type: z.literal("function_call_output"),
+    id: NonEmptyStringSchema.optional(),
+    call_id: NonEmptyStringSchema,
+    output: z.string()
+  })
+  .passthrough();
+
 export const RemoteTaskCreatedItemSchema = z
   .object({
     type: z.literal("remoteTaskCreated"),
@@ -514,6 +533,8 @@ export const TurnItemSchema = z.discriminatedUnion("type", [
   DynamicToolCallItemSchema,
   CustomToolCallItemSchema,
   CustomToolCallOutputItemSchema,
+  FunctionCallItemSchema,
+  FunctionCallOutputItemSchema,
   CollabAgentToolCallItemSchema,
   ImageViewItemSchema,
   EnteredReviewModeItemSchema,

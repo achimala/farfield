@@ -17,6 +17,8 @@ import {
   ModelChangedItemSchema,
   parseThreadConversationState,
   parseThreadStreamStateChangedBroadcast,
+  parseCommandExecutionRequestApprovalResponse,
+  parseFileChangeRequestApprovalResponse,
   parseUserInputResponsePayload,
   type IpcFrame,
   type IpcRequestFrame,
@@ -718,13 +720,56 @@ export class CodexAgentAdapter implements AgentAdapter {
   ): Promise<{ ownerClientId: string; requestId: UserInputRequestId }> {
     this.ensureCodexAvailable();
     const parsedResponse = parseUserInputResponsePayload(input.response);
-    const ownerClientIdForResult =
-      this.resolveVisibleOwnerClientId(input.threadId, input.ownerClientId) ??
-      "app-server";
-
-    await this.runAppServerCall(() =>
-      this.appClient.submitUserInput(input.requestId, parsedResponse),
+    const ownerClientId = this.resolveVisibleOwnerClientId(
+      input.threadId,
+      input.ownerClientId,
     );
+    const ownerClientIdForResult = ownerClientId ?? "app-server";
+    const request = this.findPendingRequest(input.threadId, input.requestId);
+
+    switch (request?.method) {
+      case "item/commandExecution/requestApproval": {
+        const approvalResponse =
+          parseCommandExecutionRequestApprovalResponse(parsedResponse);
+        await this.ipcClient.sendRequestAndWait(
+          "thread-follower-command-approval-decision",
+          {
+            conversationId: input.threadId,
+            requestId: input.requestId,
+            decision: approvalResponse.decision,
+          },
+          {
+            ...(ownerClientId ? { targetClientId: ownerClientId } : {}),
+            version: 1,
+          },
+        );
+        break;
+      }
+
+      case "item/fileChange/requestApproval": {
+        const approvalResponse =
+          parseFileChangeRequestApprovalResponse(parsedResponse);
+        await this.ipcClient.sendRequestAndWait(
+          "thread-follower-file-approval-decision",
+          {
+            conversationId: input.threadId,
+            requestId: input.requestId,
+            decision: approvalResponse.decision,
+          },
+          {
+            ...(ownerClientId ? { targetClientId: ownerClientId } : {}),
+            version: 1,
+          },
+        );
+        break;
+      }
+
+      default:
+        await this.runAppServerCall(() =>
+          this.appClient.submitUserInput(input.requestId, parsedResponse),
+        );
+        break;
+    }
     this.removePendingAppServerRequest(input.threadId, input.requestId);
     this.notifyThreadStateChanged(input.threadId);
     this.scheduleThreadRefresh(
@@ -737,6 +782,24 @@ export class CodexAgentAdapter implements AgentAdapter {
       ownerClientId: ownerClientIdForResult,
       requestId: input.requestId,
     };
+  }
+
+  private findPendingRequest(
+    threadId: string,
+    requestId: UserInputRequestId,
+  ): ThreadConversationRequest | null {
+    const cachedEntries = this.pendingAppServerRequestsByThreadId.get(threadId);
+    const cachedRequest = cachedEntries?.find((entry) =>
+      requestIdsMatch(entry.request.id, requestId),
+    )?.request;
+    if (cachedRequest) {
+      return cachedRequest;
+    }
+
+    const snapshotRequest = this.streamSnapshotByThreadId
+      .get(threadId)
+      ?.requests.find((request) => requestIdsMatch(request.id, requestId));
+    return snapshotRequest ?? null;
   }
 
   public async readLiveState(threadId: string): Promise<AgentThreadLiveState> {
@@ -2537,6 +2600,8 @@ function turnItemKey(item: TurnItem): string {
   switch (item.type) {
     case "custom_tool_call":
     case "custom_tool_call_output":
+    case "function_call":
+    case "function_call_output":
       return item.id ?? item.call_id;
     default:
       return item.id;

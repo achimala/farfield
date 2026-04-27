@@ -440,6 +440,17 @@ describe("codex-protocol schemas", () => {
                     type: "custom_tool_call_output",
                     call_id: "call-1",
                     output: "{\"output\":\"ok\"}"
+                  },
+                  {
+                    type: "function_call",
+                    call_id: "call-2",
+                    name: "exec_command",
+                    arguments: "{\"cmd\":\"date\"}"
+                  },
+                  {
+                    type: "function_call_output",
+                    call_id: "call-2",
+                    output: "today"
                   }
                 ]
               }
@@ -457,6 +468,8 @@ describe("codex-protocol schemas", () => {
     expect(items?.[0]?.type).toBe("userMessage");
     expect(items?.[1]?.type).toBe("custom_tool_call");
     expect(items?.[2]?.type).toBe("custom_tool_call_output");
+    expect(items?.[3]?.type).toBe("function_call");
+    expect(items?.[4]?.type).toBe("function_call_output");
   });
 
   it("rejects invalid patch value for remove operation", () => {
