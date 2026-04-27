@@ -148,17 +148,17 @@ export class CodexAgentAdapter implements AgentAdapter {
     string,
     AgentTurnCollaborationMode
   >();
-  private readonly streamSnapshotByThreadId = new Map<
+  private readonly canonicalThreadStateById = new Map<
     string,
     ThreadConversationState
   >();
-  private readonly streamSnapshotOriginByThreadId = new Map<
+  private readonly canonicalThreadStateOriginById = new Map<
     string,
     StreamSnapshotOrigin
   >();
   private readonly streamPatchSyncDisabledThreadIds = new Set<string>();
   private readonly threadTitleById = new Map<string, string | null>();
-  private readonly liveStateErrorByThreadId = new Map<
+  private readonly canonicalThreadStateErrorById = new Map<
     string,
     AgentThreadLiveState["liveStateError"]
   >();
@@ -425,7 +425,7 @@ export class CodexAgentAdapter implements AgentAdapter {
 
     const data = result.data.map((thread) => {
       const title = this.resolveThreadTitle(thread.id, thread.title);
-      const snapshot = this.streamSnapshotByThreadId.get(thread.id);
+      const snapshot = this.canonicalThreadStateById.get(thread.id);
       const isGenerating = snapshot
         ? isThreadStateGenerating(snapshot)
         : undefined;
@@ -559,7 +559,7 @@ export class CodexAgentAdapter implements AgentAdapter {
         { authoritativeRead: true },
       ),
     );
-    const existingSnapshot = this.streamSnapshotByThreadId.get(input.threadId);
+    const existingSnapshot = this.canonicalThreadStateById.get(input.threadId);
     const shouldStoreSnapshot =
       input.includeTurns ||
       parsedThread.turns.length > 0 ||
@@ -570,13 +570,16 @@ export class CodexAgentAdapter implements AgentAdapter {
         input.includeTurns && parsedThread.turns.length > 0
           ? "readThreadWithTurns"
           : "readThread";
-      returnedThread = this.storeThreadSnapshot(
+      returnedThread = this.storeCanonicalThreadState(
         input.threadId,
         parsedThread,
         snapshotOrigin,
         this.resolveVisibleOwnerClientId(input.threadId),
         false,
       );
+    } else {
+      returnedThread =
+        this.readCanonicalThreadState(input.threadId) ?? parsedThread;
     }
     return {
       thread: returnedThread,
@@ -742,13 +745,13 @@ export class CodexAgentAdapter implements AgentAdapter {
       input.collaborationMode,
     );
 
-    const currentSnapshot = this.streamSnapshotByThreadId.get(input.threadId);
+    const currentSnapshot = this.canonicalThreadStateById.get(input.threadId);
     if (currentSnapshot) {
       const nextSnapshot = this.applyPendingCollaborationMode(currentSnapshot);
-      this.storeThreadSnapshot(
+      this.storeCanonicalThreadState(
         input.threadId,
         nextSnapshot,
-        this.streamSnapshotOriginByThreadId.get(input.threadId) ?? "readThread",
+        this.canonicalThreadStateOriginById.get(input.threadId) ?? "readThread",
         ownerClientId,
         true,
       );
@@ -845,7 +848,7 @@ export class CodexAgentAdapter implements AgentAdapter {
       return cachedRequest;
     }
 
-    const snapshotRequest = this.streamSnapshotByThreadId
+    const snapshotRequest = this.canonicalThreadStateById
       .get(threadId)
       ?.requests.find((request) => requestIdsMatch(request.id, requestId));
     return snapshotRequest ?? null;
@@ -859,8 +862,8 @@ export class CodexAgentAdapter implements AgentAdapter {
           this.threadOwnerById.get(threadId) ??
           this.lastKnownOwnerClientId ??
           null,
-        conversationState: this.readMergedLiveSnapshot(threadId),
-        liveStateError: this.liveStateErrorByThreadId.get(threadId) ?? null,
+        conversationState: this.readCanonicalThreadState(threadId),
+        liveStateError: this.canonicalThreadStateErrorById.get(threadId) ?? null,
       };
     } finally {
       this.onTiming?.("codexLiveStateRead", performance.now() - startedAt);
@@ -1154,10 +1157,10 @@ export class CodexAgentAdapter implements AgentAdapter {
     };
   }
 
-  private readMergedLiveSnapshot(
+  private readCanonicalThreadState(
     threadId: string,
   ): ThreadConversationState | null {
-    const snapshot = this.streamSnapshotByThreadId.get(threadId);
+    const snapshot = this.canonicalThreadStateById.get(threadId);
     if (!snapshot) {
       return null;
     }
@@ -1290,7 +1293,7 @@ export class CodexAgentAdapter implements AgentAdapter {
         threadId,
         includeTurns: true,
       });
-      const storedThread = this.storeThreadSnapshot(
+      const storedThread = this.storeCanonicalThreadState(
         threadId,
         readResult.thread,
         origin,
@@ -1328,15 +1331,15 @@ export class CodexAgentAdapter implements AgentAdapter {
     }
   }
 
-  private storeThreadSnapshot(
+  private storeCanonicalThreadState(
     threadId: string,
     thread: ThreadConversationState,
     origin: StreamSnapshotOrigin,
     sourceClientId: string | null,
     appendSyntheticSnapshotEvent: boolean,
   ): ThreadConversationState {
-    const currentSnapshot = this.streamSnapshotByThreadId.get(threadId);
-    const currentOrigin = this.streamSnapshotOriginByThreadId.get(threadId);
+    const currentSnapshot = this.canonicalThreadStateById.get(threadId);
+    const currentOrigin = this.canonicalThreadStateOriginById.get(threadId);
     const shouldMergeReadSnapshot =
       currentSnapshot !== undefined &&
       currentOrigin === "stream" &&
@@ -1347,9 +1350,9 @@ export class CodexAgentAdapter implements AgentAdapter {
       ? mergeThreadConversationStates(currentSnapshot, thread)
       : thread;
     const nextThread = this.applyPendingCollaborationMode(mergedThread);
-    this.streamSnapshotByThreadId.set(threadId, nextThread);
-    this.streamSnapshotOriginByThreadId.set(threadId, nextOrigin);
-    this.liveStateErrorByThreadId.delete(threadId);
+    this.canonicalThreadStateById.set(threadId, nextThread);
+    this.canonicalThreadStateOriginById.set(threadId, nextOrigin);
+    this.canonicalThreadStateErrorById.delete(threadId);
     this.setThreadTitle(threadId, nextThread.title);
     this.syncActiveTurnIdFromThreadState(threadId, nextThread);
 
@@ -1389,7 +1392,7 @@ export class CodexAgentAdapter implements AgentAdapter {
         },
         "thread-stream-event-parse-failed",
       );
-      this.liveStateErrorByThreadId.set(threadId, {
+      this.canonicalThreadStateErrorById.set(threadId, {
         kind: "parseFailed",
         message: toErrorMessage(error),
         eventIndex: null,
@@ -1407,7 +1410,7 @@ export class CodexAgentAdapter implements AgentAdapter {
 
     if (parsedFrame.params.change.type === "snapshot") {
       this.streamPatchSyncDisabledThreadIds.delete(threadId);
-      this.storeThreadSnapshot(
+      this.storeCanonicalThreadState(
         threadId,
         parsedFrame.params.change.conversationState,
         "stream",
@@ -1423,10 +1426,10 @@ export class CodexAgentAdapter implements AgentAdapter {
       return false;
     }
 
-    const currentSnapshot = this.streamSnapshotByThreadId.get(threadId);
+    const currentSnapshot = this.canonicalThreadStateById.get(threadId);
     if (!currentSnapshot) {
       this.streamPatchSyncDisabledThreadIds.add(threadId);
-      this.liveStateErrorByThreadId.set(threadId, {
+      this.canonicalThreadStateErrorById.set(threadId, {
         kind: "reductionFailed",
         message: "Thread stream patches arrived before any thread snapshot",
         eventIndex: null,
@@ -1445,7 +1448,7 @@ export class CodexAgentAdapter implements AgentAdapter {
         }
         nextSnapshot = applyStrictPatch(nextSnapshot, patch);
       }
-      this.storeThreadSnapshot(
+      this.storeCanonicalThreadState(
         threadId,
         nextSnapshot,
         "stream",
@@ -1461,7 +1464,7 @@ export class CodexAgentAdapter implements AgentAdapter {
         "thread-stream-patch-apply-failed",
       );
       this.streamPatchSyncDisabledThreadIds.add(threadId);
-      this.liveStateErrorByThreadId.set(threadId, {
+      this.canonicalThreadStateErrorById.set(threadId, {
         kind: "reductionFailed",
         message: toErrorMessage(error),
         eventIndex: null,
@@ -1483,9 +1486,9 @@ export class CodexAgentAdapter implements AgentAdapter {
       return false;
     }
 
-    const currentSnapshot = this.streamSnapshotByThreadId.get(threadId) ?? null;
+    const currentSnapshot = this.canonicalThreadStateById.get(threadId) ?? null;
     const currentSnapshotOrigin =
-      this.streamSnapshotOriginByThreadId.get(threadId) ?? "readThread";
+      this.canonicalThreadStateOriginById.get(threadId) ?? "readThread";
     const ownerClientId = this.resolveVisibleOwnerClientId(threadId);
 
     if (notification.method === "thread/started") {
@@ -1498,7 +1501,7 @@ export class CodexAgentAdapter implements AgentAdapter {
       const nextThread = parseThreadConversationState(
         parsedThreadStarted.data.params.thread,
       );
-      const storedThread = this.storeThreadSnapshot(
+      const storedThread = this.storeCanonicalThreadState(
         threadId,
         nextThread,
         currentSnapshotOrigin,
@@ -1914,7 +1917,7 @@ export class CodexAgentAdapter implements AgentAdapter {
       return true;
     }
 
-    const storedThread = this.storeThreadSnapshot(
+    const storedThread = this.storeCanonicalThreadState(
       threadId,
       nextThread,
       currentSnapshotOrigin,
@@ -2013,7 +2016,7 @@ export class CodexAgentAdapter implements AgentAdapter {
       return pendingModeModel;
     }
 
-    const snapshot = this.streamSnapshotByThreadId.get(threadId);
+    const snapshot = this.canonicalThreadStateById.get(threadId);
     const snapshotModeModel = normalizeNonEmptyString(
       snapshot?.latestCollaborationMode?.settings.model,
     );
@@ -2366,7 +2369,7 @@ export class CodexAgentAdapter implements AgentAdapter {
       return this.threadTitleById.get(threadId);
     }
 
-    const snapshot = this.streamSnapshotByThreadId.get(threadId);
+    const snapshot = this.canonicalThreadStateById.get(threadId);
     if (!snapshot) {
       return undefined;
     }

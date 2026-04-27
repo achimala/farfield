@@ -256,6 +256,12 @@ function emitServerRequest(request: AppServerServerRequest): void {
   }
 }
 
+function emitIpcFrame(frame: IpcFrame): void {
+  for (const listener of frameListeners) {
+    listener(frame);
+  }
+}
+
 function createAdapter(): CodexAgentAdapter {
   return new CodexAgentAdapter({
     appExecutable: "codex",
@@ -343,6 +349,57 @@ describe("CodexAgentAdapter app-server pending requests", () => {
         model: "gpt-5.5",
         attachments: [],
       },
+    ]);
+  });
+
+  it("returns canonical thread state for sparse readThread results", async () => {
+    const threadId = "thread-canonical-read";
+    const adapter = createAdapter();
+    const canonicalThread = parseThreadConversationState({
+      id: threadId,
+      turns: [
+        {
+          id: "019dcd42-5591-7100-bfe7-3d14f7d22182",
+          status: "completed",
+          items: [
+            {
+              id: "item-1",
+              type: "userMessage",
+              content: [{ type: "text", text: "Earlier canonical turn" }],
+            },
+          ],
+        },
+      ],
+      requests: [],
+    });
+    readThreadResponse = {
+      thread: createThreadState(threadId),
+    };
+    await adapter.start();
+
+    emitIpcFrame({
+      type: "broadcast",
+      method: "thread-stream-state-changed",
+      sourceClientId: "owner-1",
+      version: 6,
+      params: {
+        conversationId: threadId,
+        type: "thread-stream-state-changed",
+        version: 6,
+        change: {
+          type: "snapshot",
+          conversationState: canonicalThread,
+        },
+      },
+    });
+
+    const result = await adapter.readThread({
+      threadId,
+      includeTurns: false,
+    });
+
+    expect(result.thread.turns.map((turn) => turn.id)).toEqual([
+      "019dcd42-5591-7100-bfe7-3d14f7d22182",
     ]);
   });
 

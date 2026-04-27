@@ -1199,10 +1199,12 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      await screen.findByText("direct-route-loaded", undefined, {
-        timeout: 3000,
-      }),
-    ).toBeTruthy();
+      (
+        await screen.findAllByText("direct-route-loaded", undefined, {
+          timeout: 3000,
+        })
+      ).length,
+    ).toBeGreaterThan(0);
     await waitFor(() =>
       expect(window.location.pathname).toBe(`/threads/${threadId}`),
     );
@@ -1259,8 +1261,14 @@ describe("App", () => {
       await screen.findByText(`Thread ${threadId} is not registered`),
     ).toBeTruthy();
     expect(
-      await screen.findByText("transient-route-loaded", {}, { timeout: 4000 }),
-    ).toBeTruthy();
+      (
+        await screen.findAllByText(
+          "transient-route-loaded",
+          {},
+          { timeout: 4000 },
+        )
+      ).length,
+    ).toBeGreaterThan(0);
     await waitFor(() =>
       expect(
         screen.queryByText(`Thread ${threadId} is not registered`),

@@ -832,88 +832,11 @@ function getConversationStateUpdatedAt(
   return state.updatedAt;
 }
 
-function getConversationStateRichness(
-  state: NonNullable<ReadThreadResponse["thread"]> | null | undefined,
-): number {
-  if (!state) {
-    return Number.NEGATIVE_INFINITY;
-  }
-
-  let itemCount = 0;
-  for (const turn of state.turns) {
-    itemCount += turn.items.length;
-  }
-
-  return itemCount * 10 + state.requests.length;
-}
-
-function buildPendingRequestKey(
-  request: NonNullable<ReadThreadResponse["thread"]>["requests"][number],
-): string {
-  return `${request.method}:${String(request.id)}`;
-}
-
 function isTransientThreadRegistrationError(
   message: string,
   threadId: string,
 ): boolean {
   return message === `Thread ${threadId} is not registered`;
-}
-
-function mergePendingRequests(
-  primary: NonNullable<ReadThreadResponse["thread"]>["requests"],
-  secondary: NonNullable<ReadThreadResponse["thread"]>["requests"],
-): NonNullable<ReadThreadResponse["thread"]>["requests"] {
-  const completedKeys = new Set(
-    [...primary, ...secondary]
-      .filter((request) => request.completed === true)
-      .map(buildPendingRequestKey),
-  );
-  const merged = secondary.filter(
-    (request) =>
-      request.completed !== true &&
-      !completedKeys.has(buildPendingRequestKey(request)),
-  );
-  const seenKeys = new Set(merged.map(buildPendingRequestKey));
-
-  for (const request of primary) {
-    const requestKey = buildPendingRequestKey(request);
-    if (request.completed === true || completedKeys.has(requestKey)) {
-      continue;
-    }
-    if (seenKeys.has(requestKey)) {
-      continue;
-    }
-    seenKeys.add(requestKey);
-    merged.push(request);
-  }
-
-  return merged;
-}
-
-function buildRequestSourceState(
-  liveConversationState: NonNullable<ReadThreadResponse["thread"]> | null,
-  readConversationState: NonNullable<ReadThreadResponse["thread"]> | null,
-  liveStateError:
-    | LiveStateResponse["liveStateError"]
-    | null
-    | undefined,
-): NonNullable<ReadThreadResponse["thread"]> | null {
-  const baseState = liveConversationState ?? readConversationState;
-  if (!baseState) {
-    return null;
-  }
-  if (!liveConversationState || !readConversationState || liveStateError) {
-    return baseState;
-  }
-
-  return {
-    ...baseState,
-    requests: mergePendingRequests(
-      liveConversationState.requests,
-      readConversationState.requests,
-    ),
-  };
 }
 
 function buildApprovalResponse(
@@ -1171,33 +1094,6 @@ function buildReadThreadSyncSignature(
     conversationProgressSignature(conversationState),
     requestProgressSignature(conversationState),
   ].join("|");
-}
-
-function selectPreferredConversationState(input: {
-  live: NonNullable<LiveStateResponse["conversationState"]> | null;
-  read: NonNullable<ReadThreadResponse["thread"]> | null;
-}): NonNullable<ReadThreadResponse["thread"]> | null {
-  if (input.live === null) {
-    return input.read;
-  }
-
-  if (input.read === null) {
-    return input.live;
-  }
-
-  const liveUpdatedAt = getConversationStateUpdatedAt(input.live);
-  const readUpdatedAt = getConversationStateUpdatedAt(input.read);
-  if (liveUpdatedAt >= readUpdatedAt) {
-    if (liveUpdatedAt > readUpdatedAt) {
-      return input.live;
-    }
-    return getConversationStateRichness(input.live) >=
-      getConversationStateRichness(input.read)
-      ? input.live
-      : input.read;
-  }
-
-  return input.read;
 }
 
 function basenameFromPath(value: string): string {
@@ -1713,26 +1609,10 @@ export function App(): React.JSX.Element {
     return allGroups;
   }, [agentDescriptors, projectColors, sidebarOrder, threads]);
   const conversationState = useMemo(
-    () =>
-      selectPreferredConversationState({
-        live: liveState?.conversationState ?? null,
-        read: readThreadState?.thread ?? null,
-      }),
+    () => liveState?.conversationState ?? readThreadState?.thread ?? null,
     [liveState?.conversationState, readThreadState?.thread],
   );
-  const requestSourceState = useMemo(
-    () =>
-      buildRequestSourceState(
-        liveState?.conversationState ?? null,
-        readThreadState?.thread ?? null,
-        liveState?.liveStateError,
-      ),
-    [
-      liveState?.conversationState,
-      liveState?.liveStateError,
-      readThreadState?.thread,
-    ],
-  );
+  const requestSourceState = conversationState;
 
   const pendingRequests = useMemo(() => {
     if (!requestSourceState) return [] as PendingRequest[];
