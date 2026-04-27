@@ -166,6 +166,7 @@ export class CodexAgentAdapter implements AgentAdapter {
   private readonly reconnectDelayMs: number;
 
   private readonly threadOwnerById = new Map<string, string>();
+  private readonly desktopOwnedThreadIds = new Set<string>();
   private readonly pendingAppServerRequestsByThreadId = new Map<
     string,
     PendingAppServerRequestEntry[]
@@ -311,6 +312,7 @@ export class CodexAgentAdapter implements AgentAdapter {
       if (frame.type === "broadcast" && threadId) {
         if (sourceClientId && !isSelfOriginatedBroadcast) {
           this.threadOwnerById.set(threadId, sourceClientId);
+          this.desktopOwnedThreadIds.add(threadId);
         }
       }
 
@@ -651,12 +653,15 @@ export class CodexAgentAdapter implements AgentAdapter {
     if (text.length === 0) {
       throw new Error("Message text is required");
     }
-    let visibleOwnerClientId = this.resolveVisibleOwnerClientId(
+    const visibleOwnerClientId = this.resolveVisibleOwnerClientId(
       input.threadId,
       input.ownerClientId,
     );
     if (visibleOwnerClientId) {
       this.threadOwnerById.set(input.threadId, visibleOwnerClientId);
+      this.desktopOwnedThreadIds.add(input.threadId);
+    } else if (this.desktopOwnedThreadIds.has(input.threadId)) {
+      this.throwDisconnectedDesktopOwner(input.threadId);
     }
 
     const sendTurn = async (): Promise<void> => {
@@ -684,8 +689,10 @@ export class CodexAgentAdapter implements AgentAdapter {
             if (!isIpcNoClientFoundMessage(toErrorMessage(error))) {
               throw error;
             }
-            this.clearVisibleOwnerClientId(input.threadId, visibleOwnerClientId);
-            visibleOwnerClientId = null;
+            this.clearDisconnectedDesktopOwner(
+              input.threadId,
+              visibleOwnerClientId,
+            );
           }
         }
 
@@ -749,8 +756,10 @@ export class CodexAgentAdapter implements AgentAdapter {
           if (!isIpcNoClientFoundMessage(toErrorMessage(error))) {
             throw error;
           }
-          this.clearVisibleOwnerClientId(input.threadId, visibleOwnerClientId);
-          visibleOwnerClientId = null;
+          this.clearDisconnectedDesktopOwner(
+            input.threadId,
+            visibleOwnerClientId,
+          );
         }
       }
       await this.appClient.startTurn(turnStartParams);
@@ -2398,6 +2407,26 @@ export class CodexAgentAdapter implements AgentAdapter {
     if (mapped === ownerClientId) {
       this.threadOwnerById.delete(threadId);
     }
+  }
+
+  private clearDisconnectedDesktopOwner(
+    threadId: string,
+    ownerClientId: string,
+  ): never {
+    this.clearVisibleOwnerClientId(threadId, ownerClientId);
+    this.scheduleThreadRefresh(
+      threadId,
+      null,
+      "readThreadWithTurns",
+      APP_SERVER_THREAD_REFRESH_DEBOUNCE_MS,
+    );
+    this.throwDisconnectedDesktopOwner(threadId);
+  }
+
+  private throwDisconnectedDesktopOwner(threadId: string): never {
+    throw new Error(
+      `Codex desktop owner for thread ${threadId} is no longer connected. Reopen this thread in Codex and retry.`,
+    );
   }
 
   private applyPendingCollaborationMode(

@@ -466,7 +466,7 @@ describe("CodexAgentAdapter app-server pending requests", () => {
     ]);
   });
 
-  it("clears stale owner client and sends through app server when owner disappears", async () => {
+  it("clears stale owner client and reports disconnected desktop owner", async () => {
     const threadId = "thread-stale-owner-send";
     const adapter = createAdapter();
     readThreadResponse = {
@@ -477,12 +477,16 @@ describe("CodexAgentAdapter app-server pending requests", () => {
       "IPC thread-follower-start-turn failed: no-client-found",
     );
 
-    await adapter.sendMessage({
-      threadId,
-      ownerClientId: "stale-client",
-      text: "hello after stale owner",
-      model: "gpt-5.5",
-    });
+    await expect(
+      adapter.sendMessage({
+        threadId,
+        ownerClientId: "stale-client",
+        text: "hello after stale owner",
+        model: "gpt-5.5",
+      }),
+    ).rejects.toThrow(
+      `Codex desktop owner for thread ${threadId} is no longer connected`,
+    );
 
     expect(ipcRequestCalls).toContainEqual({
       method: "thread-follower-start-turn",
@@ -501,36 +505,20 @@ describe("CodexAgentAdapter app-server pending requests", () => {
         version: 1,
       },
     });
-    expect(startTurnCalls).toEqual([
-      {
-        threadId,
-        input: [{ type: "text", text: "hello after stale owner" }],
-        model: "gpt-5.5",
-        attachments: [],
-      },
-    ]);
+    expect(startTurnCalls).toEqual([]);
 
-    await adapter.sendMessage({
-      threadId,
-      text: "hello without stale owner",
-      model: "gpt-5.5",
-    });
+    await expect(
+      adapter.sendMessage({
+        threadId,
+        text: "hello without stale owner",
+        model: "gpt-5.5",
+      }),
+    ).rejects.toThrow(
+      `Codex desktop owner for thread ${threadId} is no longer connected`,
+    );
 
     expect(ipcRequestCalls).toHaveLength(1);
-    expect(startTurnCalls).toEqual([
-      {
-        threadId,
-        input: [{ type: "text", text: "hello after stale owner" }],
-        model: "gpt-5.5",
-        attachments: [],
-      },
-      {
-        threadId,
-        input: [{ type: "text", text: "hello without stale owner" }],
-        model: "gpt-5.5",
-        attachments: [],
-      },
-    ]);
+    expect(startTurnCalls).toEqual([]);
   });
 
   it("does not route unowned sends to another thread's last stream owner", async () => {
