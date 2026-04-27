@@ -43,6 +43,7 @@ export class RealtimeCoordinator {
   private pendingDebugDelta = false;
   private readonly pendingThreadIds = new Set<string>();
   private flushTimer: NodeJS.Timeout | null = null;
+  private coreStateInFlight: Promise<UnifiedRealtimeCoreState> | null = null;
 
   public constructor(options: RealtimeCoordinatorOptions) {
     this.io = options.io;
@@ -57,8 +58,6 @@ export class RealtimeCoordinator {
         selectedThreadId: null,
         activeTab: "chat",
       });
-
-      void this.sendSnapshot(socket);
 
       socket.on(REALTIME_CLIENT_EVENT, (payload: JsonValue) => {
         this.handleClientMessage(socket, payload);
@@ -156,7 +155,7 @@ export class RealtimeCoordinator {
 
   private async sendSnapshot(socket: Socket): Promise<void> {
     try {
-      const coreState = await this.buildCoreState();
+      const coreState = await this.getCoreState();
       const context = this.contextBySocketId.get(socket.id) ?? {
         selectedThreadId: null,
         activeTab: "chat" as const,
@@ -179,6 +178,15 @@ export class RealtimeCoordinator {
       const message = error instanceof Error ? error.message : String(error);
       this.emitSyncError(socket, message, "snapshotFailed");
     }
+  }
+
+  private getCoreState(): Promise<UnifiedRealtimeCoreState> {
+    if (!this.coreStateInFlight) {
+      this.coreStateInFlight = this.buildCoreState().finally(() => {
+        this.coreStateInFlight = null;
+      });
+    }
+    return this.coreStateInFlight;
   }
 
   private scheduleFlush(): void {
@@ -212,7 +220,7 @@ export class RealtimeCoordinator {
     }
 
     const coreStatePromise = shouldSendCore
-      ? this.buildCoreState()
+      ? this.getCoreState()
           .then((core) => ({ ok: true as const, core }))
           .catch((error) => ({ ok: false as const, error }))
       : null;

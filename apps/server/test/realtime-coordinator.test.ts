@@ -177,7 +177,9 @@ describe("RealtimeCoordinator", () => {
     }
   });
 
-  async function setupCoordinator() {
+  async function setupCoordinator(options?: {
+    buildCoreState?: () => Promise<UnifiedRealtimeCoreState>;
+  }) {
     httpServer = http.createServer();
     ioServer = new SocketServer(httpServer, {
       transports: ["websocket"],
@@ -195,7 +197,7 @@ describe("RealtimeCoordinator", () => {
 
     const coordinator = new RealtimeCoordinator({
       io: ioServer,
-      buildCoreState: async () => buildCoreState(),
+      buildCoreState: options?.buildCoreState ?? (async () => buildCoreState()),
       buildThreadState: async ({ threadId }) => buildThreadState(threadId),
       buildDebugState: async () => ({
         traceStatus: null,
@@ -219,21 +221,21 @@ describe("RealtimeCoordinator", () => {
     };
   }
 
-  it("sends snapshot on connection and after hello with selected thread", async () => {
+  it("sends snapshot after hello with selected thread", async () => {
     const { createClient } = await setupCoordinator();
     const client = createClient();
+    const snapshots: UnifiedRealtimeServerMessage[] = [];
 
-    const initialSnapshotPromise = waitForServerMessage(
-      client,
-      (message) => message.kind === "snapshot",
-    );
+    client.on(REALTIME_SERVER_EVENT, (payload: object) => {
+      const parsed = UnifiedRealtimeServerMessageSchema.safeParse(payload);
+      if (parsed.success && parsed.data.kind === "snapshot") {
+        snapshots.push(parsed.data);
+      }
+    });
+
     await waitForEvent(client, "connect");
-    const initialSnapshot = await initialSnapshotPromise;
-    expect(initialSnapshot.kind).toBe("snapshot");
-    if (initialSnapshot.kind !== "snapshot") {
-      return;
-    }
-    expect(initialSnapshot.selectedThread).toBeNull();
+    await sleep(50);
+    expect(snapshots).toHaveLength(0);
 
     const helloSnapshotPromise = waitForServerMessage(client, (message) => {
       return (
@@ -252,19 +254,13 @@ describe("RealtimeCoordinator", () => {
       return;
     }
     expect(helloSnapshot.selectedThread?.threadId).toBe("thread-1");
-    expect(helloSnapshot.syncVersion).toBeGreaterThan(initialSnapshot.syncVersion);
+    expect(helloSnapshot.syncVersion).toBeGreaterThan(0);
   });
 
   it("rejects invalid client payload with syncError", async () => {
     const { createClient } = await setupCoordinator();
     const client = createClient();
-
-    const initialSnapshotPromise = waitForServerMessage(
-      client,
-      (message) => message.kind === "snapshot",
-    );
     await waitForEvent(client, "connect");
-    await initialSnapshotPromise;
 
     const syncErrorPromise = waitForServerMessage(
       client,
@@ -296,12 +292,7 @@ describe("RealtimeCoordinator", () => {
       }
     });
 
-    const initialSnapshotPromise = waitForServerMessage(
-      client,
-      (message) => message.kind === "snapshot",
-    );
     await waitForEvent(client, "connect");
-    await initialSnapshotPromise;
 
     client.emit(REALTIME_CLIENT_EVENT, {
       kind: "selectionChanged",
@@ -333,6 +324,11 @@ describe("RealtimeCoordinator", () => {
       (message) => message.kind === "snapshot",
     );
     await waitForEvent(firstClient, "connect");
+    firstClient.emit(REALTIME_CLIENT_EVENT, {
+      kind: "hello",
+      selectedThreadId: null,
+      activeTab: "chat",
+    });
     const firstSnapshot = await firstSnapshotPromise;
 
     firstClient.disconnect();
@@ -344,9 +340,52 @@ describe("RealtimeCoordinator", () => {
       (message) => message.kind === "snapshot",
     );
     await waitForEvent(secondClient, "connect");
+    secondClient.emit(REALTIME_CLIENT_EVENT, {
+      kind: "hello",
+      selectedThreadId: null,
+      activeTab: "chat",
+    });
     const secondSnapshot = await secondSnapshotPromise;
 
     expect(secondSnapshot.kind).toBe("snapshot");
     expect(secondSnapshot.syncVersion).toBeGreaterThan(firstSnapshot.syncVersion);
+  });
+
+  it("shares one in-flight core state build across concurrent snapshots", async () => {
+    let coreBuildCount = 0;
+    const { createClient } = await setupCoordinator({
+      buildCoreState: async () => {
+        coreBuildCount += 1;
+        await sleep(80);
+        return buildCoreState();
+      },
+    });
+    const firstClient = createClient();
+    const secondClient = createClient();
+
+    const firstSnapshotPromise = waitForServerMessage(
+      firstClient,
+      (message) => message.kind === "snapshot",
+    );
+    const secondSnapshotPromise = waitForServerMessage(
+      secondClient,
+      (message) => message.kind === "snapshot",
+    );
+    await waitForEvent(firstClient, "connect");
+    await waitForEvent(secondClient, "connect");
+
+    firstClient.emit(REALTIME_CLIENT_EVENT, {
+      kind: "hello",
+      selectedThreadId: null,
+      activeTab: "chat",
+    });
+    secondClient.emit(REALTIME_CLIENT_EVENT, {
+      kind: "hello",
+      selectedThreadId: null,
+      activeTab: "chat",
+    });
+
+    await Promise.all([firstSnapshotPromise, secondSnapshotPromise]);
+    expect(coreBuildCount).toBe(1);
   });
 });
