@@ -289,6 +289,12 @@ type ThreadSummary = {
   source?: string;
 };
 
+type ThreadListProviderError = {
+  code: string;
+  message: string;
+  details?: Record<string, string>;
+};
+
 type UnifiedThreadFixture = UnifiedThread;
 
 let featureMatrixFixture: {
@@ -306,8 +312,8 @@ let threadsFixture: {
     opencode: string | null;
   };
   errors: {
-    codex: null;
-    opencode: null;
+    codex: ThreadListProviderError | null;
+    opencode: ThreadListProviderError | null;
   };
 };
 
@@ -768,6 +774,44 @@ describe("App", () => {
     render(<App />);
     expect((await screen.findAllByText("Farfield")).length).toBeGreaterThan(0);
     expect(await screen.findByText("No thread selected")).toBeTruthy();
+  });
+
+  it("shows a provider connection state when sidebar listing is disconnected", async () => {
+    featureMatrixFixture = {
+      ok: true,
+      features: {
+        codex: buildFeatureSet(codexCapabilities, { connected: false }),
+        opencode: buildFeatureSet(opencodeCapabilities, { enabled: false }),
+      },
+    };
+    threadsFixture = {
+      ok: true,
+      data: [],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: {
+          code: "providerDisconnected",
+          message: "Codex is not connected. Open Codex and retry.",
+          details: {
+            provider: "codex",
+            featureId: "listThreads",
+            reason: "providerDisconnected",
+          },
+        },
+        opencode: null,
+      },
+    };
+
+    render(<App />);
+
+    expect(await screen.findByText("Codex is not connected")).toBeTruthy();
+    expect(
+      await screen.findByText("Codex is not connected. Open Codex and retry."),
+    ).toBeTruthy();
+    expect(screen.queryByText("Thread list sync failed")).toBeNull();
   });
 
   it("connects via websocket and sends hello", async () => {

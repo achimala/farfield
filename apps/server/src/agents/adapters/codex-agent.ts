@@ -134,6 +134,7 @@ const ANSI_ESCAPE_REGEX = /\u001B\[[0-?]*[ -/]*[@-~]/g;
 const APP_SERVER_THREAD_REFRESH_DEBOUNCE_MS = 120;
 const IPC_THREAD_REFRESH_DEBOUNCE_MS = 1_500;
 const THREAD_REFRESH_RETRY_DELAY_MS = 600;
+const CONNECTION_CHECK_MIN_INTERVAL_MS = 2_000;
 
 export class CodexAgentAdapter implements AgentAdapter {
   public readonly id = "codex";
@@ -232,6 +233,7 @@ export class CodexAgentAdapter implements AgentAdapter {
 
   private bootstrapInFlight: Promise<void> | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
+  private lastConnectionCheckRequestedAtMs = 0;
   private started = false;
 
   public constructor(options: CodexAgentOptions) {
@@ -389,6 +391,23 @@ export class CodexAgentAdapter implements AgentAdapter {
 
   public isIpcReady(): boolean {
     return this.runtimeState.ipcConnected && this.runtimeState.ipcInitialized;
+  }
+
+  public requestConnectionCheck(): void {
+    if (!this.started || this.bootstrapInFlight) {
+      return;
+    }
+
+    const nowMs = Date.now();
+    if (
+      nowMs - this.lastConnectionCheckRequestedAtMs <
+      CONNECTION_CHECK_MIN_INTERVAL_MS
+    ) {
+      return;
+    }
+
+    this.lastConnectionCheckRequestedAtMs = nowMs;
+    void this.bootstrapConnections();
   }
 
   public async start(): Promise<void> {

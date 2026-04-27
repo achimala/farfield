@@ -141,6 +141,7 @@ export interface AgentAdapter {
   stop(): Promise<void>;
   isEnabled(): boolean;
   isConnected(): boolean;
+  requestConnectionCheck?(): void;
 
   listThreads(input: AgentListThreadsInput): Promise<AgentListThreadsResult>;
   createThread(input: AgentCreateThreadInput): Promise<AgentCreateThreadResult>;

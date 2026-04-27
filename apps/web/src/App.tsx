@@ -22,6 +22,7 @@ import {
   Palette,
   PanelLeft,
   Plus,
+  RefreshCw,
   Sun,
   X,
 } from "lucide-react";
@@ -629,11 +630,11 @@ function buildThreadListErrorMessage(
 ): string | null {
   const messages: string[] = [];
 
-  if (errors.codex) {
+  if (errors.codex && !isProviderConnectionError(errors.codex)) {
     messages.push(`Codex: ${errors.codex.message}`);
   }
 
-  if (errors.opencode) {
+  if (errors.opencode && !isProviderConnectionError(errors.opencode)) {
     messages.push(`OpenCode: ${errors.opencode.message}`);
   }
 
@@ -642,6 +643,35 @@ function buildThreadListErrorMessage(
   }
 
   return `Thread list sync failed for provider(s): ${messages.join(" | ")}`;
+}
+
+function isProviderConnectionError(
+  error: ThreadListProviderErrors["codex"],
+): boolean {
+  if (!error) {
+    return false;
+  }
+  return error.code === "providerDisconnected" || error.code === "providerNotReady";
+}
+
+function buildSidebarProviderConnectionState(
+  errors: ThreadListProviderErrors,
+): { label: string; message: string } | null {
+  if (isProviderConnectionError(errors.codex) && errors.codex) {
+    return {
+      label: "Codex",
+      message: errors.codex.message,
+    };
+  }
+
+  if (isProviderConnectionError(errors.opencode) && errors.opencode) {
+    return {
+      label: "OpenCode",
+      message: errors.opencode.message,
+    };
+  }
+
+  return null;
 }
 
 function hasSameThreadListErrors(
@@ -1490,6 +1520,10 @@ export function App(): React.JSX.Element {
   );
   const threadListErrorMessage = useMemo(
     () => buildThreadListErrorMessage(threadListErrors),
+    [threadListErrors],
+  );
+  const sidebarProviderConnectionState = useMemo(
+    () => buildSidebarProviderConnectionState(threadListErrors),
     [threadListErrors],
   );
   const selectedAgentLabel = selectedAgentDescriptor?.label ?? "Agent";
@@ -4008,11 +4042,47 @@ export function App(): React.JSX.Element {
                   <span className="reasoning-shimmer font-medium">
                     Loading threads...
                   </span>
+                ) : sidebarProviderConnectionState ? (
+                  <div className="space-y-3">
+                    <div className="space-y-1">
+                      <div className="text-sm font-medium text-foreground">
+                        {sidebarProviderConnectionState.label} is not connected
+                      </div>
+                      <div className="mx-auto max-w-[13rem] leading-5">
+                        {sidebarProviderConnectionState.message}
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-center gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 rounded-full px-3 text-xs"
+                        disabled={isCoreLoading}
+                        onClick={() => {
+                          void refreshAll();
+                        }}
+                      >
+                        <RefreshCw size={12} className="mr-1.5" />
+                        Retry
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 rounded-full px-3 text-xs"
+                        onClick={() => setIsSettingsModalOpen(true)}
+                      >
+                        Settings
+                      </Button>
+                    </div>
+                  </div>
                 ) : (
                   "No threads"
                 )}
               </div>
               {!isCoreLoading &&
+                !sidebarProviderConnectionState &&
                 availableAgentIds.length > 0 &&
                 (availableAgentIds.length === 1 ? (
                   <Button

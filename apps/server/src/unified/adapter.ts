@@ -123,6 +123,7 @@ export interface UnifiedProviderAdapter {
     UnifiedFeatureId,
     UnifiedFeatureAvailability
   >;
+  requestConnectionCheck(): void;
   execute<K extends UnifiedCommandKind>(
     command: UnifiedCommandByKind<K>,
   ): Promise<UnifiedCommandResultByKind<K>>;
@@ -145,6 +146,10 @@ export class AgentUnifiedProviderAdapter implements UnifiedProviderAdapter {
     UnifiedFeatureAvailability
   > {
     return buildProviderFeatureAvailability(this.provider, this.adapter);
+  }
+
+  public requestConnectionCheck(): void {
+    this.adapter.requestConnectionCheck?.();
   }
 
   public async execute<K extends UnifiedCommandKind>(

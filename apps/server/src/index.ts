@@ -573,6 +573,45 @@ let rateLimitsCacheEntry: RateLimitsCacheEntry | null = null;
 let rateLimitsInFlight: Promise<AppServerGetAccountRateLimitsResponse> | null =
   null;
 
+function providerLabel(provider: UnifiedProviderId): string {
+  return provider === "codex" ? "Codex" : "OpenCode";
+}
+
+function buildUnavailableProviderError(
+  provider: UnifiedProviderId,
+  featureId: UnifiedFeatureId,
+  availability: Extract<
+    UnifiedFeatureAvailability,
+    { status: "unavailable" }
+  >,
+): ProviderErrorPayload {
+  const label = providerLabel(provider);
+  const message = (() => {
+    switch (availability.reason) {
+      case "providerDisconnected":
+        return `${label} is not connected. Open ${label} and retry.`;
+      case "providerNotReady":
+        return `${label} is not ready yet.`;
+      case "providerDisabled":
+        return `${label} is disabled.`;
+      case "unsupportedByProvider":
+        return `${label} does not support ${featureId}.`;
+      case "requiresOwnerClientId":
+        return `${label} needs an owner client for ${featureId}.`;
+    }
+  })();
+
+  return {
+    code: availability.reason,
+    message: availability.detail ?? message,
+    details: {
+      provider,
+      featureId,
+      reason: availability.reason,
+    },
+  };
+}
+
 function isFeatureAvailable(feature: UnifiedFeatureAvailability): boolean {
   return feature.status === "available";
 }
@@ -622,6 +661,22 @@ async function listUnifiedThreads(
           code: "providerDisabled",
           message: `Provider ${provider} is not available`,
         };
+        return;
+      }
+
+      const availability = adapter.getFeatureAvailability().listThreads;
+      if (availability.status === "unavailable") {
+        if (
+          availability.reason === "providerDisconnected" ||
+          availability.reason === "providerNotReady"
+        ) {
+          adapter.requestConnectionCheck();
+        }
+        errors[provider] = buildUnavailableProviderError(
+          provider,
+          "listThreads",
+          availability,
+        );
         return;
       }
 
