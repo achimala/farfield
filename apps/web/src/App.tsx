@@ -3593,7 +3593,7 @@ export function App(): React.JSX.Element {
               }
             : {}),
         });
-        await refreshAll();
+        void refreshAll();
       } catch (e) {
         setError(toErrorMessage(e));
       } finally {

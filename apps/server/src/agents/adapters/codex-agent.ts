@@ -645,10 +645,11 @@ export class CodexAgentAdapter implements AgentAdapter {
       });
     };
     await this.runThreadOperationWithResumeRetry(input.threadId, sendTurn);
-    await this.refreshThreadFromAppServer(
+    this.scheduleThreadRefresh(
       input.threadId,
       visibleOwnerClientId,
       "readThreadWithTurns",
+      APP_SERVER_THREAD_REFRESH_DEBOUNCE_MS,
     );
   }
 
