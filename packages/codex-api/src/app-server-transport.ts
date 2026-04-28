@@ -166,7 +166,9 @@ export class ChildProcessAppServerTransport implements AppServerTransport {
         CODEX_USER_AGENT: this.userAgent,
         CODEX_CLIENT_ID: `farfield-${randomUUID()}`
       },
-      stdio: ["pipe", "pipe", "pipe"]
+      shell: process.platform === "win32",
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true
     });
 
     child.on("exit", (code, signal) => {

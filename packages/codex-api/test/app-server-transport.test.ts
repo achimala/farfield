@@ -44,7 +44,11 @@ function createFakeAppServer(): {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "farfield-app-server-"));
   tempDirectories.push(tempDir);
 
-  const executablePath = path.join(tempDir, "fake-codex");
+  const scriptPath = path.join(tempDir, "fake-codex.mjs");
+  const executablePath = path.join(
+    tempDir,
+    process.platform === "win32" ? "fake-codex.cmd" : "fake-codex",
+  );
   const recordsPath = path.join(tempDir, "records.json");
   const source = `#!/usr/bin/env node
 import fs from "node:fs";
@@ -160,7 +164,15 @@ reader.on("line", (line) => {
 });
 `;
 
-  fs.writeFileSync(executablePath, source, { mode: 0o755 });
+  if (process.platform === "win32") {
+    fs.writeFileSync(scriptPath, source);
+    fs.writeFileSync(
+      executablePath,
+      `@echo off\r\n"${process.execPath}" "${scriptPath}" %*\r\n`,
+    );
+  } else {
+    fs.writeFileSync(executablePath, source, { mode: 0o755 });
+  }
   return { executablePath, recordsPath };
 }
 
