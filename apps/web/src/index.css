@@ -211,6 +211,18 @@ pre {
   padding-left: 1.15rem;
 }
 
+.markdown-content ul {
+  list-style: disc;
+}
+
+.markdown-content ol {
+  list-style: decimal;
+}
+
+.markdown-content li::marker {
+  color: var(--muted-foreground);
+}
+
 .markdown-content li + li {
   margin-top: 0.2rem;
 }
