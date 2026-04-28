@@ -1025,7 +1025,7 @@ async function buildRealtimeThreadState(input: {
       readThread,
       liveState: {
         ownerClientId: liveResult.ownerClientId,
-        conversationState: liveResult.conversationState,
+        conversationState: null,
         liveStateError: liveResult.liveStateError ?? null,
       },
       streamEvents: streamResult.events,
