@@ -63,7 +63,7 @@ import {
 const HOST = process.env["HOST"] ?? "127.0.0.1";
 const PORT = Number(process.env["PORT"] ?? 4311);
 const HISTORY_LIMIT = 2_000;
-const USER_AGENT = "farfield/0.2.3";
+const USER_AGENT = "farfield/0.2.4";
 const IPC_RECONNECT_DELAY_MS = 1_000;
 const SIDEBAR_PREVIEW_MAX_CHARS = 180;
 const SIDEBAR_CORE_CACHE_TTL_MS = 1_000;

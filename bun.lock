@@ -9,11 +9,12 @@
         "tsx": "^4.20.5",
         "typescript": "^5.9.2",
         "vitest": "^3.2.4",
+        "zod": "^3.24.1",
       },
     },
     "apps/server": {
       "name": "@farfield/server",
-      "version": "0.2.2",
+      "version": "0.2.4",
       "bin": "./dist/cli.js",
       "dependencies": {
         "@opencode-ai/sdk": "^1.2.6",
