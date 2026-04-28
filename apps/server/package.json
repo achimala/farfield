@@ -4,7 +4,9 @@
   "private": false,
   "type": "module",
   "description": "Farfield server for Codex and OpenCode",
-  "bin": "./dist/index.js",
+  "bin": {
+    "farfield-server": "./dist/index.js"
+  },
   "files": [
     "dist"
   ],
