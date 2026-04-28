@@ -5,6 +5,7 @@ import { ReasoningBlock } from "./ReasoningBlock";
 import { CommandBlock } from "./CommandBlock";
 import { DiffBlock } from "./DiffBlock";
 import { MarkdownText } from "./MarkdownText";
+import { McpToolBlock } from "./McpToolBlock";
 
 type UserMessageLikeItem = Extract<
   UnifiedItem,
@@ -278,39 +279,9 @@ const ITEM_RENDERERS = {
     </div>
   ),
 
-  mcpToolCall: ({ item, toolSpacing }) => {
-    const argumentsText = JSON.stringify(item.arguments);
-    return (
-      <div
-        className={`${toolSpacing} rounded-lg border border-border bg-muted/20 px-3 py-2`}
-      >
-        <div className="text-[10px] text-muted-foreground font-mono mb-1 uppercase tracking-wider">
-          MCP tool
-        </div>
-        <div className="text-xs text-foreground/90 whitespace-pre-wrap break-words">
-          {item.server}/{item.tool} ({item.status})
-        </div>
-        {item.durationMs != null && (
-          <div className="mt-1 text-[11px] text-muted-foreground font-mono">
-            {item.durationMs}ms
-          </div>
-        )}
-        {item.error?.message && (
-          <div className="mt-2 text-xs text-danger whitespace-pre-wrap break-words">
-            {item.error.message}
-          </div>
-        )}
-        {item.result?.content && item.result.content.length > 0 && (
-          <div className="mt-2 text-xs text-muted-foreground">
-            Result parts: {item.result.content.length}
-          </div>
-        )}
-        <div className="mt-2 text-[11px] text-muted-foreground font-mono whitespace-pre-wrap break-all">
-          {argumentsText}
-        </div>
-      </div>
-    );
-  },
+  mcpToolCall: ({ item, toolSpacing }) => (
+    <McpToolBlock item={item} className={toolSpacing} />
+  ),
 
   dynamicToolCall: ({ item, toolSpacing }) => {
     const argumentsText = JSON.stringify(item.arguments);
