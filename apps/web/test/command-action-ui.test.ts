@@ -48,6 +48,27 @@ describe("describeCommandAction", () => {
     );
   });
 
+  it("describes rtk-wrapped sed range reads", () => {
+    const presentation = describeCommandAction({
+      type: "unknown",
+      command: "rtk sed -n '12,34p' apps/web/src/components/CommandBlock.tsx",
+    });
+
+    expect(presentation.iconKey).toBe("read");
+    expect(presentation.text).toBe("Read lines 12-34 from CommandBlock.tsx");
+  });
+
+  it("describes rtk-wrapped ripgrep searches", () => {
+    const presentation = describeCommandAction({
+      type: "unknown",
+      command:
+        "rtk rg -n \"commandActions\" apps/web/src/components/CommandBlock.tsx",
+    });
+
+    expect(presentation.iconKey).toBe("search");
+    expect(presentation.text).toBe("Searched \"commandActions\" in CommandBlock.tsx");
+  });
+
   it("uses explicit action fields when available", () => {
     const presentation = describeCommandAction({
       type: "search",

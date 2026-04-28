@@ -4726,7 +4726,7 @@ export function App(): React.JSX.Element {
           <header
             className={`flex items-center justify-between px-3 h-14 shrink-0 gap-2 ${
               activeTab === "chat"
-                ? "absolute inset-x-0 top-0 z-20 bg-transparent"
+                ? "absolute inset-x-0 top-0 z-20 bg-background/45 supports-[backdrop-filter]:bg-background/25 backdrop-blur-sm border-b border-border/10"
                 : "border-b border-border"
             }`}
           >

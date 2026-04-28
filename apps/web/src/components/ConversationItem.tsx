@@ -69,6 +69,30 @@ function readTextContent(content: UserMessageLikeItem["content"]): string {
     .join("\n");
 }
 
+function trimInjectedBrowserContext(text: string): string {
+  const marker = "## My request for Codex:";
+  const trimmedStart = text.trimStart();
+  const hasInjectedBrowserContext =
+    trimmedStart.startsWith("# In app browser:") ||
+    trimmedStart.startsWith("# Diff comments:");
+  if (!hasInjectedBrowserContext) {
+    return text;
+  }
+
+  const markerIndex = trimmedStart.indexOf(marker);
+  if (markerIndex < 0) {
+    return text;
+  }
+
+  const requestText = trimmedStart.slice(markerIndex + marker.length);
+  const imageBoilerplateIndex = requestText.indexOf("The next image shows");
+  return (
+    imageBoilerplateIndex >= 0
+      ? requestText.slice(0, imageBoilerplateIndex)
+      : requestText
+  ).trim();
+}
+
 interface RendererContext {
   isActive: boolean;
   toolSpacing: string;
@@ -83,7 +107,7 @@ type ItemRendererMap = {
 
 const ITEM_RENDERERS = {
   userMessage: ({ item }) => {
-    const text = readTextContent(item.content);
+    const text = trimInjectedBrowserContext(readTextContent(item.content));
     if (!text) {
       return null;
     }
@@ -98,7 +122,7 @@ const ITEM_RENDERERS = {
   },
 
   steeringUserMessage: ({ item }) => {
-    const text = readTextContent(item.content);
+    const text = trimInjectedBrowserContext(readTextContent(item.content));
     if (!text) {
       return null;
     }

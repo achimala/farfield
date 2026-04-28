@@ -184,7 +184,19 @@ function splitPipeline(tokens: string[]): string[][] {
     segments.push(currentSegment);
   }
 
-  return segments;
+  return segments.map(stripRtkPrefix);
+}
+
+function stripRtkPrefix(segment: string[]): string[] {
+  if (segment[0] !== "rtk") {
+    return segment;
+  }
+
+  if (segment[1] === "proxy") {
+    return segment.slice(2);
+  }
+
+  return segment.slice(1);
 }
 
 function parseSedRangeToken(token: string): { startLine: number; endLine: number } | null {

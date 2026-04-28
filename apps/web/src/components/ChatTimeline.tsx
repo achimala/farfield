@@ -140,9 +140,9 @@ export const ChatTimeline = memo(function ChatTimeline({
               type="button"
               onClick={onScrollToBottom}
               size="icon"
-              className="h-10 w-10 rounded-full border border-border bg-card text-foreground shadow-lg hover:bg-muted"
+              className="h-9 w-9 rounded-full border border-white/10 bg-background/75 text-foreground/80 shadow-[0_8px_26px_rgba(0,0,0,0.28)] backdrop-blur-md hover:border-white/20 hover:bg-muted/80 hover:text-foreground"
             >
-              <ArrowDown size={16} />
+              <ArrowDown size={15} />
             </Button>
           </motion.div>
         )}
