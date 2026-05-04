@@ -52,6 +52,7 @@ const StoredServerTargetSchema = z
   .object({
     version: z.literal(1),
     baseUrl: ServerBaseUrlSchema,
+    authToken: z.string().trim().optional(),
   })
   .strict();
 
@@ -92,6 +93,11 @@ export function getDefaultServerBaseUrl(): string {
   return window.location.origin;
 }
 
+function normalizeAuthToken(value: string | undefined): string | undefined {
+  const trimmed = value?.trim() ?? "";
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 export function readStoredServerTarget(): StoredServerTarget | null {
   if (typeof window === "undefined") {
     return null;
@@ -110,11 +116,16 @@ export function parseServerBaseUrl(value: string): string {
   return ServerBaseUrlSchema.parse(value);
 }
 
-export function saveServerBaseUrl(value: string): StoredServerTarget {
+export function saveServerBaseUrl(
+  value: string,
+  authToken?: string,
+): StoredServerTarget {
   const parsedBaseUrl = parseServerBaseUrl(value);
+  const parsedAuthToken = normalizeAuthToken(authToken);
   const next: StoredServerTarget = {
     version: 1,
     baseUrl: parsedBaseUrl,
+    ...(parsedAuthToken ? { authToken: parsedAuthToken } : {}),
   };
 
   if (typeof window !== "undefined") {

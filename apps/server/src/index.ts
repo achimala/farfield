@@ -34,6 +34,11 @@ import {
   TraceMarkBodySchema,
   TraceStartBodySchema,
 } from "./http-schemas.js";
+import {
+  isHttpRequestAuthorized,
+  isSocketAuthorized,
+  resolveFarfieldAuthConfig,
+} from "./auth.js";
 import { logger } from "./logger.js";
 import {
   parseServerCliOptions,
@@ -62,6 +67,7 @@ import {
 
 const HOST = process.env["HOST"] ?? "127.0.0.1";
 const PORT = Number(process.env["PORT"] ?? 4311);
+const AUTH_CONFIG = resolveFarfieldAuthConfig();
 const HISTORY_LIMIT = 2_000;
 const USER_AGENT = "farfield/0.2.5";
 const IPC_RECONNECT_DELAY_MS = 1_000;
@@ -230,8 +236,9 @@ function jsonResponse(
   res.writeHead(statusCode, {
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": encoded.length,
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "content-type",
+    "Access-Control-Allow-Origin": AUTH_CONFIG.corsOrigin,
+    "Access-Control-Allow-Headers":
+      "content-type, authorization, x-farfield-token",
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
   });
   res.end(encoded);
@@ -1327,6 +1334,21 @@ const server = http.createServer(async (req, res) => {
     const pathname = url.pathname;
     const segments = pathname.split("/").filter(Boolean);
 
+    if (
+      pathname.startsWith("/api/") &&
+      !isHttpRequestAuthorized(req, AUTH_CONFIG)
+    ) {
+      jsonResponse(res, 401, {
+        ok: false,
+        error: {
+          code: "unauthorized",
+          message:
+            "Farfield authentication failed. Set Authorization: Bearer <token> or X-Farfield-Token.",
+        },
+      });
+      return;
+    }
+
     if (req.method === "GET" && pathname === "/api/health") {
       jsonResponse(res, 200, {
         ok: true,
@@ -1762,7 +1784,7 @@ const server = http.createServer(async (req, res) => {
           "Content-Type": "application/x-ndjson",
           "Content-Length": data.length,
           "Content-Disposition": `attachment; filename="${trace.id}.ndjson"`,
-          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Origin": AUTH_CONFIG.corsOrigin,
         });
         res.end(data);
         return;
@@ -1819,9 +1841,23 @@ const io = new SocketServer(server, {
   path: "/api/unified/ws",
   transports: ["websocket"],
   cors: {
-    origin: "*",
+    origin: AUTH_CONFIG.corsOrigin,
     methods: ["GET", "POST"],
   },
+});
+
+io.use((socket, next) => {
+  if (
+    isSocketAuthorized(
+      socket.handshake.auth,
+      socket.handshake.headers,
+      AUTH_CONFIG,
+    )
+  ) {
+    next();
+    return;
+  }
+  next(new Error("Unauthorized"));
 });
 
 const realtimeCoordinator = new RealtimeCoordinator({
