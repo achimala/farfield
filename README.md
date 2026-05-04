@@ -50,10 +50,21 @@ You will need to make port 4311 remotely accessible via HTTPS and give the publi
 
 The securest way to open the port for remote access is by putting all devices involved in a private VPN. Tailscale is a free option that works.
 
-Doing this with Tailscale is as simple as installing Tailscale on your phone, computer, etc., and running this command on the device hosting the Farfield server:
+For an extra guardrail, set a token before starting the server:
+
+```bash
+export FARFIELD_AUTH_TOKEN="$(openssl rand -hex 32)"
+export FARFIELD_CORS_ORIGIN="https://farfield.app"
+npx -y @farfield/server@latest
+```
+
+Then install Tailscale on your phone, computer, etc., and run this command on the device hosting the Farfield server:
+
 ```bash
 tailscale serve --https=443 http://127.0.0.1:4311
 ```
+
+In farfield.app **Settings**, paste your Tailscale HTTPS URL into **Server** and paste the same token into **Auth token**.
 
 We are working on easier options. Stay tuned!
 
@@ -99,7 +110,7 @@ bun run dev:remote                           # exposes frontend + backend on you
 bun run dev:remote -- --agents=opencode      # remote mode with OpenCode only
 ```
 
-> **Warning:** `dev:remote` exposes Farfield with no authentication. Only use on trusted networks.
+> **Warning:** `dev:remote` exposes Farfield on your network. Set `FARFIELD_AUTH_TOKEN` and `FARFIELD_CORS_ORIGIN` when using it outside a trusted local network.
 
 ## Production Mode (No Extra Proxy)
 
@@ -180,13 +191,16 @@ You still need to run the server locally so it can talk to your coding agent.
 ### 1) Start the Farfield server on your machine
 
 ```bash
+export FARFIELD_AUTH_TOKEN="$(openssl rand -hex 32)"
+export FARFIELD_CORS_ORIGIN="https://farfield.app"
 HOST=0.0.0.0 PORT=4311 bun run --filter @farfield/server dev
 ```
 
 Quick local check:
 
 ```bash
-curl http://127.0.0.1:4311/api/health
+curl -H "Authorization: Bearer $FARFIELD_AUTH_TOKEN" \
+  http://127.0.0.1:4311/api/health
 ```
 
 ### 2) Put Tailscale HTTPS in front of port 4311
@@ -207,7 +221,8 @@ https://<machine>.<tailnet>.ts.net
 Check it from a device on your tailnet:
 
 ```bash
-curl https://<machine>.<tailnet>.ts.net/api/health
+curl -H "Authorization: Bearer $FARFIELD_AUTH_TOKEN" \
+  https://<machine>.<tailnet>.ts.net/api/health
 ```
 
 ### 3) Pair farfield.app to your server
@@ -221,15 +236,18 @@ https://<machine>.<tailnet>.ts.net
 (note: no port)
 ```
 
-4. Click **Save**.
+4. In **Auth token**, paste the value of `FARFIELD_AUTH_TOKEN`.
+5. Click **Save**.
 
-Farfield stores this in browser storage and uses it for API calls and live event stream.
+Farfield stores this in browser storage and uses it for API calls and realtime websocket auth.
 
 ### Notes
 
 - Do not use raw tailnet IPs with `https://` (for example `https://100.x.x.x:4311`) in the browser; this won't work.
 - If you use `tailscale serve --https=443`, do not include `:4311` in the URL you enter in Settings.
 - **Use automatic** in Settings clears the saved server URL and returns to built-in default behavior.
+- `FARFIELD_AUTH_TOKEN` accepts `Authorization: Bearer <token>` and `X-Farfield-Token: <token>`.
+- If you self-host the frontend, set `FARFIELD_CORS_ORIGIN` to your frontend origin instead of `https://farfield.app`.
 
 ## License
 

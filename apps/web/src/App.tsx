@@ -39,6 +39,7 @@ import {
   getPendingApprovalRequests,
   getPendingThreadRequests,
   getPendingUserInputRequests,
+  getSavedServerAuthToken,
   getSavedServerBaseUrl,
   getServerBaseUrl,
   getStreamEvents,
@@ -1342,6 +1343,7 @@ export function App(): React.JSX.Element {
     () => getSavedServerBaseUrl() !== null,
     [],
   );
+  const initialServerAuthToken = useMemo(() => getSavedServerAuthToken(), []);
   const initialSnapshot = ENABLE_VIEW_SNAPSHOT_CACHE
     ? appViewSnapshotCache
     : null;
@@ -1410,8 +1412,12 @@ export function App(): React.JSX.Element {
   );
   const [serverBaseUrl, setServerBaseUrlState] =
     useState<string>(initialServerBaseUrl);
+  const [serverAuthToken, setServerAuthToken] =
+    useState<string>(initialServerAuthToken);
   const [serverBaseUrlDraft, setServerBaseUrlDraft] =
     useState<string>(initialServerBaseUrl);
+  const [serverAuthTokenDraft, setServerAuthTokenDraft] =
+    useState<string>(initialServerAuthToken);
   const [hasSavedServerTarget, setHasSavedServerTarget] = useState<boolean>(
     initialHasSavedServerBaseUrl,
   );
@@ -1529,7 +1535,8 @@ export function App(): React.JSX.Element {
   const selectedAgentLabel = selectedAgentDescriptor?.label ?? "Agent";
   const reversedHistory = useMemo(() => history.slice().reverse(), [history]);
   const hasServerBaseUrlDraftChanges =
-    serverBaseUrlDraft.trim() !== serverBaseUrl;
+    serverBaseUrlDraft.trim() !== serverBaseUrl ||
+    serverAuthTokenDraft.trim() !== serverAuthToken;
   const unifiedWebSocketUrl = useMemo(
     () => getUnifiedWebSocketUrl(serverBaseUrl),
     [serverBaseUrl],
@@ -2721,9 +2728,13 @@ export function App(): React.JSX.Element {
   const saveServerTarget = useCallback(async () => {
     try {
       setError("");
-      const normalizedBaseUrl = setServerBaseUrl(serverBaseUrlDraft);
+      const normalizedBaseUrl = setServerBaseUrl(
+        serverBaseUrlDraft,
+        serverAuthTokenDraft,
+      );
       setServerBaseUrlState(normalizedBaseUrl);
       setServerBaseUrlDraft(normalizedBaseUrl);
+      setServerAuthToken(serverAuthTokenDraft.trim());
       setHasSavedServerTarget(true);
       agentCacheRef.current = null;
       providerCatalogCacheRef.current.clear();
@@ -2731,7 +2742,7 @@ export function App(): React.JSX.Element {
     } catch (e) {
       setError(toErrorMessage(e));
     }
-  }, [refreshAll, serverBaseUrlDraft]);
+  }, [refreshAll, serverAuthTokenDraft, serverBaseUrlDraft]);
 
   const useDefaultServerTarget = useCallback(async () => {
     try {
@@ -2740,6 +2751,8 @@ export function App(): React.JSX.Element {
       const defaultBaseUrl = getDefaultServerBaseUrl();
       setServerBaseUrlState(defaultBaseUrl);
       setServerBaseUrlDraft(defaultBaseUrl);
+      setServerAuthToken("");
+      setServerAuthTokenDraft("");
       setHasSavedServerTarget(false);
       agentCacheRef.current = null;
       providerCatalogCacheRef.current.clear();
@@ -3192,6 +3205,7 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     const socket = createUnifiedRealtimeSocket({
       socketUrl: unifiedWebSocketUrl,
+      authToken: serverAuthToken,
       onConnect: () => {
         socket.send({
           kind: "hello",
@@ -3248,7 +3262,7 @@ export function App(): React.JSX.Element {
       window.removeEventListener("pageshow", onPageShow);
       disconnectSocket();
     };
-  }, [handleRealtimeMessage, unifiedWebSocketUrl]);
+  }, [handleRealtimeMessage, serverAuthToken, unifiedWebSocketUrl]);
 
   useEffect(() => {
     if (!activeRequest) {
@@ -5467,6 +5481,27 @@ export function App(): React.JSX.Element {
                       }
                     }}
                     placeholder="https://your-vpn-server.example.com"
+                    className="h-9 text-sm"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-sm font-medium">Auth token</Label>
+                  <div className="text-xs text-muted-foreground">
+                    Optional. Must match FARFIELD_AUTH_TOKEN when your server
+                    enables token auth.
+                  </div>
+                  <Input
+                    type="password"
+                    value={serverAuthTokenDraft}
+                    onChange={(e) => setServerAuthTokenDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void saveServerTarget();
+                      }
+                    }}
+                    placeholder="Paste FARFIELD_AUTH_TOKEN"
                     className="h-9 text-sm"
                   />
                 </div>

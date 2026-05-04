@@ -449,12 +449,17 @@ export function getSavedServerBaseUrl(): string | null {
   return stored?.baseUrl ?? null;
 }
 
+export function getSavedServerAuthToken(): string {
+  const stored = readStoredServerTarget();
+  return stored?.authToken ?? "";
+}
+
 export function getDefaultServerBaseUrl(): string {
   return getDefaultStoredServerBaseUrl();
 }
 
-export function setServerBaseUrl(value: string): string {
-  return saveServerBaseUrl(value).baseUrl;
+export function setServerBaseUrl(value: string, authToken?: string): string {
+  return saveServerBaseUrl(value, authToken).baseUrl;
 }
 
 export function clearServerBaseUrl(): void {
@@ -473,7 +478,15 @@ async function requestJson(
   path: string,
   init?: RequestInit,
 ): Promise<{ response: Response; payload: JsonValue }> {
-  const response = await fetch(buildServerUrl(path), init);
+  const authToken = getSavedServerAuthToken();
+  const headers = new Headers(init?.headers);
+  if (authToken.length > 0 && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${authToken}`);
+  }
+  const response = await fetch(buildServerUrl(path), {
+    ...init,
+    headers,
+  });
   const payload = JsonValueSchema.parse(await response.json());
   return {
     response,

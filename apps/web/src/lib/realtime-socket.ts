@@ -18,6 +18,7 @@ export interface UnifiedRealtimeSocket {
 
 export function createUnifiedRealtimeSocket(input: {
   socketUrl: string;
+  authToken?: string;
   onMessage: (message: UnifiedRealtimeServerMessage) => void;
   onConnect?: () => void;
   onDisconnect?: () => void;
@@ -33,6 +34,9 @@ export function createUnifiedRealtimeSocket(input: {
       reconnection: true,
       reconnectionDelay: 1_000,
       reconnectionDelayMax: 10_000,
+      ...(input.authToken && input.authToken.length > 0
+        ? { auth: { token: input.authToken } }
+        : {}),
     },
   );
 
